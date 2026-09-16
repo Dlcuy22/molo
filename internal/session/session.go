@@ -15,7 +15,7 @@ import (
 )
 
 // The device format is fixed, which is what lets one device serve every track.
-var canonical = core.FrameFormat{Rate: 48000, Ch: 2, Fmt: core.F32}
+var canonical = core.CanonicalFormat
 
 // defaultEventBuffer is the event channel depth. It is generous enough that a
 // UI draining once a frame never loses an event, and small enough that a UI

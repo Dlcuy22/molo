@@ -40,7 +40,7 @@ const DefaultChunkFrames = 48000 * 100 / 1000
 
 // canonical is the one format the ring and every consumer see. Pre-modules may
 // change the format inside the producer, but the chain must end here.
-var canonical = core.FrameFormat{Rate: 48000, Ch: 2, Fmt: core.F32}
+var canonical = core.CanonicalFormat
 
 // Opener builds a decoder for the stream. It is called once at construction and
 // again by the reopen-and-discard seek fallback, which is why the streamer

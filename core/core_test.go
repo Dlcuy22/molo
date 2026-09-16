@@ -130,3 +130,17 @@ func TestDurationModesAreDistinct(t *testing.T) {
 		t.Fatalf("DurationUnknown = %d, want 0", DurationUnknown)
 	}
 }
+
+func TestCanonicalFormatIsTheEngineContract(t *testing.T) {
+	// The whole pipeline assumes this exact layout: decoders normalize to it,
+	// the ring stores it, and the device opens for it. Pinning the values here
+	// means changing them is a deliberate act with a failing test, not a silent
+	// drift that only shows up as wrong pitch or a rejected device.
+	want := FrameFormat{Rate: 48000, Ch: 2, Fmt: F32}
+	if CanonicalFormat != want {
+		t.Fatalf("CanonicalFormat = %+v, want %+v", CanonicalFormat, want)
+	}
+	if got := CanonicalFormat.BytesPerFrame(); got != 8 {
+		t.Fatalf("BytesPerFrame() = %d, want 8", got)
+	}
+}

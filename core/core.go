@@ -69,6 +69,13 @@ func (s StreamInfo) Duration() time.Duration {
 	return time.Duration(s.TotalFrames) * time.Second / time.Duration(s.Format.Rate)
 }
 
+// CanonicalFormat is the one PCM layout the engine speaks end to end: every
+// decoder output is normalized to it before the ring, the device is opened for
+// it, and positions are counted in its frames. It lives here, in the only
+// package every layer already depends on, so a rate change breaks compilation
+// in one place instead of drifting silently between packages.
+var CanonicalFormat = FrameFormat{Rate: 48000, Ch: 2, Fmt: F32}
+
 // Module is one insertable stage of the pipeline. Pre-ring modules may
 // allocate; post-ring modules are on the real-time path and must not.
 type Module interface {

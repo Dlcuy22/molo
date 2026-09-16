@@ -82,19 +82,21 @@ func otoContext() (*oto.Context, error) {
 var ErrAudioInit = errors.New("playback/oto: audio init failed")
 
 // The device format is pinned in one place so Open and the shared context can
-// never disagree about what the backend is playing.
-const (
-	deviceRate     = 48000
-	deviceChannels = 2
+// never disagree about what the backend is playing. It is derived from the
+// engine's canonical format rather than restated here, so a change to the
+// canonical rate cannot leave this backend behind.
+var (
+	deviceRate     = core.CanonicalFormat.Rate
+	deviceChannels = core.CanonicalFormat.Ch
 )
 
-// playerBufferFrames is how far ahead of the device oto is allowed to read,
+// playerBufferFrames is how far ahead of the device oto is allowed to read:
 // 100 ms at the device rate. oto's default is 500 ms, which is larger than the
-// streamer's 300 ms ring: every pull would ask for more than the ring can ever
-// hold, come back short, and be counted as an underrun even when audio is
+// streamer's 300 ms ring, so every pull would ask for more than the ring can
+// ever hold, come back short, and be counted as an underrun even when audio is
 // flowing perfectly. Matching the engine's own chunk size keeps reads whole and
 // the underrun counter meaningful, at the cost of a little robustness margin.
-const playerBufferFrames = deviceRate * 100 / 1000
+var playerBufferFrames = deviceRate * 100 / 1000
 
 type deviceState uint8
 
