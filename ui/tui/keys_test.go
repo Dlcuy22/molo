@@ -28,7 +28,7 @@ func TestHandleKeyPauseResume(t *testing.T) {
 			f := newFakePlayer()
 			f.snap.State = tc.state
 
-			if quit := handleKey(f, keyPress("space")); quit {
+			if res := handleKey(f, keyPress("space")); res.quit {
 				t.Fatalf("space requested quit")
 			}
 			if tc.wantCall == "" {
@@ -48,7 +48,7 @@ func TestHandleKeyPauseResume(t *testing.T) {
 func TestHandleKeyQuit(t *testing.T) {
 	for _, k := range []string{"q", "ctrl+c"} {
 		f := newFakePlayer()
-		if !handleKey(f, keyPress(k)) {
+		if !handleKey(f, keyPress(k)).quit {
 			t.Errorf("%q did not request quit", k)
 		}
 	}
@@ -64,35 +64,56 @@ func TestHandleKeyNextPrev(t *testing.T) {
 	}
 }
 
+// TestHandleKeySeek pins the mapping from a seek key to a relative delta. The
+// model turns the delta into one batched engine call; handleKey must never
+// reach the engine itself, because one key press cannot know the batch.
 func TestHandleKeySeek(t *testing.T) {
 	cases := []struct {
 		name string
 		key  string
-		pos  time.Duration
-		dur  time.Duration
 		want time.Duration
 	}{
-		{"forward by step", "l", 10 * time.Second, 60 * time.Second, 15 * time.Second},
-		{"right seeks forward too", "right", 10 * time.Second, 60 * time.Second, 15 * time.Second},
-		{"back by step", "h", 10 * time.Second, 60 * time.Second, 5 * time.Second},
-		{"left seeks back too", "left", 10 * time.Second, 60 * time.Second, 5 * time.Second},
-		{"back past zero clamps", "left", 2 * time.Second, 60 * time.Second, 0},
-		{"forward past known end clamps", "l", 59 * time.Second, 60 * time.Second, 60 * time.Second},
-		{"forward with unknown duration is unclamped", "l", 10 * time.Second, 0, 15 * time.Second},
+		{"forward by step", "l", seekStep},
+		{"right seeks forward too", "right", seekStep},
+		{"back by step", "h", -seekStep},
+		{"left seeks back too", "left", -seekStep},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakePlayer()
-			f.snap.Position = tc.pos
-			f.snap.Duration = tc.dur
 
-			handleKey(f, keyPress(tc.key))
-			if !f.called("Seek") {
-				t.Fatalf("%q did not call Seek", tc.key)
+			res := handleKey(f, keyPress(tc.key))
+			if !res.seeking || res.delta != tc.want {
+				t.Fatalf("%q -> %+v, want delta %v", tc.key, res, tc.want)
 			}
-			if got := f.Snapshot().Position; got != tc.want {
-				t.Fatalf("seek target = %v, want %v", got, tc.want)
+			if f.callCount() != 0 {
+				t.Fatalf("%q reached the engine directly: %v", tc.key, f.calls)
+			}
+		})
+	}
+}
+
+// TestClampSeekTarget covers the arithmetic the batch applies when it flushes.
+// A positive target past a known duration clamps to the end because a decoder
+// can treat a past-the-end seek as a failure; a negative target clamps to zero.
+func TestClampSeekTarget(t *testing.T) {
+	cases := []struct {
+		name        string
+		base, delta time.Duration
+		dur, want   time.Duration
+	}{
+		{"forward by step", 10 * time.Second, 5 * time.Second, 60 * time.Second, 15 * time.Second},
+		{"back by step", 10 * time.Second, -5 * time.Second, 60 * time.Second, 5 * time.Second},
+		{"back past zero clamps", 2 * time.Second, -5 * time.Second, 60 * time.Second, 0},
+		{"forward past known end clamps", 59 * time.Second, 5 * time.Second, 60 * time.Second, 60 * time.Second},
+		{"forward with unknown duration is unclamped", 10 * time.Second, 5 * time.Second, 0, 15 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampSeekTarget(tc.base, tc.delta, tc.dur); got != tc.want {
+				t.Fatalf("clampSeekTarget(%v, %v, %v) = %v, want %v", tc.base, tc.delta, tc.dur, got, tc.want)
 			}
 		})
 	}
@@ -134,8 +155,8 @@ func TestHandleKeyVolume(t *testing.T) {
 func TestHandleKeyUnknownIsIgnored(t *testing.T) {
 	f := newFakePlayer()
 	for _, k := range []string{"", "x", "z", "enter", "tab", "up", "down", "F1", "shift+a", "ctrl+alt+delete"} {
-		if quit := handleKey(f, keyPress(k)); quit {
-			t.Fatalf("%q was treated as quit", k)
+		if res := handleKey(f, keyPress(k)); res.quit || res.seeking {
+			t.Fatalf("%q produced %+v", k, res)
 		}
 	}
 	if f.callCount() != 0 {

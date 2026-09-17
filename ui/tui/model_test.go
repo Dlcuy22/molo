@@ -38,6 +38,11 @@ func TestUpdateKeyThroughModel(t *testing.T) {
 		m = next.(model)
 	}
 
+	// The four seek keys accumulate into one batch; it reaches the engine only
+	// when the flush lands.
+	next, _ := m.Update(seekFlushMsg{seq: m.seekSeq})
+	m = next.(model)
+
 	for _, want := range []string{"Pause", "Next", "Prev", "Seek", "SetVolume"} {
 		if !f.called(want) {
 			t.Errorf("key sweep never called %s: %v", want, f.calls)

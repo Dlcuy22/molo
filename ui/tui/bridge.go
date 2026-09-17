@@ -47,6 +47,11 @@ type (
 	// tap.
 	meterMsg struct{ level float64 }
 
+	// seekFlushMsg closes a seek batch. The sequence is the batch it was armed
+	// for, so a timer that fires after a later key press re-arms instead of
+	// applying a target the user has already moved past.
+	seekFlushMsg struct{ seq uint64 }
+
 	// waveMsg carries a finished waveform pass. The sequence guards against a
 	// result arriving after the user has moved to another track.
 	waveMsg struct {

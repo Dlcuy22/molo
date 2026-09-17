@@ -15,58 +15,64 @@ const (
 	volumeStep = 0.1
 )
 
-// handleKey applies one key press to the player and reports whether the UI
-// should quit. It is deliberately free of terminal and ticker concerns so every
-// binding, including illegal input, is unit-testable against a fake player.
+// keyResult is what one key press asks the model to do. A seek is expressed as
+// a relative delta rather than an engine call: on the pure-Go Opus decoder a
+// seek costs time proportional to its target position, so a burst of keys must
+// become one engine call, which only the model can batch.
+type keyResult struct {
+	quit    bool
+	seeking bool
+	delta   time.Duration
+}
+
+// handleKey maps one key press to a keyResult. It is deliberately free of
+// terminal and ticker concerns so every binding, including illegal input, is
+// unit-testable against a fake player.
 //
 // An unrecognised key is ignored rather than treated as an error: keystrokes
 // arrive from a human, and the UI must not fall over on the first stray press.
-func handleKey(p player.Player, msg tea.KeyPressMsg) bool {
+func handleKey(p player.Player, msg tea.KeyPressMsg) keyResult {
 	switch msg.String() {
 	case "space":
 		togglePause(p)
 
-		return false
+		return keyResult{}
 
 	case "q", "ctrl+c":
-		return true
+		return keyResult{quit: true}
 
 	case "n":
 		if p != nil {
 			_ = p.Next()
 		}
 
-		return false
+		return keyResult{}
 
 	case "p":
 		if p != nil {
 			_ = p.Prev()
 		}
 
-		return false
+		return keyResult{}
 
 	case "h", "left":
-		seekBy(p, -seekStep)
-
-		return false
+		return keyResult{seeking: true, delta: -seekStep}
 
 	case "l", "right":
-		seekBy(p, seekStep)
-
-		return false
+		return keyResult{seeking: true, delta: seekStep}
 
 	case "+", "=":
 		volumeBy(p, volumeStep)
 
-		return false
+		return keyResult{}
 
 	case "-", "_":
 		volumeBy(p, -volumeStep)
 
-		return false
+		return keyResult{}
 	}
 
-	return false
+	return keyResult{}
 }
 
 // togglePause is the space bar. It only ever acts on a state it can act on, so
@@ -84,24 +90,19 @@ func togglePause(p player.Player) {
 	}
 }
 
-// seekBy moves relative to the current position. A positive target past a known
+// clampSeekTarget moves from base by delta. A positive target past a known
 // duration is clamped to the end, because a decoder can treat a past-the-end
 // seek as a failure; a negative target is clamped to zero.
-func seekBy(p player.Player, delta time.Duration) {
-	if p == nil {
-		return
-	}
-
-	snap := p.Snapshot()
-	target := snap.Position + delta
+func clampSeekTarget(base, delta, duration time.Duration) time.Duration {
+	target := base + delta
 	if target < 0 {
 		target = 0
 	}
-	if delta > 0 && snap.Duration > 0 && target > snap.Duration {
-		target = snap.Duration
+	if delta > 0 && duration > 0 && target > duration {
+		target = duration
 	}
 
-	_ = p.Seek(target)
+	return target
 }
 
 func volumeBy(p player.Player, delta float64) {

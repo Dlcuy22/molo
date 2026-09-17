@@ -28,6 +28,18 @@ const tickInterval = 250 * time.Millisecond
 // size the engine publishes in, so a read usually returns a whole block.
 const meterBlockFrames = 1024
 
+// seekFlushDelay is how long a seek batch waits after the last key before it is
+// issued. On the pure-Go Opus decoder a seek costs time proportional to its
+// target, so a burst must collapse to one call; 150 ms is long enough to absorb
+// a burst and short enough to feel immediate.
+const seekFlushDelay = 150 * time.Millisecond
+
+// maxAnchorTicks bounds how long the model holds a commanded seek target while
+// waiting for the engine to confirm it. A seek can take hundreds of
+// milliseconds, and the poll must not report the old position in that window;
+// the bound exists so a dropped Seeked event cannot freeze the clock.
+const maxAnchorTicks = 8
+
 const (
 	defaultWidth  = 80
 	defaultHeight = 24
@@ -73,6 +85,24 @@ type model struct {
 	debug              debugLog
 	debugDecoderLogged bool
 	debugMetaLogged    bool
+
+	// The seek batch. seekSeq stamps the flush timer so a timer superseded by a
+	// later press is dropped; seekPending is true while a trailing flush is due;
+	// seekTarget is the accumulated target.
+	seekSeq     uint64
+	seekPending bool
+	seekArmed   bool
+	seekTarget  time.Duration
+
+	// seekAnchor holds the last commanded target from a flush until the engine
+	// agrees with it. A seek blocks the engine for a time proportional to its
+	// target, during which the position poll still reports the old position;
+	// without the anchor the next batch would accumulate from that stale read
+	// and lose a step. anchorTicks bounds the wait so a dropped confirmation
+	// cannot hold the clock at a target the engine never reached.
+	seekAnchor   time.Duration
+	seekAnchored bool
+	anchorTicks  int
 
 	// waveFn is nil unless the caller asked for a waveform, which keeps a
 	// plain model free of the analysis dependency.
@@ -137,6 +167,69 @@ func (m model) tick() tea.Cmd {
 	return tea.Tick(tickInterval, func(time.Time) tea.Msg { return tickMsg(time.Now()) })
 }
 
+// addSeek folds one seek key into the pending batch. The window is
+// trailing-edge: each key restarts it, so a continuous burst becomes one seek
+// once the keys stop rather than one per window. The target accumulates from
+// the model's snapshot, not from the engine, so a burst never re-reads a
+// position that is still moving.
+func (m model) addSeek(delta time.Duration) (tea.Model, tea.Cmd) {
+	if m.p == nil {
+		return m, nil
+	}
+
+	if m.seekPending {
+		m.seekTarget = clampSeekTarget(m.seekTarget, delta, m.snap.Duration)
+	} else {
+		m.seekPending = true
+		m.seekTarget = clampSeekTarget(m.snap.Position, delta, m.snap.Duration)
+	}
+
+	// The sequence marks the batch's newest key. Only one timer is ever in
+	// flight; it re-arms itself while the sequence keeps moving.
+	m.seekSeq++
+	if m.seekArmed {
+		return m, nil
+	}
+	m.seekArmed = true
+
+	return m, m.flushSeekCmd()
+}
+
+// flushSeekCmd fires once after the batch window. It carries the sequence of
+// the key that armed it, so the flush can tell whether the window was extended.
+func (m model) flushSeekCmd() tea.Cmd {
+	seq := m.seekSeq
+
+	return tea.Tick(seekFlushDelay, func(time.Time) tea.Msg { return seekFlushMsg{seq: seq} })
+}
+
+// flushSeek closes the batch. A key that arrived during the window bumps the
+// sequence, so this flush re-arms instead of seeking; after a quiet window it
+// applies the whole batch in exactly one engine call.
+func (m model) flushSeek(seq uint64) (tea.Model, tea.Cmd) {
+	if !m.seekPending || m.p == nil {
+		return m, nil
+	}
+	if seq != m.seekSeq {
+		return m, m.flushSeekCmd()
+	}
+
+	m.seekPending = false
+	m.seekArmed = false
+	// Move the displayed position with the target now and anchor it. The engine
+	// confirms with a Seeked event, but a 4 Hz poll can read the pre-seek
+	// position first; the anchor keeps that stale read from making the next
+	// batch lose a step. The tick count bounds the anchor so a dropped
+	// confirmation cannot freeze the clock.
+	m.snap.Position = m.seekTarget
+	m.seekAnchor = m.seekTarget
+	m.seekAnchored = true
+	m.anchorTicks = 0
+	_ = m.p.Seek(m.seekTarget)
+
+	return m, nil
+}
+
 // readQueue asks the engine for the current queue. The call is cheap, but it is
 // still a Cmd: Update must never assume an engine call is instant.
 func readQueue(p player.Player) tea.Cmd {
@@ -171,13 +264,29 @@ func readTap(t player.Tap) tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if handleKey(m.p, msg) {
+		res := handleKey(m.p, msg)
+		if res.quit {
 			m.stopWave()
 
 			return m, tea.Quit
 		}
+		if res.seeking {
+			// A repeat is the same held key sending itself again. On the
+			// pure-Go decoder a seek costs time proportional to its target, so
+			// a held arrow key must not queue a full-cost jump per repeat.
+			// Repeats of the other bindings are left alone: their actions are
+			// cheap and holding them is a legitimate way to ramp.
+			if msg.IsRepeat {
+				return m, nil
+			}
+
+			return m.addSeek(res.delta)
+		}
 
 		return m, nil
+
+	case seekFlushMsg:
+		return m.flushSeek(msg.seq)
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -187,7 +296,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.frame++
 		if m.p != nil {
-			m.snap = m.p.Snapshot()
+			fresh := m.p.Snapshot()
+			// A seek may still be running, in which case the poll reports the
+			// pre-seek position. Keep the commanded target until the engine
+			// agrees with it, or until the anchor expires, so a later batch
+			// never accumulates from a stale read.
+			if m.seekAnchored {
+				m.anchorTicks++
+				if fresh.Position == m.seekAnchor || m.anchorTicks > maxAnchorTicks {
+					m.seekAnchored = false
+				} else {
+					fresh.Position = m.snap.Position
+				}
+			}
+			m.snap = fresh
 			m.recordTitle()
 			m.recordIdentity()
 		}
@@ -207,8 +329,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.nextEvent(), m.startWave(msg.path))
 
 	case seekedMsg:
-		m.snap.Position = msg.position
 		m.debug.push(formatSeekLine(msg.from, msg.position, msg.elapsed))
+		// Confirmations arrive in command order, so this may be the older of
+		// two seeks in flight. Only the one matching the anchor clears it and
+		// moves the clock; an older one must not drag the position backwards.
+		if m.seekAnchored && msg.position != m.seekAnchor {
+			return m, m.nextEvent()
+		}
+		m.snap.Position = msg.position
+		m.seekAnchored = false
 
 		return m, m.nextEvent()
 
@@ -302,6 +431,14 @@ func (m *model) resetForTrack(index int, path string) {
 	m.debugMetaLogged = false
 	m.err = nil
 	m.meter.reset()
+
+	// A batch aimed at the old track is meaningless on the new one. Bump the
+	// sequence so its in-flight timer is dropped when it lands, and drop any
+	// anchor from a seek that was still running.
+	m.seekPending = false
+	m.seekArmed = false
+	m.seekAnchored = false
+	m.seekSeq++
 
 	if index >= 0 && index < len(m.titles) {
 		m.titles[index] = ""

@@ -122,6 +122,19 @@ type metaResult struct {
 	err   error
 }
 
+// seekResult is a finished reposition, delivered to the control loop so the
+// seek itself never runs there. stream and seq identify the track it was
+// started for, so the controller can drop a result whose track has moved on.
+type seekResult struct {
+	seq     uint64
+	stream  *stream.Streamer
+	target  time.Duration
+	from    time.Duration
+	resume  bool
+	elapsed time.Duration
+	err     error
+}
+
 // view is the mutable state Snapshot reads. The control goroutine is the only
 // writer; readers take the same short-lived lock.
 type view struct {
@@ -168,6 +181,7 @@ type Session struct {
 	openCh  chan openResult
 	probeCh chan probeResult
 	metaCh  chan metaResult
+	seekCh  chan seekResult
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -188,6 +202,25 @@ type Session struct {
 	index         int
 	seq           uint64
 	inFlight      bool
+
+	// Seek is the one slow step that is not a build, so the controller starts
+	// it on a worker and keeps going. seekBusy is true while a worker is
+	// repositioning and seekPending holds the newest target that has not
+	// started yet (latest-wins). Both are owned by the control goroutine; the
+	// worker only reports on seekCh.
+	seekBusy    bool
+	seekPending *seekRequest
+}
+
+// seekRequest is one accepted seek, either in flight or waiting to replace an
+// in-flight one. from is captured when the device has been parked, so it is
+// the frame the reposition actually started from.
+type seekRequest struct {
+	seq    uint64
+	stream *stream.Streamer
+	target time.Duration
+	from   time.Duration
+	resume bool
 }
 
 // New builds a session and starts its control goroutine. It does not touch the
@@ -234,6 +267,7 @@ func New(cfg Config) (*Session, error) {
 		openCh:  make(chan openResult, 4),
 		probeCh: make(chan probeResult, 4),
 		metaCh:  make(chan metaResult, 4),
+		seekCh:  make(chan seekResult, 1),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.provider = newRoutedProvider(s.gain, s.tap, s.feed, s.closing)
@@ -446,6 +480,8 @@ func (s *Session) run() {
 			s.handleProbe(res)
 		case res := <-s.metaCh:
 			s.handleMeta(res)
+		case res := <-s.seekCh:
+			s.handleSeek(res)
 		case <-ticker.C:
 			s.pollDevice()
 		}
@@ -492,7 +528,7 @@ func (s *Session) apply(c command) {
 			s.stopToStopped()
 		}
 	case cmdSeek:
-		s.seek(c.pos)
+		s.requestSeek(c.pos)
 	}
 }
 
@@ -528,7 +564,7 @@ func (s *Session) prev() {
 
 		return
 	}
-	s.seek(0)
+	s.requestSeek(0)
 }
 
 // setQueue replaces the queue under the lock Queue reads under. The control
@@ -578,6 +614,10 @@ func (s *Session) detach() {
 // silence rather than the ErrClosed that a planned close produces.
 func (s *Session) retireLive() {
 	s.inFlight = false
+	// Any target that has not started belongs to the stream being retired, so
+	// it is dropped rather than applied to the next track. An in-flight worker
+	// is left alone; its stale result is discarded in handleSeek.
+	s.seekPending = nil
 	if s.live == nil {
 		return
 	}
@@ -851,35 +891,113 @@ func (s *Session) stopToStopped() {
 	s.setState(StateStopped)
 }
 
-// seek pauses the device, repositions the streamer, then resumes only if the
-// session was playing. The order matters: repositioning flushes the ring, and
-// a device reading through the flush would be handed a half-empty buffer.
-func (s *Session) seek(d time.Duration) {
+// requestSeek accepts a seek from the control loop without performing it. The
+// device is parked here, so the origin is frozen and no device read races the
+// worker's flush, and the intent to resume is decided now. The reposition then
+// runs on a worker; the control loop keeps serving commands and events.
+func (s *Session) requestSeek(d time.Duration) {
 	live := s.live
 	if live == nil {
 		return
 	}
-	resume := s.state() == StatePlaying
 
 	if s.device != nil {
 		_ = s.device.Pause()
 	}
 	// Capture the origin once the device is parked, so the reported position is
 	// the frame the seek actually started from rather than a moving target.
-	from := stream.FramesToDuration(live.Position())
-	start := time.Now()
-	err := live.SeekFrame(framesFor(d))
-	elapsed := time.Since(start)
-	if resume && s.device != nil {
-		_ = s.device.Resume()
+	req := &seekRequest{
+		seq:    s.seq,
+		stream: live,
+		target: d,
+		from:   stream.FramesToDuration(live.Position()),
+		resume: s.state() == StatePlaying,
 	}
-	if err != nil {
-		s.emit(Failed{Err: err})
+
+	if s.seekBusy {
+		// Latest-wins: overwrite the target that has not started yet. The
+		// in-flight worker is not disturbed; its completion starts this one.
+		s.seekPending = req
 
 		return
 	}
 
-	s.emit(Seeked{Position: d, From: from, Elapsed: elapsed})
+	s.startSeek(req)
+}
+
+// startSeek hands one accepted request to a worker. At most one worker runs at
+// a time, so two repositions never share a streamer. The worker owns the
+// SeekFrame call and reports back on seekCh; it must not touch session state.
+func (s *Session) startSeek(req *seekRequest) {
+	s.seekBusy = true
+	s.workerWG.Add(1)
+
+	go func() {
+		defer s.workerWG.Done()
+
+		start := time.Now()
+		err := req.stream.SeekFrame(framesFor(req.target))
+		res := seekResult{
+			seq:     req.seq,
+			stream:  req.stream,
+			target:  req.target,
+			from:    req.from,
+			resume:  req.resume,
+			elapsed: time.Since(start),
+			err:     err,
+		}
+		select {
+		case s.seekCh <- res:
+		case <-s.closing:
+		}
+	}()
+}
+
+// startPendingSeek launches the newest not-yet-started target, if any, and
+// reports whether it did. A pending request for a track that has since moved
+// on is stale and dropped.
+func (s *Session) startPendingSeek() bool {
+	req := s.seekPending
+	s.seekPending = nil
+	if req == nil {
+		return false
+	}
+	if req.stream != s.live || req.seq != s.seq {
+		return false
+	}
+	s.startSeek(req)
+
+	return true
+}
+
+// handleSeek applies a finished reposition. A result whose track is no longer
+// live is stale and ignored whole: it must not move the new track or resume a
+// device the user asked to leave alone. The device is resumed only when the
+// seek intended it and the session is still playing.
+func (s *Session) handleSeek(res seekResult) {
+	s.seekBusy = false
+
+	if res.stream != s.live || res.seq != s.seq {
+		s.startPendingSeek()
+
+		return
+	}
+
+	if res.err != nil {
+		s.emit(Failed{Err: res.err})
+		s.startPendingSeek()
+
+		return
+	}
+
+	// A newer target replaced this one, so stay parked until it lands: a resumed
+	// device would be handed a half-flushed ring by the next reposition.
+	pending := s.startPendingSeek()
+	if !pending && res.resume && s.state() == StatePlaying && s.device != nil {
+		_ = s.device.Resume()
+	}
+
+	s.emit(Seeked{Position: res.target, From: res.from, Elapsed: res.elapsed})
 }
 
 // shutdown is the single teardown path. It runs on the control goroutine, so

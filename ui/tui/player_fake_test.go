@@ -53,6 +53,22 @@ func (f *fakePlayer) callCount() int {
 	return len(f.calls)
 }
 
+// callCountOf counts one command rather than all of them, which is what a test
+// about how often a seek happens needs to assert.
+func (f *fakePlayer) callCountOf(call string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	n := 0
+	for _, c := range f.calls {
+		if c == call {
+			n++
+		}
+	}
+
+	return n
+}
+
 func (f *fakePlayer) Snapshot() player.Snapshot {
 	f.mu.Lock()
 	defer f.mu.Unlock()
