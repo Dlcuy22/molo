@@ -187,3 +187,40 @@ func TestFacadeVolumeAndQueue(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 }
+
+// TestFacadeExposesTheTapFeed proves the facade re-exports the visualizer feed
+// and that Read is non-blocking on an idle player. Post-gain sample values are
+// asserted where the pipeline actually runs (internal/session); a passive
+// backend here cannot push audio through the tap, so this test deliberately
+// stops at the contract.
+func TestFacadeExposesTheTapFeed(t *testing.T) {
+	p, err := player.New(player.WithBackend("facade-test"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	tap := p.Tap()
+	if tap == nil {
+		t.Fatal("Tap() returned nil")
+	}
+
+	// An empty tap must answer immediately rather than park.
+	done := make(chan int, 1)
+	go func() { done <- tap.Read(make([]float32, 128)) }()
+	select {
+	case n := <-done:
+		if n != 0 {
+			t.Fatalf("Read on an idle tap = %d frames, want 0", n)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read blocked on an idle tap")
+	}
+
+	// With no consumer yet the tap is inactive; Play with a passive device must
+	// still not stall. Read() is what activates it.
+	if err := p.Play(fixture(t, "short_stereo.opus")); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	waitState(t, p, player.Playing, 3*time.Second)
+}

@@ -222,7 +222,7 @@ func (d *pumpDevice) loop() {
 
 			continue
 		}
-		_, err := p.ReadFrames(buf)
+		n, err := p.ReadFrames(buf)
 
 		d.mu.Lock()
 		d.reading = false
@@ -232,7 +232,13 @@ func (d *pumpDevice) loop() {
 		if err != nil {
 			return
 		}
-		time.Sleep(200 * time.Microsecond)
+		// Consume at real-time pace. Without this the device drains a whole
+		// fixture in well under a millisecond, so a short track can finish
+		// before a test has any chance to observe the Playing state, and
+		// end-of-track races look like flakiness rather than a broken engine.
+		if n > 0 {
+			time.Sleep(time.Duration(n) * time.Second / time.Duration(canonicalFormat.Rate))
+		}
 	}
 }
 

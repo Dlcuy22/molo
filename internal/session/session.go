@@ -60,6 +60,12 @@ type Config struct {
 	// Resolver describes each track. Nil selects meta.Default().
 	Resolver meta.Resolver
 
+	// ProbeMode selects how much work the asynchronous duration probe may do.
+	// Nil selects the cheap tail probe. A pointer, not a value, because
+	// core.DurationUnknown is the zero value and must stay distinguishable
+	// from "the caller did not choose".
+	ProbeMode *core.DurationMode
+
 	// The seams below let tests drive the controller without a file system or
 	// an audio server. Production code leaves them nil.
 	openDecoder func(path string) (decode.Decoder, error)
@@ -140,6 +146,7 @@ type view struct {
 type Session struct {
 	cfg    Config
 	gain   *dsp.Gain
+	tap    *tap
 	events *eventQueue
 	v      view
 
@@ -198,6 +205,10 @@ func New(cfg Config) (*Session, error) {
 	if cfg.probeStream == nil {
 		cfg.probeStream = probeWithDefaultRegistry
 	}
+	if cfg.ProbeMode == nil {
+		mode := core.DurationProbe
+		cfg.ProbeMode = &mode
+	}
 	if cfg.newDevice == nil {
 		backend := cfg.Backend
 		cfg.newDevice = func() (playback.Device, error) { return playback.Open(backend) }
@@ -206,6 +217,7 @@ func New(cfg Config) (*Session, error) {
 	s := &Session{
 		cfg:     cfg,
 		gain:    dsp.NewGain(cfg.Volume),
+		tap:     newTap(),
 		events:  newEventQueue(cfg.EventBuffer),
 		v:       view{state: StateIdle, queueIndex: -1},
 		wake:    make(chan struct{}, 1),
@@ -217,7 +229,7 @@ func New(cfg Config) (*Session, error) {
 		metaCh:  make(chan metaResult, 4),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.provider = newRoutedProvider(s.gain, s.feed, s.closing)
+	s.provider = newRoutedProvider(s.gain, s.tap, s.feed, s.closing)
 
 	go s.run()
 
@@ -349,6 +361,22 @@ func (s *Session) Seek(d time.Duration) error {
 // SetVolume changes the post-ring gain. It is atomic and takes effect on the
 // next buffer, so it is safe to call while audio is running.
 func (s *Session) SetVolume(v float64) { s.gain.SetVolume(v) }
+
+// Tap is the real-time audio feed a visualizer reads. The engine writes mono
+// downmixed frames after the gain and before the device, so a consumer sees
+// exactly what is heard.
+type Tap interface {
+	// Read copies up to len(dst) mono frames in time order. It never blocks
+	// and reports zero when nothing is buffered.
+	Read(dst []float32) int
+}
+
+// Tap returns the session's visualizer feed. The feed becomes live on the
+// first Read, so holding a Tap without consuming it costs the audio path
+// nothing. The returned Tap stays valid across tracks and after Stop.
+func (s *Session) Tap() Tap {
+	return s.tap
+}
 
 // Close stops every goroutine and releases the device and streamer. It is
 // idempotent and safe to call from any goroutine.
@@ -689,7 +717,7 @@ func (s *Session) activate(res openResult) {
 // them; their channel sends are released by the closing signal.
 func (s *Session) enrich(seq uint64, index int, path string) {
 	go func() {
-		info, err := s.cfg.probeStream(path, decode.ProbeOptions{Duration: core.DurationProbe})
+		info, err := s.cfg.probeStream(path, decode.ProbeOptions{Duration: *s.cfg.ProbeMode})
 		select {
 		case s.probeCh <- probeResult{seq: seq, index: index, info: info, err: err}:
 		case <-s.closing:

@@ -44,6 +44,12 @@ type feedEvent struct {
 type routedProvider struct {
 	gain *dsp.Gain
 
+	// tap observes the post-gain samples on their way to the device. It is
+	// created once and reused for the session's life, so a visualizer keeps
+	// reading across track changes. publish is a single atomic load until the
+	// consumer's first Read activates it.
+	tap *tap
+
 	// cur is the streamer the device reads from. It is nil between tracks and
 	// while stopped, which is when the provider emits silence.
 	cur atomic.Pointer[stream.Streamer]
@@ -60,8 +66,8 @@ type routedProvider struct {
 	done <-chan struct{}
 }
 
-func newRoutedProvider(gain *dsp.Gain, feed chan<- feedEvent, done <-chan struct{}) *routedProvider {
-	return &routedProvider{gain: gain, feed: feed, done: done}
+func newRoutedProvider(gain *dsp.Gain, t *tap, feed chan<- feedEvent, done <-chan struct{}) *routedProvider {
+	return &routedProvider{gain: gain, tap: t, feed: feed, done: done}
 }
 
 // setCurrent points the device at a new streamer, or at nothing when s is nil.
@@ -91,6 +97,10 @@ func (p *routedProvider) ReadFrames(dst []float32) (int, error) {
 
 				return n, perr
 			}
+			// The tap sits after the gain and before the device: it must
+			// observe what is actually heard, not the pre-volume samples. With
+			// no consumer, publish is one atomic load and returns.
+			p.tap.publish(dst, n, canonical.Ch)
 
 			return n, nil
 		}

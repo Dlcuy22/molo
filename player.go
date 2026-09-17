@@ -10,6 +10,7 @@ package player
 import (
 	"time"
 
+	"github.com/dlcuy22/player/core"
 	"github.com/dlcuy22/player/internal/session"
 	"github.com/dlcuy22/player/meta"
 )
@@ -52,6 +53,11 @@ type TrackEnded = session.TrackEnded
 // Failed reports a decode or device error. The player remains usable.
 type Failed = session.Failed
 
+// Tap is the real-time audio feed a visualizer reads. Read copies up to
+// len(dst) mono downmixed frames in time order, never blocks, and reports zero
+// when nothing is buffered.
+type Tap = session.Tap
+
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
 type Player interface {
@@ -69,6 +75,10 @@ type Player interface {
 	Stop() error
 	Seek(d time.Duration) error
 	SetVolume(v float64)
+
+	// Tap returns the visualizer feed. The feed starts publishing on the first
+	// Read, so holding a Tap without reading it costs the audio path nothing.
+	Tap() Tap
 
 	Close() error
 }
@@ -103,6 +113,13 @@ func WithVolume(v float64) Option {
 // WithResolver supplies the metadata resolver. Nil selects meta.Default().
 func WithResolver(r meta.Resolver) Option {
 	return func(c *session.Config) { c.Resolver = r }
+}
+
+// WithProbeMode selects how much work the asynchronous duration probe may do
+// when a track starts. It does not affect playback, only how quickly and how
+// accurately the reported duration becomes known.
+func WithProbeMode(mode core.DurationMode) Option {
+	return func(c *session.Config) { c.ProbeMode = &mode }
 }
 
 // player is the facade implementation. It adds nothing to the session: its
@@ -142,4 +159,5 @@ func (p *player) Resume() error              { return p.session.Resume() }
 func (p *player) Stop() error                { return p.session.Stop() }
 func (p *player) Seek(d time.Duration) error { return p.session.Seek(d) }
 func (p *player) SetVolume(v float64)        { p.session.SetVolume(v) }
+func (p *player) Tap() Tap                   { return p.session.Tap() }
 func (p *player) Close() error               { return p.session.Close() }
