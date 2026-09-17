@@ -184,3 +184,55 @@ func TestScriptedRenderSnapshotFrame(t *testing.T) {
 		}
 	}
 }
+
+// TestScriptedDebugPanelRender drives the real Bubble Tea program against a
+// fake engine that emits a track change, a state change and a seek, then prints
+// the captured frame so the debug panel is visible in the test log. It is the
+// end-to-end evidence that the panel survives a real event loop, not just a
+// direct render call.
+func TestScriptedDebugPanelRender(t *testing.T) {
+	f := newFakePlayer()
+	f.snap = player.Snapshot{
+		State:      player.Playing,
+		Path:       "/music/a.opus",
+		Meta:       meta.Meta{Tags: meta.Tags{Title: "Real Track"}, Source: "embedded-tags"},
+		Position:   0,
+		Duration:   2 * time.Minute,
+		Volume:     0.8,
+		Decoder:    "pion/opus",
+		Parser:     "pion/opus/pkg/oggreader",
+		QueueIndex: 0,
+		QueueLen:   1,
+	}
+	// Queued before the program starts, so the event bridge drains them in
+	// order: a track, a pause, and a seek with its origin and timing.
+	f.events <- player.TrackChanged{Index: 0, Path: "/music/a.opus"}
+	f.events <- player.StateChanged{From: player.Playing, To: player.Paused}
+	f.events <- player.Seeked{Position: 42 * time.Second, From: 12 * time.Second, Elapsed: 3 * time.Millisecond}
+
+	in := &pacedReader{data: []byte("q"), delay: 900 * time.Millisecond}
+	var out bytes.Buffer
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	p := tea.NewProgram(
+		newModel(f),
+		tea.WithContext(ctx),
+		tea.WithInput(in),
+		tea.WithOutput(&out),
+		tea.WithWindowSize(64, 20),
+	)
+	if _, err := p.Run(); err != nil {
+		t.Fatalf("program: %v", err)
+	}
+
+	frames := stripANSI(out.String())
+	t.Logf("captured frame with debug panel:\n%s", frames)
+
+	for _, want := range []string{"debug", "decoder  pion/opus", "meta     embedded-tags", "seek     0:12 -> 0:42  took 3ms"} {
+		if !strings.Contains(frames, want) {
+			t.Errorf("captured frame is missing %q:\n%s", want, frames)
+		}
+	}
+}

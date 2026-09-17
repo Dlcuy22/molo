@@ -68,6 +68,12 @@ type model struct {
 	meter meter
 	err   error
 
+	// debug is the bounded technical log shown under the main panel. The two
+	// guards make the per-track identity lines fire once, not once per tick.
+	debug              debugLog
+	debugDecoderLogged bool
+	debugMetaLogged    bool
+
 	// waveFn is nil unless the caller asked for a waveform, which keeps a
 	// plain model free of the analysis dependency.
 	waveFn  WaveFunc
@@ -183,32 +189,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.p != nil {
 			m.snap = m.p.Snapshot()
 			m.recordTitle()
+			m.recordIdentity()
 		}
 
 		return m, tea.Batch(m.tick(), readQueue(m.p), readTap(m.tap))
 
 	case stateMsg:
 		m.snap.State = msg.to
+		m.debug.push(formatStateLine(msg.to))
 
 		return m, m.nextEvent()
 
 	case trackMsg:
 		m.resetForTrack(msg.index, msg.path)
+		m.debug.push(formatTrackLine(msg.path))
 
 		return m, tea.Batch(m.nextEvent(), m.startWave(msg.path))
 
 	case seekedMsg:
 		m.snap.Position = msg.position
+		m.debug.push(formatSeekLine(msg.from, msg.position, msg.elapsed))
 
 		return m, m.nextEvent()
 
 	case endedMsg:
 		m.meter.reset()
+		m.debug.push(formatEOSLine(m.snap.Path))
 
 		return m, m.nextEvent()
 
 	case failedMsg:
 		m.err = msg.err
+		m.debug.push(formatErrorLine(msg.err))
 
 		return m, m.nextEvent()
 
@@ -283,6 +295,11 @@ func (m *model) resetForTrack(index int, path string) {
 	m.snap.Meta.Tags.Title = ""
 	m.snap.Meta.Tags.Artist = ""
 	m.snap.Meta.Tags.Album = ""
+	m.snap.Decoder = ""
+	m.snap.Parser = ""
+	m.snap.Meta.Source = ""
+	m.debugDecoderLogged = false
+	m.debugMetaLogged = false
 	m.err = nil
 	m.meter.reset()
 
@@ -304,6 +321,21 @@ func (m *model) recordTitle() {
 	}
 }
 
+// recordIdentity logs the decoder and the meta resolver for the current track,
+// each at most once. Both arrive asynchronously after the track event, so they
+// are learned from the poll; the guards stop a 4 Hz tick from repeating the same
+// two lines for the life of the track.
+func (m *model) recordIdentity() {
+	if !m.debugDecoderLogged && m.snap.Decoder != "" {
+		m.debug.push(formatDecoderLine(m.snap.Decoder, m.snap.Parser))
+		m.debugDecoderLogged = true
+	}
+	if !m.debugMetaLogged && m.snap.Meta.Source != "" {
+		m.debug.push(formatMetaLine(m.snap.Meta.Source))
+		m.debugMetaLogged = true
+	}
+}
+
 func (m model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
@@ -313,6 +345,23 @@ func (m model) View() tea.View {
 }
 
 func (m model) render() string {
+	body := m.renderBody()
+
+	var b strings.Builder
+	b.WriteString(body)
+
+	if panel := m.renderDebugPanel(m.width, m.debugLinesBudget(strings.Count(body, "\n")+1)); panel != "" {
+		b.WriteString("\n\n")
+		b.WriteString(panel)
+	}
+
+	return b.String()
+}
+
+// renderBody draws everything above the debug panel: the now playing line, the
+// progress, the optional waveform and meter, the queue, the error and the key
+// legend.
+func (m model) renderBody() string {
 	width := m.width
 	if width <= 0 {
 		width = defaultWidth

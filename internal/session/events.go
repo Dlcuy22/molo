@@ -27,9 +27,13 @@ type TrackChanged struct {
 	Path  string
 }
 
-// Seeked confirms a seek after it has been applied and audio resumed.
+// Seeked confirms a seek after it has been applied and audio resumed. From and
+// Elapsed describe the move itself: where playback was, and how long the
+// reposition took.
 type Seeked struct {
-	Position time.Duration
+	Position time.Duration // where the seek landed
+	From     time.Duration // where playback was before the seek
+	Elapsed  time.Duration // how long the reposition took
 }
 
 // TrackEnded is emitted once per track when it reaches its natural end.
@@ -144,6 +148,11 @@ type Snapshot struct {
 	QueueLen   int
 
 	Stats stream.Stats
+
+	// Decoder and Parser name the components handling the current track, for a
+	// debug view. Empty when the decoder does not describe itself.
+	Decoder string
+	Parser  string
 
 	// DroppedEvents counts events discarded because the consumer fell behind.
 	DroppedEvents int64

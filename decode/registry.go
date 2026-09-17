@@ -69,6 +69,25 @@ type Seeker interface {
 	SeekFrame(frame int64) error
 }
 
+// Descriptor is implemented by decoders that can name the pieces they are
+// built from, for diagnostics. Both labels are free-form and for display.
+type Descriptor interface {
+	DecoderName() string
+	ParserName() string
+}
+
+// Describe returns the decoder and parser labels when d implements
+// Descriptor, and empty strings otherwise. Test fakes and future codecs are
+// free to omit it.
+func Describe(d Decoder) (decoder, parser string) {
+	desc, ok := d.(Descriptor)
+	if !ok {
+		return "", ""
+	}
+
+	return desc.DecoderName(), desc.ParserName()
+}
+
 // ProbeOptions tells a Prober how much work it may do. DurationUnknown must
 // stay cheap and may leave TotalFrames at -1.
 type ProbeOptions struct {

@@ -199,6 +199,12 @@ func (d *pionOpusDecoder) Info() core.StreamInfo {
 	}
 }
 
+// DecoderName names the Opus implementation behind this decoder.
+func (d *pionOpusDecoder) DecoderName() string { return "pion/opus" }
+
+// ParserName names the container reader this decoder consumes.
+func (d *pionOpusDecoder) ParserName() string { return "pion/opus/pkg/oggreader" }
+
 func (d *pionOpusDecoder) ReadFrames(dst []float32) (int, error) {
 	if d.closed {
 		return 0, ErrClosed

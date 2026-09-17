@@ -24,7 +24,11 @@ type (
 	}
 
 	// seekedMsg confirms a seek after the engine applied it.
-	seekedMsg struct{ position time.Duration }
+	seekedMsg struct {
+		position time.Duration
+		from     time.Duration
+		elapsed  time.Duration
+	}
 
 	// endedMsg marks a track reaching its natural end.
 	endedMsg struct{}
@@ -79,7 +83,7 @@ func translateEvent(ev player.Event) tea.Msg {
 	case player.TrackChanged:
 		return trackMsg{index: ev.Index, path: ev.Path}
 	case player.Seeked:
-		return seekedMsg{position: ev.Position}
+		return seekedMsg{position: ev.Position, from: ev.From, elapsed: ev.Elapsed}
 	case player.TrackEnded:
 		return endedMsg{}
 	case player.Failed:

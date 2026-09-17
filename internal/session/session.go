@@ -103,6 +103,8 @@ type openResult struct {
 	path     string
 	streamer *stream.Streamer
 	info     core.StreamInfo
+	decoder  string
+	parser   string
 	err      error
 }
 
@@ -129,6 +131,11 @@ type view struct {
 	meta     meta.Meta
 	duration time.Duration
 	lastPos  time.Duration
+
+	// decoder and parser label the streamer feeding the device. They belong to
+	// the track, so startIndex clears them with the rest of the per-track state.
+	decoder string
+	parser  string
 
 	queueIndex int
 	queueLen   int
@@ -274,6 +281,8 @@ func (s *Session) Snapshot() Snapshot {
 		QueueIndex:    v.queueIndex,
 		QueueLen:      v.queueLen,
 		Stats:         stats,
+		Decoder:       v.decoder,
+		Parser:        v.parser,
 		DroppedEvents: s.events.droppedCount(),
 	}
 }
@@ -546,6 +555,8 @@ func (s *Session) startIndex(index int) {
 		v.meta = meta.Meta{Path: path}
 		v.duration = 0
 		v.lastPos = 0
+		v.decoder = ""
+		v.parser = ""
 		v.queueIndex = index
 		v.queueLen = len(s.queue)
 	})
@@ -609,6 +620,7 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 	}
 
 	var info core.StreamInfo
+	var decoderName, parserName string
 	open := func(<-chan struct{}) (decode.Decoder, error) {
 		select {
 		case <-s.closing:
@@ -621,6 +633,7 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 			return nil, err
 		}
 		info = d.Info()
+		decoderName, parserName = decode.Describe(d)
 
 		return d, nil
 	}
@@ -635,7 +648,10 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 		return openResult{seq: seq, index: index, path: path, err: err}
 	}
 
-	return openResult{seq: seq, index: index, path: path, streamer: st, info: info}
+	return openResult{
+		seq: seq, index: index, path: path,
+		streamer: st, info: info, decoder: decoderName, parser: parserName,
+	}
 }
 
 // handleOpen installs a finished build, or discards it when the queue has
@@ -689,6 +705,8 @@ func (s *Session) activate(res openResult) {
 		v.path = res.path
 		v.meta = meta.Meta{Path: res.path, Stream: res.info}
 		v.duration = 0
+		v.decoder = res.decoder
+		v.parser = res.parser
 		v.queueIndex = res.index
 		v.queueLen = len(s.queue)
 	})
@@ -846,7 +864,12 @@ func (s *Session) seek(d time.Duration) {
 	if s.device != nil {
 		_ = s.device.Pause()
 	}
+	// Capture the origin once the device is parked, so the reported position is
+	// the frame the seek actually started from rather than a moving target.
+	from := stream.FramesToDuration(live.Position())
+	start := time.Now()
 	err := live.SeekFrame(framesFor(d))
+	elapsed := time.Since(start)
 	if resume && s.device != nil {
 		_ = s.device.Resume()
 	}
@@ -856,7 +879,7 @@ func (s *Session) seek(d time.Duration) {
 		return
 	}
 
-	s.emit(Seeked{Position: d})
+	s.emit(Seeked{Position: d, From: from, Elapsed: elapsed})
 }
 
 // shutdown is the single teardown path. It runs on the control goroutine, so

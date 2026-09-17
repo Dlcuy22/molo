@@ -248,6 +248,13 @@ func (d *libopusfileDecoder) Info() core.StreamInfo {
 	}
 }
 
+// DecoderName names the native Opus implementation behind this decoder.
+func (d *libopusfileDecoder) DecoderName() string { return "libopusfile" }
+
+// ParserName names the container handling this decoder uses. libopusfile owns
+// its own Ogg parsing, so there is no separate reader library to name.
+func (d *libopusfileDecoder) ParserName() string { return "libopusfile (bundled)" }
+
 func (d *libopusfileDecoder) ReadFrames(dst []float32) (int, error) {
 	if d.closed {
 		return 0, ErrClosed
