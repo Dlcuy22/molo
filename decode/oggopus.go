@@ -657,9 +657,10 @@ func (o *OggOpusReader) ReadPacket() (packet []byte, granule int64, err error) {
 // its inter-frame state (RFC 7845 section 4.6 recommends 3840, 80 ms).
 //
 // The page chosen is the last indexed page whose granule is at or before
-// target-preroll, or the first audio page when the target is earlier. The
-// chosen page is never past target, so a caller can always discard forward to
-// the exact frame.
+// target-preroll. When the target is earlier than the first audio page, the
+// first audio page is chosen instead, which can be past the target; the caller
+// must discard forward from whatever the reader reports rather than assuming
+// the position never exceeds the target.
 //
 // Errors: a negative target, a target past the last known granule, or a stream
 // with no indexed audio pages.

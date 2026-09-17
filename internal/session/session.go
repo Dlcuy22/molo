@@ -993,7 +993,15 @@ func (s *Session) handleSeek(res seekResult) {
 	// A newer target replaced this one, so stay parked until it lands: a resumed
 	// device would be handed a half-flushed ring by the next reposition.
 	pending := s.startPendingSeek()
-	if !pending && res.resume && s.state() == StatePlaying && s.device != nil {
+	if pending {
+		// This result was superseded before anyone could act on it, so it is an
+		// internal step rather than an observable seek: emitting Seeked here
+		// would tell a consumer "the position is now X" when the target has
+		// already moved on, and it would do so once per queued seek.
+		return
+	}
+
+	if res.resume && s.state() == StatePlaying && s.device != nil {
 		_ = s.device.Resume()
 	}
 

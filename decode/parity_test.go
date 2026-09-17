@@ -104,7 +104,10 @@ func TestOpusParityAfterSeek(t *testing.T) {
 		t.Fatalf("pion read after seek: frames=%d err=%v", n, err)
 	}
 
-	if db := segmentDiffDB(nativeBuf, pionBuf, seekConvergeFrames); db > parityFloorDBFS {
+	db := segmentDiffDB(nativeBuf, pionBuf, seekConvergeFrames)
+	t.Logf("post-seek: %d frames compared after %d frames of convergence, difference %.2f dBFS",
+		frames-seekConvergeFrames, seekConvergeFrames, db)
+	if db > parityFloorDBFS {
 		t.Fatalf("post-seek decoders differ by %.2f dBFS after convergence, want below %.0f", db, parityFloorDBFS)
 	}
 }

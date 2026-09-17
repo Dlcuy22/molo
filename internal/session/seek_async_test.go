@@ -224,18 +224,26 @@ func TestSeekCollapsesABurstToTheNewestTarget(t *testing.T) {
 		t.Fatalf("last target = %d frames, want %d", last, framesFor(want))
 	}
 
-	// The newest target must be the one the session reports as landed.
+	// The newest target must be the one the session reports as landed, and a
+	// burst must report exactly one seek: a superseded intermediate step is an
+	// internal reposition, not an observable seek, and a consumer that saw one
+	// per queued target would think the position jumped backwards.
+	var landed int
 	deadline := time.After(2 * time.Second)
-	for {
+	for landed == 0 {
 		select {
 		case ev := <-s.Events():
-			if e, ok := ev.(Seeked); ok && e.Position == want {
-				return
+			if e, ok := ev.(Seeked); ok {
+				landed++
+				if e.Position != want {
+					t.Fatalf("Seeked.Position = %v, want %v", e.Position, want)
+				}
 			}
 		case <-deadline:
 			t.Fatalf("no Seeked event for the newest target %v", want)
 		}
 	}
+	assertNoEvent[Seeked](t, s, 150*time.Millisecond)
 }
 
 // TestSeekedReportsTheRepositionCost checks the payload a UI consumes: the
@@ -386,6 +394,64 @@ func TestStaleSeekAfterTrackChangeIsDiscarded(t *testing.T) {
 	}
 
 	assertNoEvent[Seeked](t, s, 150*time.Millisecond)
+}
+
+// TestSuccessfulStaleSeekIsDiscarded covers the guard the parked-seek tests
+// cannot reach. It is a white-box test on purpose: through the public path a
+// "successful stale seek" is almost unreachable, because the only way to replace
+// a track is to retire its streamer, and retirement makes an in-flight
+// SeekFrame fail with ErrClosed, which takes the error branch. That is why the
+// earlier tests never exercised the guard.
+//
+// The guard still has to be correct for the narrow real window: the streamer
+// applied the seek, the worker published the success, and the control loop had
+// not yet read it when the queue moved on. So this test delivers exactly that
+// result to the control loop and asserts it is discarded rather than reported or
+// applied.
+func TestSuccessfulStaleSeekIsDiscarded(t *testing.T) {
+	cfg := testConfig()
+	cfg.openDecoder = func(string) (decode.Decoder, error) {
+		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
+	}
+	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
+	s := newSession(t, cfg)
+
+	if err := s.Play("first"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	waitState(t, s, StatePlaying, 3*time.Second)
+	eventually(t, 2*time.Second, "audio to start moving", func() bool { return s.Snapshot().Position > 0 })
+
+	// Capture the track the seek belongs to, without touching non-atomic state:
+	// provider.current is the same pointer the session keeps in s.live.
+	stale := s.provider.current()
+	if stale == nil {
+		t.Fatal("no live streamer to seek")
+	}
+
+	if err := s.Play("second"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	eventually(t, 3*time.Second, "the second track to play", func() bool {
+		snap := s.Snapshot()
+
+		return snap.Path == "second" && snap.State == StatePlaying
+	})
+
+	// A success for the track that is no longer live, arriving now.
+	s.seekCh <- seekResult{
+		seq:    s.seq - 1,
+		stream: stale,
+		target: time.Second,
+		from:   0,
+		resume: true,
+		err:    nil,
+	}
+
+	assertNoEvent[Seeked](t, s, 250*time.Millisecond)
+	if pos := s.Snapshot().Position; pos >= time.Second {
+		t.Fatalf("the stale successful seek moved the new track to %v", pos)
+	}
 }
 
 // TestCloseDuringSeekReturns proves a session closed while a seek is parked
