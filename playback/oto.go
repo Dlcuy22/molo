@@ -239,6 +239,33 @@ func (d *otoDevice) Resume() error {
 	return nil
 }
 
+// Flush drops the audio oto has queued but not yet played. PauseAndStopReading
+// only stops oto from reading more: it keeps what is in the buffer (oto says so
+// itself in mux.pauseAndStopReadingImpl), so without this a seek or a track
+// change would replay up to a buffer of the old position on resume. BufferedSize
+// for the engine's 100 ms buffer puts that at roughly 100 ms.
+//
+// It is safe on any open device. After Flush the queue is empty and Latency
+// reports zero, which is what makes seek and track-change handling verifiable.
+func (d *otoDevice) Flush() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	switch d.state {
+	case stateClosed:
+		return ErrClosed
+	case stateIdle:
+		return ErrNotOpen
+	}
+
+	// Reset empties oto's buffer without touching its reader, so the queued
+	// pre-seek audio is dropped while the pull side stays exactly as it is. It
+	// must not be called on a playing device: Reset pauses first, and the state
+	// machine below would then disagree with oto's.
+	d.player.Reset()
+
+	return nil
+}
+
 // Close releases the device. It is idempotent and safe to call from any
 // goroutine, including one other than Start's, and while audio is playing.
 //

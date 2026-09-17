@@ -19,6 +19,7 @@ type stubDevice struct {
 	started int
 	paused  int
 	resumed int
+	flushed int
 	closed  int
 	err     error
 }
@@ -31,6 +32,7 @@ func (d *stubDevice) Open(f core.FrameFormat, _ Provider) error {
 func (d *stubDevice) Start() error  { d.started++; return nil }
 func (d *stubDevice) Pause() error  { d.paused++; return nil }
 func (d *stubDevice) Resume() error { d.resumed++; return nil }
+func (d *stubDevice) Flush() error  { d.flushed++; return nil }
 func (d *stubDevice) Close() error  { d.closed++; return nil }
 func (d *stubDevice) Err() error    { return d.err }
 func (d *stubDevice) Latency() time.Duration {

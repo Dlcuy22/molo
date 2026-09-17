@@ -67,6 +67,7 @@ type recordingDevice struct {
 	starts  int
 	pauses  int
 	resumes int
+	flushes int
 	err     error
 	closed  bool
 }
@@ -111,6 +112,17 @@ func (d *recordingDevice) Resume() error {
 	d.mu.Unlock()
 	if d.log != nil {
 		d.log.add("resume")
+	}
+
+	return nil
+}
+
+func (d *recordingDevice) Flush() error {
+	d.mu.Lock()
+	d.flushes++
+	d.mu.Unlock()
+	if d.log != nil {
+		d.log.add("flush")
 	}
 
 	return nil
@@ -275,6 +287,25 @@ func (d *pumpDevice) Resume() error {
 	d.cond.Broadcast()
 	if d.log != nil {
 		d.log.add("resume")
+	}
+
+	return nil
+}
+
+// Flush models the real backend dropping the audio it had queued but not yet
+// played. pumpDevice reads on demand rather than buffering ahead, so there is
+// nothing to drop; recording the call is what lets a test pin the ordering.
+func (d *pumpDevice) Flush() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return playback.ErrClosed
+	}
+	if !d.open {
+		return playback.ErrNotOpen
+	}
+	if d.log != nil {
+		d.log.add("flush")
 	}
 
 	return nil

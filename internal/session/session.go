@@ -604,9 +604,19 @@ func (s *Session) startIndex(index int) {
 // closed: it is the resource the next track reuses.
 func (s *Session) detach() {
 	s.retireLive()
-	if s.device != nil && s.deviceStarted {
-		_ = s.device.Pause()
+	s.park()
+}
+
+// park stops the device and drops whatever it had queued. Pause alone is not
+// enough: the backend keeps the audio it already read, so a later resume would
+// replay part of the position being left behind. Every path that abandons a
+// position (track change, stop, seek) parks for that reason.
+func (s *Session) park() {
+	if s.device == nil || !s.deviceStarted {
+		return
 	}
+	_ = s.device.Pause()
+	_ = s.device.Flush()
 }
 
 // retireLive stops the provider from reading the current streamer and closes
@@ -869,6 +879,7 @@ func (s *Session) fail(err error, closeDevice bool) {
 
 	if closeDevice && s.device != nil {
 		_ = s.device.Pause()
+		_ = s.device.Flush()
 		_ = s.device.Close()
 		s.device = nil
 		s.deviceStarted = false
@@ -885,9 +896,7 @@ func (s *Session) fail(err error, closeDevice bool) {
 func (s *Session) stopToStopped() {
 	s.seq++
 	s.retireLive()
-	if s.device != nil && s.deviceStarted {
-		_ = s.device.Pause()
-	}
+	s.park()
 	s.setState(StateStopped)
 }
 
@@ -901,9 +910,11 @@ func (s *Session) requestSeek(d time.Duration) {
 		return
 	}
 
-	if s.device != nil {
-		_ = s.device.Pause()
-	}
+	// Park before reading the origin and before the reposition: the device must
+	// not be mid-read while the streamer flushes, and the audio it had queued is
+	// the pre-seek position, so it goes too.
+	s.park()
+
 	// Capture the origin once the device is parked, so the reported position is
 	// the frame the seek actually started from rather than a moving target.
 	req := &seekRequest{

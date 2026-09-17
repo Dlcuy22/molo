@@ -39,6 +39,7 @@ func (d *facadeDevice) Pause() error {
 }
 
 func (d *facadeDevice) Resume() error          { return nil }
+func (d *facadeDevice) Flush() error           { return nil }
 func (d *facadeDevice) Close() error           { return nil }
 func (d *facadeDevice) Latency() time.Duration { return 0 }
 func (d *facadeDevice) Err() error             { return nil }

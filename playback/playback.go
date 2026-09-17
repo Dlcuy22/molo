@@ -63,6 +63,12 @@ type Device interface {
 	// Resume continues after Pause. It is a no-op on a device that is not
 	// started.
 	Resume() error
+	// Flush discards audio the backend has queued but not yet played, without
+	// changing whether it is playing. It exists because Pause alone keeps that
+	// queued audio: resuming would replay up to a buffer of the old position,
+	// which is exactly what a seek or a track change must not do. A device that
+	// is not open, or has nothing queued, treats it as a no-op.
+	Flush() error
 	// Close releases the sink. It is idempotent and safe to call from any
 	// goroutine, including while audio is playing.
 	Close() error

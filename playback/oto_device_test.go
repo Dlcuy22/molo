@@ -216,6 +216,61 @@ func TestOtoCloseWhilePlaying(t *testing.T) {
 	}
 }
 
+func TestOtoFlushDropsQueuedAudio(t *testing.T) {
+	// The bug this covers: Pause keeps what oto already read, so without a flush
+	// the resume after a seek replays up to a buffer of the old position. The
+	// observable, non-audio proof is that the queued latency goes to zero and
+	// that the Provider is not asked for more while the device is parked.
+	dev := openOtoDevice(t, newSilenceProvider(deviceRate*3, 0.01))
+	if err := dev.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	eventually(t, 2*time.Second, "the queue to fill", func() bool { return dev.Latency() > 0 })
+
+	if err := dev.Pause(); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	queued := dev.Latency()
+	if queued == 0 {
+		t.Fatal("Pause dropped the queue by itself; the test would not prove Flush does anything")
+	}
+
+	before := dev.src.provider.(*silenceProvider).framesRead()
+	if err := dev.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if got := dev.Latency(); got != 0 {
+		t.Fatalf("Latency after Flush = %v, want 0 (was %v)", got, queued)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	if after := dev.src.provider.(*silenceProvider).framesRead(); after != before {
+		t.Fatalf("Flush pulled %d more frames; it must not read the Provider", after-before)
+	}
+
+	// Flushing a parked device must not start playback.
+	if err := dev.Resume(); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+}
+
+func TestOtoFlushBeforeOpenIsInert(t *testing.T) {
+	dev := newOtoDevice().(*otoDevice)
+	if err := dev.Flush(); !errors.Is(err, ErrNotOpen) {
+		t.Fatalf("Flush before Open = %v, want ErrNotOpen", err)
+	}
+}
+
+func TestOtoFlushAfterCloseIsRejected(t *testing.T) {
+	dev := openOtoDevice(t, newSilenceProvider(deviceRate/4, 0))
+	if err := dev.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := dev.Flush(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Flush after Close = %v, want ErrClosed", err)
+	}
+}
+
 func TestOtoLatencyTracksTheQueue(t *testing.T) {
 	// 3 seconds of audio at unity so oto fills its buffer. The queue must show
 	// up as a positive, bounded latency; unbounded would mean the field is

@@ -42,6 +42,7 @@ func (d *otoDevice) Open(core.FrameFormat, Provider) error {
 func (d *otoDevice) Start() error           { return errors.Join(ErrAudioInit, otoUnsupportedError) }
 func (d *otoDevice) Pause() error           { return errors.Join(ErrAudioInit, otoUnsupportedError) }
 func (d *otoDevice) Resume() error          { return errors.Join(ErrAudioInit, otoUnsupportedError) }
+func (d *otoDevice) Flush() error           { return errors.Join(ErrAudioInit, otoUnsupportedError) }
 func (d *otoDevice) Close() error           { return nil }
 func (d *otoDevice) Latency() time.Duration { return 0 }
 func (d *otoDevice) Err() error             { return errors.Join(ErrAudioInit, otoUnsupportedError) }
