@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/dlcuy22/player"
 	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
 )
 
 // Exit codes. They are distinct because a caller such as Recordan needs to
@@ -134,19 +134,15 @@ func parseArgs(args []string) (options, error) {
 }
 
 // validateDecoder rejects a decoder name no codec registered. An empty name is
-// automatic selection and always valid. The valid choices come from the
-// registry, so the message cannot drift from what is actually available.
+// automatic selection and always valid. The check is the facade's, so this CLI
+// cannot drift from what ApplySettings accepts; only the message is the CLI's,
+// because it names the flag and the available choices.
 func validateDecoder(name string) error {
-	if name == "" {
-		return nil
-	}
-	for _, c := range decode.Default.Codecs() {
-		if c.Name == name {
-			return nil
-		}
+	if err := player.ValidateDecoder(name); err != nil {
+		return fmt.Errorf("%w: -decoder %q is not a codec; available: %s", errUsage, name, codecList())
 	}
 
-	return fmt.Errorf("%w: -decoder %q is not a codec; available: %s", errUsage, name, codecList())
+	return nil
 }
 
 func parseDurationMode(s string) (core.DurationMode, error) {

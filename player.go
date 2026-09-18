@@ -76,6 +76,16 @@ type Settings = session.Settings
 // field-specific error, so a UI can tell "bad value" apart from other failures.
 var ErrInvalidSetting = session.ErrInvalidSetting
 
+// ValidateDecoder reports whether name is a usable decoder preference: empty
+// means automatic selection. It is the same rule ApplySettings enforces, exposed
+// so a caller can check a value before offering it (a CLI flag, a settings
+// screen) without importing the registry or reimplementing the check.
+func ValidateDecoder(name string) error { return session.ValidateDecoder(name) }
+
+// ValidateBackend reports whether name is a usable playback backend, with empty
+// meaning the default. Same rule as ApplySettings enforces.
+func ValidateBackend(name string) error { return session.ValidateBackend(name) }
+
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
 type Player interface {
