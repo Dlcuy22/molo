@@ -62,10 +62,11 @@ func TestDefaultRegistryDispatchesOggOpus(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryPrefersDependencyFreePion(t *testing.T) {
-	// Both factories claim Ogg Opus. The pure-Go one must win by default
-	// because it has no runtime library dependency; pinning it here means a
-	// reordering of init() cannot silently flip the default.
+func TestDefaultRegistryPrefersPionByHigherWeight(t *testing.T) {
+	// Both factories claim Ogg Opus. The pure-Go one wins automatic selection
+	// by weight (90 over 80), not by registration order, because it has no
+	// runtime library dependency. Anchoring on the resulting decoder means a
+	// weight change cannot silently flip the default.
 	d, err := Default.Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Default.Open: %v", err)

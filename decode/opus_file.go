@@ -131,10 +131,9 @@ const (
 	opHole = -3
 )
 
-// init registers the native decoder first, so the dependency-free pure-Go
-// decoder registered afterwards resolves first for Ogg Opus. The order is a
-// deliberate default, not a limitation: a host that prefers native decoding can
-// register this factory again after import.
+// init registers the native decoder. Its weight is lower than the pure-Go
+// factory, so it is never the automatic default; a caller that prefers native
+// decoding asks for it by name with OpenNamed.
 func init() {
 	Register(NewLibopusfileFactory())
 }
@@ -145,6 +144,13 @@ type LibopusfileFactory struct{}
 func NewLibopusfileFactory() *LibopusfileFactory { return &LibopusfileFactory{} }
 
 func (f *LibopusfileFactory) Name() string { return "opus-libopusfile" }
+
+// FriendlyName is the label a UI shows for this codec.
+func (f *LibopusfileFactory) FriendlyName() string { return "Fastest" }
+
+// Weight leaves this below the pure-Go factory as the automatic default; the
+// native library is faster but requires a runtime dependency.
+func (f *LibopusfileFactory) Weight() int { return 80 }
 
 func (f *LibopusfileFactory) Exts() []string { return []string{".opus", ".ogg"} }
 

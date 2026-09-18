@@ -38,9 +38,9 @@ const maxOpusPacketSamples = 48000 * 12 / 100 * 2
 // RFC 7845 section 4.6 recommends 3840 samples (80 ms at 48 kHz).
 const seekPrerollGranules = 3840
 
-// init registers the pure-Go decoder last so it wins magic resolution and
-// becomes the default for Ogg Opus. It has no runtime dependency, unlike the
-// libopusfile path, so it is the safer default when both are registered.
+// init registers the pure-Go decoder. Its weight makes it the automatic
+// default for Ogg Opus: it has no runtime library dependency, unlike the
+// libopusfile path, so it is the safer choice when both are registered.
 func init() {
 	Register(NewPionOpusFactory())
 }
@@ -51,6 +51,13 @@ type PionOpusFactory struct{}
 func NewPionOpusFactory() *PionOpusFactory { return &PionOpusFactory{} }
 
 func (f *PionOpusFactory) Name() string { return "opus-pion" }
+
+// FriendlyName is the label a UI shows for this codec.
+func (f *PionOpusFactory) FriendlyName() string { return "Portable" }
+
+// Weight makes this the automatic default over libopusfile: it needs no
+// runtime shared library.
+func (f *PionOpusFactory) Weight() int { return 90 }
 
 func (f *PionOpusFactory) Exts() []string { return []string{".opus", ".ogg"} }
 

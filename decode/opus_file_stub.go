@@ -23,6 +23,12 @@ func NewLibopusfileFactory() *LibopusfileFactory { return &LibopusfileFactory{} 
 
 func (f *LibopusfileFactory) Name() string { return "opus-libopusfile" }
 
+// FriendlyName and Weight match the native build so the registry shape and the
+// UI list are identical on every platform.
+func (f *LibopusfileFactory) FriendlyName() string { return "Fastest" }
+
+func (f *LibopusfileFactory) Weight() int { return 80 }
+
 func (f *LibopusfileFactory) Exts() []string { return []string{".opus", ".ogg"} }
 
 func (f *LibopusfileFactory) Match(magic []byte) bool {
