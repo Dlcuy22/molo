@@ -12,7 +12,7 @@ import (
 func TestSnapshotDurationIsZeroUntilTheProbeAnswers(t *testing.T) {
 	release := make(chan struct{})
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.probeStream = func(string, decode.ProbeOptions) (core.StreamInfo, error) {
@@ -41,7 +41,7 @@ func TestSnapshotDurationIsZeroUntilTheProbeAnswers(t *testing.T) {
 
 func TestProbeFailureLeavesDurationUnknown(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.probeStream = func(string, decode.ProbeOptions) (core.StreamInfo, error) {

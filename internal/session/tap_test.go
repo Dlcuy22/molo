@@ -105,7 +105,7 @@ func TestTapInactivePublishIsNoop(t *testing.T) {
 // publisher on.
 func TestHeldTapIsInactiveUntilRead(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newRecordingDevice(nil) }}).new
@@ -179,7 +179,7 @@ func TestTapPublishAcrossScratchWindows(t *testing.T) {
 // volume must reach both the device buffer and the tap as 0.5.
 func TestProviderPublishesPostGainAudio(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 1.0, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newRecordingDevice(nil) }}).new
@@ -223,7 +223,7 @@ func TestProviderPublishesPostGainAudio(t *testing.T) {
 // overwrites oldest instead of stalling the audio thread.
 func TestTapNeverBlocksPlayback(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.25, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
@@ -250,7 +250,7 @@ func TestTapNeverBlocksPlayback(t *testing.T) {
 // that is never read must not activate publishing.
 func TestProviderReadAllocatesNothingWhenTapInactive(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newRecordingDevice(nil) }}).new

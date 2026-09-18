@@ -39,7 +39,7 @@ func TestVolumeChangesTheSamplesOnTheWire(t *testing.T) {
 	// the device. This reads the provider directly, so the assertion is about
 	// the audio the device would receive, not about the snapshot.
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 1.0, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newRecordingDevice(nil) }}).new
@@ -87,7 +87,7 @@ func TestVolumeSurvivesATrackChange(t *testing.T) {
 	// Volume lives on the gain module, not on the stream, so a track change
 	// must not reset it.
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 1.0, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new

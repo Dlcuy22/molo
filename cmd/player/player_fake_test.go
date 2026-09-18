@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,12 +12,13 @@ import (
 // It exists so the CLI's key dispatch, event drain and exit-code logic can be
 // exercised in a unit test.
 type fakePlayer struct {
-	mu     sync.Mutex
-	snap   player.Snapshot
-	events chan player.Event
-	queue  []string
-	calls  []string
-	closed bool
+	mu       sync.Mutex
+	snap     player.Snapshot
+	events   chan player.Event
+	queue    []string
+	calls    []string
+	settings player.Settings
+	closed   bool
 
 	// fail makes PlayQueue report a playback failure instead of playing.
 	fail error
@@ -208,6 +210,26 @@ func (f *fakePlayer) SetVolume(v float64) {
 // Tap satisfies the facade. The CLI never reads the visualizer feed; Phase 6
 // owns that.
 func (f *fakePlayer) Tap() player.Tap { return nil }
+
+// Settings and ApplySettings mirror the real facade's contract closely enough
+// for the CLI tests: validation is refused, a valid update is remembered.
+func (f *fakePlayer) Settings() player.Settings {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.settings
+}
+
+func (f *fakePlayer) ApplySettings(s player.Settings) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s.Decoder != "" && s.Decoder != "opus-pion" && s.Decoder != "opus-libopusfile" {
+		return fmt.Errorf("%w: decoder", player.ErrInvalidSetting)
+	}
+	f.settings = s
+
+	return nil
+}
 
 func (f *fakePlayer) Close() error {
 	f.mu.Lock()

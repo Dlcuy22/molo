@@ -3,6 +3,9 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -38,7 +41,70 @@ var (
 	ErrNoProber = errors.New("session: no duration prober for the path")
 	// ErrClosed means the session is shutting down.
 	ErrClosed = errors.New("session: closed")
+	// ErrUnknownDecoder means a decoder preference named no registered codec.
+	ErrUnknownDecoder = errors.New("session: unknown decoder")
+	// ErrUnknownBackend means a backend preference named no registered backend.
+	ErrUnknownBackend = errors.New("session: unknown playback backend")
+	// ErrBadProbeMode means a duration mode outside the known set.
+	ErrBadProbeMode = errors.New("session: unknown duration mode")
+	// ErrBadVolume means a gain outside dsp's accepted range.
+	ErrBadVolume = errors.New("session: volume out of range")
+	// ErrInvalidSetting marks a rejected Settings update. The field-specific
+	// errors above are wrapped inside it, so a caller can match on this one to
+	// tell "bad value" apart from every other failure.
+	ErrInvalidSetting = errors.New("session: invalid setting")
 )
+
+// ValidateDecoder reports whether name is a usable decoder preference. The
+// empty string means automatic selection and is always valid. This is the one
+// copy of the rule: the facade and the config defaults both call it, so a
+// chooser UI and a direct setter cannot disagree about what is legal.
+func ValidateDecoder(name string) error {
+	if name == "" {
+		return nil
+	}
+	for _, c := range decode.Default.Codecs() {
+		if c.Name == name {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w: %q", ErrUnknownDecoder, name)
+}
+
+// ValidateBackend reports whether name is a usable playback backend.
+// The empty string selects the default backend and is always valid.
+func ValidateBackend(name string) error {
+	if name == "" {
+		return nil
+	}
+	if slices.Contains(playback.Names(), name) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %q", ErrUnknownBackend, name)
+}
+
+// ValidateProbeMode reports whether mode is one of the defined duration modes.
+// Bounds are spelled out rather than compared to DurationScan, because a future
+// mode inserted in the middle of the enum would otherwise pass unnoticed.
+func ValidateProbeMode(mode core.DurationMode) error {
+	switch mode {
+	case core.DurationUnknown, core.DurationProbe, core.DurationScan:
+		return nil
+	default:
+		return fmt.Errorf("%w: %d", ErrBadProbeMode, mode)
+	}
+}
+
+// ValidateVolume reports whether v is inside the gain's accepted range.
+func ValidateVolume(v float64) error {
+	if v < dsp.MinVolume || v > dsp.MaxVolume || math.IsNaN(v) {
+		return fmt.Errorf("%w: %v", ErrBadVolume, v)
+	}
+
+	return nil
+}
 
 // Config tunes a Session. Zero fields take the documented default, so the
 // empty Config is the intended setup.
@@ -66,11 +132,71 @@ type Config struct {
 	// from "the caller did not choose".
 	ProbeMode *core.DurationMode
 
+	// Decoder is the initial decoder preference: a name from
+	// decode.Default.Codecs(), or empty for automatic selection. It is only the
+	// starting value; Settings can change it while the session runs.
+	Decoder string
+
+	// validateDecoder overrides the decoder-name check. Tests that drive the
+	// session with fake codecs set it, so they do not have to register into the
+	// process-wide registry. Production code leaves it nil and the real
+	// registry is consulted.
+	validateDecoder func(name string) error
+
 	// The seams below let tests drive the controller without a file system or
 	// an audio server. Production code leaves them nil.
-	openDecoder func(path string) (decode.Decoder, error)
+	//
+	// openDecoder takes the decoder preference per call rather than being bound
+	// once, because the preference can change between tracks. An empty name
+	// means automatic selection.
+	openDecoder func(name, path string) (decode.Decoder, error)
 	probeStream func(path string, opts decode.ProbeOptions) (core.StreamInfo, error)
-	newDevice   func() (playback.Device, error)
+	// newDevice takes the backend name so it can be overridden per call; only
+	// the first build after a backend change uses the new name.
+	newDevice func(backend string) (playback.Device, error)
+}
+
+// runtimeSettings is the mutable half of the configuration. Volume lives on
+// the gain itself, so it is not duplicated here.
+//
+// Backend is included because a change must survive until the next device is
+// built, but note that an already-open device keeps playing on the old backend:
+// a Device cannot be re-bound, so the switch lands on the next Play that has to
+// build one.
+type runtimeSettings struct {
+	mu        sync.Mutex
+	decoder   string
+	backend   string
+	probeMode core.DurationMode
+}
+
+func (r *runtimeSettings) snapshot() (decoder, backend string, mode core.DurationMode) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.decoder, r.backend, r.probeMode
+}
+
+func (r *runtimeSettings) set(decoder, backend string, mode core.DurationMode) {
+	r.mu.Lock()
+	r.decoder = decoder
+	r.backend = backend
+	r.probeMode = mode
+	r.mu.Unlock()
+}
+
+func (r *runtimeSettings) decoderName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.decoder
+}
+
+func (r *runtimeSettings) probeDurationMode() core.DurationMode {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.probeMode
 }
 
 // command is one queued public call. Commands are values, so a caller never
@@ -188,6 +314,11 @@ type Session struct {
 
 	closeOnce sync.Once
 
+	// runtime holds the values a caller may change while the session runs. It
+	// is read from worker goroutines (build) as well as the control goroutine,
+	// so it is guarded by its own mutex rather than the control loop's state.
+	runtime runtimeSettings
+
 	// workerWG tracks the asynchronous build/probe/meta goroutines so
 	// shutdown can wait for them before draining their result channels.
 	workerWG sync.WaitGroup
@@ -240,7 +371,7 @@ func New(cfg Config) (*Session, error) {
 		cfg.Resolver = meta.Default()
 	}
 	if cfg.openDecoder == nil {
-		cfg.openDecoder = decode.Default.Open
+		cfg.openDecoder = decode.Default.OpenNamed
 	}
 	if cfg.probeStream == nil {
 		cfg.probeStream = probeWithDefaultRegistry
@@ -250,8 +381,21 @@ func New(cfg Config) (*Session, error) {
 		cfg.ProbeMode = &mode
 	}
 	if cfg.newDevice == nil {
-		backend := cfg.Backend
-		cfg.newDevice = func() (playback.Device, error) { return playback.Open(backend) }
+		cfg.newDevice = func(backend string) (playback.Device, error) {
+			return playback.Open(backend)
+		}
+	}
+
+	// An invalid initial preference is a programming error, so it is rejected
+	// here rather than becoming a Failed event on the first Play.
+	if err := cfg.validate(cfg.Decoder, ValidateDecoder); err != nil {
+		return nil, err
+	}
+	if err := ValidateBackend(cfg.Backend); err != nil {
+		return nil, err
+	}
+	if err := ValidateVolume(cfg.Volume); err != nil {
+		return nil, err
 	}
 
 	s := &Session{
@@ -269,12 +413,82 @@ func New(cfg Config) (*Session, error) {
 		metaCh:  make(chan metaResult, 4),
 		seekCh:  make(chan seekResult, 1),
 	}
+	s.runtime.set(cfg.Decoder, cfg.Backend, *cfg.ProbeMode)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.provider = newRoutedProvider(s.gain, s.tap, s.feed, s.closing)
 
 	go s.run()
 
 	return s, nil
+}
+
+// validateDecoderName runs the caller's override when one is set, so a test can
+// drive fake codecs without touching the process-wide registry, and the real
+// check otherwise. One rule, two sources.
+func (c Config) validate(name string, real func(string) error) error {
+	if c.validateDecoder != nil {
+		return c.validateDecoder(name)
+	}
+
+	return real(name)
+}
+
+// Settings returns the mutable configuration currently in effect.
+func (s *Session) Settings() Settings {
+	decoder, backend, mode := s.runtime.snapshot()
+
+	return Settings{
+		Volume:    s.gain.Volume(),
+		Decoder:   decoder,
+		Backend:   backend,
+		ProbeMode: mode,
+	}
+}
+
+// SetSettings validates every field before applying any of them, so a partial
+// update is impossible: either the whole set is accepted or nothing changes.
+// Validation runs here, on the caller's goroutine, so a bad value is reported
+// as an error instead of surfacing as a Failed event on the next track.
+func (s *Session) SetSettings(next Settings) error {
+	if err := ValidateVolume(next.Volume); err != nil {
+		return err
+	}
+	if err := s.cfg.validate(next.Decoder, ValidateDecoder); err != nil {
+		return err
+	}
+	if err := ValidateBackend(next.Backend); err != nil {
+		return err
+	}
+	if err := ValidateProbeMode(next.ProbeMode); err != nil {
+		return err
+	}
+
+	// Everything is valid, so apply. Volume is the only one that takes effect
+	// immediately; decoder and probe mode are read per track, and backend is
+	// read when a device is built.
+	s.gain.SetVolume(next.Volume)
+	s.runtime.set(next.Decoder, next.Backend, next.ProbeMode)
+
+	return nil
+}
+
+// Settings is the mutable half of a Session's configuration: the values a
+// caller may change while playback is running. Everything else in Config is
+// read once by New and cannot change afterwards.
+//
+// Three of these take effect at different moments, which callers must know:
+//
+//   - Volume applies immediately.
+//   - Decoder and ProbeMode are read when the next track is built, so the
+//     current track keeps what it started with.
+//   - Backend is read when a device is built. An already-open device keeps
+//     playing on the old backend, so the change lands on the next Play that
+//     has to build one.
+type Settings struct {
+	Volume    float64
+	Decoder   string
+	Backend   string
+	ProbeMode core.DurationMode
 }
 
 // probeWithDefaultRegistry asks the process-wide decoder registry for a
@@ -678,7 +892,10 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 		default:
 		}
 
-		d, err := s.cfg.openDecoder(path)
+		// Read the preference here, not at New: changing it must affect the
+		// next track, and this is the moment the next track's decoder is
+		// chosen. The current track keeps the decoder it was built with.
+		d, err := s.cfg.openDecoder(s.runtime.decoderName(), path)
 		if err != nil {
 			return nil, err
 		}
@@ -730,7 +947,11 @@ func (s *Session) handleOpen(res openResult) {
 // on the first track and reused from then on.
 func (s *Session) activate(res openResult) {
 	if s.device == nil {
-		dev, err := s.cfg.newDevice()
+		// A backend change is read here, at the only moment a Device is built.
+		// An already-open device keeps its backend: a Device cannot be
+		// re-bound, so the switch lands on the next build, not immediately.
+		_, backend, _ := s.runtime.snapshot()
+		dev, err := s.cfg.newDevice(backend)
 		if err != nil {
 			_ = res.streamer.Close()
 			s.fail(err, false)
@@ -785,7 +1006,8 @@ func (s *Session) activate(res openResult) {
 // them; their channel sends are released by the closing signal.
 func (s *Session) enrich(seq uint64, index int, path string) {
 	go func() {
-		info, err := s.cfg.probeStream(path, decode.ProbeOptions{Duration: *s.cfg.ProbeMode})
+		mode := s.runtime.probeDurationMode()
+		info, err := s.cfg.probeStream(path, decode.ProbeOptions{Duration: mode})
 		select {
 		case s.probeCh <- probeResult{seq: seq, index: index, info: info, err: err}:
 		case <-s.closing:

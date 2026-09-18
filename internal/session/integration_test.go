@@ -124,8 +124,8 @@ type countingFactory struct {
 	made []playback.Device
 }
 
-func (f *countingFactory) new() (playback.Device, error) {
-	d, err := playback.Open("oto")
+func (f *countingFactory) new(backend string) (playback.Device, error) {
+	d, err := playback.Open(backend)
 	if err != nil {
 		return nil, err
 	}

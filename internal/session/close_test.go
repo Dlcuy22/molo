@@ -39,7 +39,7 @@ func TestCloseBeforeAnyTrack(t *testing.T) {
 
 func TestCloseDuringPlaybackDoesNotLeakGoroutines(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new

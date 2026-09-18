@@ -122,7 +122,7 @@ func TestSeekDoesNotBlockTheControlLoop(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &gatedDecoder{toneDecoder: toneDecoder{value: 0.5, total: 1 << 40}, gate: gate}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}).new
@@ -178,7 +178,7 @@ func TestSeekCollapsesABurstToTheNewestTarget(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &gatedDecoder{toneDecoder: toneDecoder{value: 0.5, total: 1 << 40}, gate: gate}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
@@ -253,7 +253,7 @@ func TestSeekedReportsTheRepositionCost(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &gatedDecoder{toneDecoder: toneDecoder{value: 0.5, total: 1 << 40}, gate: gate}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
@@ -299,7 +299,7 @@ func TestStopDuringSeekDoesNotResume(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &gatedDecoder{toneDecoder: toneDecoder{value: 0.5, total: 1 << 40}, gate: gate}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}).new
@@ -347,7 +347,7 @@ func TestStaleSeekAfterTrackChangeIsDiscarded(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(path string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		if path == "a" {
 			return &gatedDecoder{toneDecoder: toneDecoder{value: 0.5, total: 1 << 40}, gate: gate}, nil
 		}
@@ -410,7 +410,7 @@ func TestStaleSeekAfterTrackChangeIsDiscarded(t *testing.T) {
 // applied.
 func TestSuccessfulStaleSeekIsDiscarded(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
@@ -461,7 +461,7 @@ func TestCloseDuringSeekReturns(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &gatedDecoder{toneDecoder: toneDecoder{value: 0.5, total: 1 << 40}, gate: gate}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
@@ -530,7 +530,7 @@ func TestSeekCommandLatencyStaysLow(t *testing.T) {
 	defer gate.open()
 
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &costDecoder{
 			toneDecoder:   toneDecoder{value: 0.5, total: 1 << 40},
 			gate:          gate,

@@ -336,8 +336,9 @@ func (d *pumpDevice) Err() error {
 // fakeFactory builds one device per call and keeps them, so a test can prove
 // how many devices a track change created.
 type fakeFactory struct {
-	mu   sync.Mutex
-	made []playback.Device
+	mu          sync.Mutex
+	made        []playback.Device
+	lastBackend string
 }
 
 func (f *fakeFactory) count() int {
@@ -363,10 +364,11 @@ type recorderFactory struct {
 	build func() playback.Device
 }
 
-func (f *recorderFactory) new() (playback.Device, error) {
+func (f *recorderFactory) new(backend string) (playback.Device, error) {
 	d := f.build()
 	f.mu.Lock()
 	f.made = append(f.made, d)
+	f.lastBackend = backend
 	f.mu.Unlock()
 
 	return d, nil

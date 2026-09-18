@@ -14,7 +14,7 @@ import (
 func TestSeekPausesThenRepositionsThenResumes(t *testing.T) {
 	log := &orderLog{}
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40, log: log}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}).new
@@ -43,7 +43,7 @@ func TestSeekPausesThenRepositionsThenResumes(t *testing.T) {
 func TestSeekFromPauseDoesNotResume(t *testing.T) {
 	log := &orderLog{}
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40, log: log}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}).new
@@ -78,7 +78,7 @@ func TestSeekFromPauseDoesNotResume(t *testing.T) {
 
 func TestSeekEmitsSeekedAndUpdatesPosition(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new
@@ -108,7 +108,7 @@ func TestSeekEmitsSeekedAndUpdatesPosition(t *testing.T) {
 func TestSeekFlushesTheDeviceBeforeRepositioning(t *testing.T) {
 	log := &orderLog{}
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40, log: log}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}).new
@@ -139,7 +139,7 @@ func TestSeekFlushesTheDeviceBeforeRepositioning(t *testing.T) {
 func TestPauseThenSeekStillFlushes(t *testing.T) {
 	log := &orderLog{}
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40, log: log}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}).new
@@ -173,7 +173,7 @@ func TestTrackChangeFlushesTheDevice(t *testing.T) {
 	log := &orderLog{}
 	factory := &recorderFactory{build: func() playback.Device { return newPumpDevice(log) }}
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40}, nil
 	}
 	cfg.newDevice = factory.new
@@ -217,7 +217,7 @@ func TestSeekOnAnIdleSessionIsInert(t *testing.T) {
 
 func TestSeekReportsButSurvivesAFailedReposition(t *testing.T) {
 	cfg := testConfig()
-	cfg.openDecoder = func(string) (decode.Decoder, error) {
+	cfg.openDecoder = func(_, path string) (decode.Decoder, error) {
 		return &toneDecoder{value: 0.5, total: 1 << 40, seekErr: errors.New("cannot seek")}, nil
 	}
 	cfg.newDevice = (&recorderFactory{build: func() playback.Device { return newPumpDevice(nil) }}).new

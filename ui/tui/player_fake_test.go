@@ -12,13 +12,14 @@ import (
 // It lets the model's key handling, event translation and rendering be driven
 // from a unit test with no terminal and no engine.
 type fakePlayer struct {
-	mu     sync.Mutex
-	snap   player.Snapshot
-	events chan player.Event
-	queue  []string
-	calls  []string
-	tap    *fakeTap
-	closed bool
+	mu       sync.Mutex
+	snap     player.Snapshot
+	events   chan player.Event
+	queue    []string
+	calls    []string
+	tap      *fakeTap
+	settings player.Settings
+	closed   bool
 }
 
 func newFakePlayer() *fakePlayer {
@@ -241,6 +242,23 @@ func (t *fakeTap) readCount() int {
 	defer t.mu.Unlock()
 
 	return t.reads
+}
+
+// Settings and ApplySettings satisfy the facade so the TUI fake stays a valid
+// Player. The TUI does not exercise them yet; a later screen will.
+func (f *fakePlayer) Settings() player.Settings {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.settings
+}
+
+func (f *fakePlayer) ApplySettings(s player.Settings) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings = s
+
+	return nil
 }
 
 var _ player.Player = (*fakePlayer)(nil)

@@ -8,6 +8,7 @@
 package player
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/dlcuy22/player/core"
@@ -58,6 +59,23 @@ type Failed = session.Failed
 // when nothing is buffered.
 type Tap = session.Tap
 
+// Settings is the subset of configuration that can change while a Player is
+// alive. Everything else is read once by New.
+//
+// The fields take effect at different moments, which a UI should know:
+//
+//   - Volume applies immediately.
+//   - Decoder and ProbeMode are read when the next track is built, so the
+//     track already playing keeps the decoder it started with.
+//   - Backend is read when a device is built. An open device cannot be
+//     re-bound, so a backend change lands on the next Play that has to build
+//     one.
+type Settings = session.Settings
+
+// ErrInvalidSetting reports a rejected Settings update. It wraps a
+// field-specific error, so a UI can tell "bad value" apart from other failures.
+var ErrInvalidSetting = session.ErrInvalidSetting
+
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
 type Player interface {
@@ -75,6 +93,13 @@ type Player interface {
 	Stop() error
 	Seek(d time.Duration) error
 	SetVolume(v float64)
+
+	// Settings reads the mutable configuration in effect.
+	Settings() Settings
+	// ApplySettings validates every field before applying any of them: a
+	// rejected update changes nothing, so a UI can report the error without
+	// worrying about partial state. It never blocks on disk or the device.
+	ApplySettings(s Settings) error
 
 	// Tap returns the visualizer feed. The feed starts publishing on the first
 	// Read, so holding a Tap without reading it costs the audio path nothing.
@@ -122,6 +147,14 @@ func WithProbeMode(mode core.DurationMode) Option {
 	return func(c *session.Config) { c.ProbeMode = &mode }
 }
 
+// WithDecoder picks the decoder by registry name, for example "opus-pion" or
+// "opus-libopusfile". Empty means automatic selection, where the codec with the
+// highest weight wins. It is the starting value; ApplySettings can change it
+// while the player runs.
+func WithDecoder(name string) Option {
+	return func(c *session.Config) { c.Decoder = name }
+}
+
 // player is the facade implementation. It adds nothing to the session: its
 // whole job is to keep internal/session out of a UI's import graph.
 type player struct {
@@ -160,4 +193,17 @@ func (p *player) Stop() error                { return p.session.Stop() }
 func (p *player) Seek(d time.Duration) error { return p.session.Seek(d) }
 func (p *player) SetVolume(v float64)        { p.session.SetVolume(v) }
 func (p *player) Tap() Tap                   { return p.session.Tap() }
-func (p *player) Close() error               { return p.session.Close() }
+func (p *player) Settings() Settings         { return p.session.Settings() }
+
+// ApplySettings validates on the caller's goroutine and never touches the
+// control loop, so a bad value is an immediate error rather than a Failed
+// event on the next track. The session wraps the field-specific errors, which
+// ErrInvalidSetting lets a UI match on.
+func (p *player) ApplySettings(s Settings) error {
+	if err := p.session.SetSettings(s); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidSetting, err)
+	}
+
+	return nil
+}
+func (p *player) Close() error { return p.session.Close() }
