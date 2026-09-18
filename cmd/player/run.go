@@ -60,6 +60,11 @@ func run(args []string, e env) int {
 
 		return exitOK
 	}
+	if opts.codecs {
+		printCodecs(e.stdout)
+
+		return exitOK
+	}
 
 	paths, err := resolveQueue(opts.paths, decode.Default.Supported())
 	if err != nil {
@@ -103,10 +108,17 @@ func run(args []string, e env) int {
 	}
 	defer restore()
 
-	p, err := e.newPlayer(
+	playerOpts := []player.Option{
 		player.WithBackend(opts.backend),
 		player.WithProbeMode(opts.probe),
-	)
+	}
+	// An empty -decoder means automatic selection, which is the facade's own
+	// default, so the option is omitted rather than passed as empty.
+	if opts.decoder != "" {
+		playerOpts = append(playerOpts, player.WithDecoder(opts.decoder))
+	}
+
+	p, err := e.newPlayer(playerOpts...)
 	if err != nil {
 		fmt.Fprintf(e.stderr, "player: %v\n", err)
 

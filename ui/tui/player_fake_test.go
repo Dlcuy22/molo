@@ -19,6 +19,9 @@ type fakePlayer struct {
 	calls    []string
 	tap      *fakeTap
 	settings player.Settings
+	// applyErr makes the next ApplySettings fail, which is how a test drives
+	// the picker's rejection path without a real engine.
+	applyErr error
 	closed   bool
 }
 
@@ -245,7 +248,8 @@ func (t *fakeTap) readCount() int {
 }
 
 // Settings and ApplySettings satisfy the facade so the TUI fake stays a valid
-// Player. The TUI does not exercise them yet; a later screen will.
+// Player. The picker is the caller: the fake stores no state on a rejected
+// update, mirroring the engine's all-or-nothing contract.
 func (f *fakePlayer) Settings() player.Settings {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -256,6 +260,10 @@ func (f *fakePlayer) Settings() player.Settings {
 func (f *fakePlayer) ApplySettings(s player.Settings) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.record("ApplySettings")
+	if f.applyErr != nil {
+		return f.applyErr
+	}
 	f.settings = s
 
 	return nil

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/player/decode"
 )
 
 // Exit codes. They are distinct because a caller such as Recordan needs to
@@ -32,8 +33,10 @@ type options struct {
 	paths   []string
 	volume  float64
 	backend string
+	decoder string
 	probe   core.DurationMode
 	list    bool
+	codecs  bool
 	help    bool
 }
 
@@ -44,6 +47,9 @@ decodable extensions.
 
 flags:
   -backend name   playback backend (default "oto")
+  -codecs         list the available codecs and exit
+  -decoder name   codec for the tracks this run plays, by configuration name;
+                  empty (the default) selects automatically
   -list           print the resolved queue and exit
   -probe mode     duration preflight for the progress display:
                   unknown, probe, or scan (default "probe")
@@ -75,6 +81,7 @@ func parseArgs(args []string) (options, error) {
 		probe   string
 		volume  float64
 		backend string
+		decoder string
 	)
 
 	fs := flag.NewFlagSet("player", flag.ContinueOnError)
@@ -82,7 +89,9 @@ func parseArgs(args []string) (options, error) {
 	fs.Usage = func() {}
 	fs.Float64Var(&volume, "volume", 1, "initial volume in [0, 1]")
 	fs.BoolVar(&opts.list, "list", false, "print the resolved queue and exit")
+	fs.BoolVar(&opts.codecs, "codecs", false, "list the available codecs and exit")
 	fs.StringVar(&backend, "backend", "oto", "playback backend")
+	fs.StringVar(&decoder, "decoder", "", "codec for the tracks this run plays")
 	fs.StringVar(&probe, "probe", "probe", "duration preflight: unknown, probe, or scan")
 
 	if err := fs.Parse(args); err != nil {
@@ -101,6 +110,9 @@ func parseArgs(args []string) (options, error) {
 	if backend == "" {
 		return opts, fmt.Errorf("%w: -backend must not be empty", errUsage)
 	}
+	if err := validateDecoder(decoder); err != nil {
+		return opts, err
+	}
 
 	mode, err := parseDurationMode(probe)
 	if err != nil {
@@ -110,13 +122,31 @@ func parseArgs(args []string) (options, error) {
 	opts.paths = fs.Args()
 	opts.volume = volume
 	opts.backend = backend
+	opts.decoder = decoder
 	opts.probe = mode
 
-	if len(opts.paths) == 0 {
+	// -codecs is a query, not a playback request, so it needs no paths.
+	if len(opts.paths) == 0 && !opts.codecs {
 		return opts, fmt.Errorf("%w: no paths given", errUsage)
 	}
 
 	return opts, nil
+}
+
+// validateDecoder rejects a decoder name no codec registered. An empty name is
+// automatic selection and always valid. The valid choices come from the
+// registry, so the message cannot drift from what is actually available.
+func validateDecoder(name string) error {
+	if name == "" {
+		return nil
+	}
+	for _, c := range decode.Default.Codecs() {
+		if c.Name == name {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w: -decoder %q is not a codec; available: %s", errUsage, name, codecList())
 }
 
 func parseDurationMode(s string) (core.DurationMode, error) {

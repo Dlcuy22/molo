@@ -69,6 +69,17 @@ func formatTrackLine(path string) string {
 	return "track    " + displayName("", path)
 }
 
+// formatCodecLine records an accepted decoder change. It names the resolved
+// choice, with "auto" spelled out for the empty preference so the log never
+// shows a puzzling blank.
+func formatCodecLine(name string) string {
+	if name == "" {
+		return "codec    auto"
+	}
+
+	return "codec    " + name
+}
+
 // renderDebugPanel draws the header and the newest lines that fit. The panel is
 // allowed only the height the main panel and the queue leave behind: when the
 // terminal is short it shows fewer, older lines, and it disappears entirely

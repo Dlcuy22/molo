@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/player/decode"
 )
 
 func TestParseArgsDefaults(t *testing.T) {
@@ -28,6 +29,12 @@ func TestParseArgsDefaults(t *testing.T) {
 	}
 	if opts.help {
 		t.Error("default help = true, want false")
+	}
+	if opts.codecs {
+		t.Error("default codecs = true, want false")
+	}
+	if opts.decoder != "" {
+		t.Errorf("default decoder = %q, want empty (automatic)", opts.decoder)
 	}
 	if len(opts.paths) != 1 || opts.paths[0] != "a.opus" {
 		t.Errorf("paths = %q, want [a.opus]", opts.paths)
@@ -108,6 +115,55 @@ func TestParseArgsRejectsUnknownProbeMode(t *testing.T) {
 	}
 }
 
+func TestParseArgsDecoder(t *testing.T) {
+	opts, err := parseArgs([]string{"-decoder", "opus-pion", "a.opus"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if opts.decoder != "opus-pion" {
+		t.Fatalf("decoder = %q, want opus-pion", opts.decoder)
+	}
+}
+
+func TestParseArgsDecoderEmptyIsAutomatic(t *testing.T) {
+	for _, args := range [][]string{
+		{"a.opus"},
+		{"-decoder", "", "a.opus"},
+	} {
+		opts, err := parseArgs(args)
+		if err != nil {
+			t.Fatalf("parseArgs(%q): %v", args, err)
+		}
+		if opts.decoder != "" {
+			t.Errorf("decoder = %q, want empty for %q", opts.decoder, args)
+		}
+	}
+}
+
+func TestParseArgsRejectsUnknownDecoder(t *testing.T) {
+	_, err := parseArgs([]string{"-decoder", "not-a-codec", "a.opus"})
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("error = %v, want errUsage", err)
+	}
+	// The message must name the valid choices, and they come from the
+	// registry rather than a hand-written list.
+	for _, c := range decode.Default.Codecs() {
+		if !strings.Contains(err.Error(), c.Name) {
+			t.Errorf("error %q does not name the available codec %q", err, c.Name)
+		}
+	}
+}
+
+func TestParseArgsCodecsNeedsNoPaths(t *testing.T) {
+	opts, err := parseArgs([]string{"-codecs"})
+	if err != nil {
+		t.Fatalf("parseArgs(-codecs): %v", err)
+	}
+	if !opts.codecs {
+		t.Fatal("codecs = false, want true")
+	}
+}
+
 func TestParseArgsHelp(t *testing.T) {
 	opts, err := parseArgs([]string{"-h"})
 	if err != nil {
@@ -139,6 +195,21 @@ func TestUsageDocumentsExitCodes(t *testing.T) {
 	for _, code := range []string{"0", "1", "2", "3"} {
 		if !strings.Contains(usageText, code) {
 			t.Errorf("usage text does not mention exit code %q:\n%s", code, usageText)
+		}
+	}
+}
+
+func TestUsageDocumentsDecoderAndCodecs(t *testing.T) {
+	for _, want := range []string{"-decoder", "-codecs"} {
+		if !strings.Contains(usageText, want) {
+			t.Errorf("usage text does not mention %q:\n%s", want, usageText)
+		}
+	}
+	// The decoder choice applies to this run's tracks. The usage must not
+	// promise a mid-playback switch, which the engine does not do.
+	for _, word := range []string{"mid-playback", "while playing", "immediately"} {
+		if strings.Contains(usageText, word) {
+			t.Errorf("usage text claims a decoder change is immediate (%q):\n%s", word, usageText)
 		}
 	}
 }

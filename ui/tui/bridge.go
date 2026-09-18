@@ -59,6 +59,14 @@ type (
 		wave *Wave
 		err  error
 	}
+
+	// codecResultMsg carries the outcome of an ApplySettings call for a codec
+	// pick. The name is the value that was requested; err is non-nil on
+	// rejection, in which case the model keeps the previous selection.
+	codecResultMsg struct {
+		name string
+		err  error
+	}
 )
 
 // waitForEvent reads one engine event and returns it translated. It is a

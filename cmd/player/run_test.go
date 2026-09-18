@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/dlcuy22/player"
 	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/player/decode"
 )
 
 // testEnv builds a non-interactive env wired to a fake player. makeRaw is nil,
@@ -233,6 +235,152 @@ func TestRunKeyShowsProgressInInteractiveMode(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "\x1b[K") {
 		t.Fatalf("interactive output = %q, want ANSI erase", stdout.String())
+	}
+}
+
+func TestRunDecoderReachesWithDecoder(t *testing.T) {
+	dir := t.TempDir()
+	track := writeTrack(t, dir, "a.opus")
+
+	p := newFakePlayer()
+	p.autoEnd = true
+
+	// The CLI hands the decoder to the facade as an Option, and an Option is a
+	// function over the internal session config. Applying the options through
+	// the facade's own constructor is the only way a test in package main can
+	// read the result without importing the internal config type; New opens no
+	// device, so this stays headless.
+	var got string
+	e, _, stderr := testEnv(t, p)
+	e.newPlayer = func(opts ...player.Option) (player.Player, error) {
+		applied, err := player.New(opts...)
+		if err != nil {
+			return nil, err
+		}
+		got = applied.Settings().Decoder
+		_ = applied.Close()
+
+		return p, nil
+	}
+
+	if code := run([]string{"-decoder", "opus-libopusfile", track}, e); code != exitOK {
+		t.Fatalf("run = %d, want %d; stderr=%q", code, exitOK, stderr.String())
+	}
+	if got != "opus-libopusfile" {
+		t.Fatalf("Settings().Decoder = %q, want opus-libopusfile", got)
+	}
+}
+
+func TestRunCodecsListsRegistryAndExitsZero(t *testing.T) {
+	p := newFakePlayer()
+
+	e, stdout, _ := testEnv(t, p)
+	if got := run([]string{"-codecs"}, e); got != exitOK {
+		t.Fatalf("run(-codecs) = %d, want %d", got, exitOK)
+	}
+
+	out := stdout.String()
+	for _, c := range decode.Default.Codecs() {
+		line := codecLine(out, c.Name)
+		if line == "" {
+			t.Errorf("output does not list the codec name %q:\n%s", c.Name, out)
+
+			continue
+		}
+		if c.FriendlyName != "" && !strings.Contains(line, c.FriendlyName) {
+			t.Errorf("line for %q does not list the friendly name %q: %q", c.Name, c.FriendlyName, line)
+		}
+		if !strings.Contains(line, strconv.Itoa(c.Weight)) {
+			t.Errorf("line for %q does not list the weight %d: %q", c.Name, c.Weight, line)
+		}
+		if marked := strings.Contains(line, "(default)"); marked != c.Default {
+			t.Errorf("line for %q default marker = %v, want %v: %q", c.Name, marked, c.Default, line)
+		}
+	}
+
+	if strings.ContainsAny(out, "\r\x1b") {
+		t.Fatalf("-codecs output contains control bytes: %q", out)
+	}
+	if p.called("PlayQueue") || p.called("Play") {
+		t.Fatal("-codecs started playback")
+	}
+}
+
+// codecLine returns the single output line naming name, or "" when the name
+// does not appear. It lets a test assert about one codec's own line instead of
+// matching a value anywhere in the whole listing.
+func codecLine(out, name string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, name) {
+			return line
+		}
+	}
+
+	return ""
+}
+
+func TestRunCodecsDoesNotConstructAPlayer(t *testing.T) {
+	built := false
+	e, _, _ := testEnv(t, newFakePlayer())
+	e.newPlayer = func(...player.Option) (player.Player, error) {
+		built = true
+
+		return newFakePlayer(), nil
+	}
+
+	if got := run([]string{"-codecs"}, e); got != exitOK {
+		t.Fatalf("run(-codecs) = %d, want %d", got, exitOK)
+	}
+	if built {
+		t.Fatal("-codecs constructed a player")
+	}
+}
+
+func TestRunUnknownDecoderExitsUsageWithoutPlaying(t *testing.T) {
+	dir := t.TempDir()
+	track := writeTrack(t, dir, "a.opus")
+
+	p := newFakePlayer()
+	// If the rejection fails, this keeps the run from blocking forever on a
+	// fake that would otherwise stay playing, so the assertions below are what
+	// report the bug rather than a test timeout.
+	p.autoEnd = true
+
+	e, _, stderr := testEnv(t, p)
+	if got := run([]string{"-decoder", "not-a-codec", track}, e); got != exitUsage {
+		t.Fatalf("run(-decoder not-a-codec) = %d, want %d", got, exitUsage)
+	}
+	if p.called("PlayQueue") || p.called("Play") {
+		t.Fatal("an unknown decoder still started playback")
+	}
+	if !strings.Contains(stderr.String(), "not-a-codec") {
+		t.Fatalf("stderr = %q, want the rejected name", stderr.String())
+	}
+	for _, c := range decode.Default.Codecs() {
+		if !strings.Contains(stderr.String(), c.Name) {
+			t.Errorf("stderr does not name the valid codec %q:\n%s", c.Name, stderr.String())
+		}
+	}
+}
+
+func TestRunEmptyDecoderUsesAutomatic(t *testing.T) {
+	dir := t.TempDir()
+	track := writeTrack(t, dir, "a.opus")
+
+	p := newFakePlayer()
+	p.autoEnd = true
+
+	e, stdout, stderr := testEnv(t, p)
+	if got := run([]string{track}, e); got != exitOK {
+		t.Fatalf("run = %d, want %d; stderr=%q", got, exitOK, stderr.String())
+	}
+	if !p.called("PlayQueue") {
+		t.Fatal("an empty decoder did not play")
+	}
+	// The default decoder path must stay a plain line stream for a non-TTY
+	// caller, exactly like a run with no decoder flag at all.
+	if strings.ContainsAny(stdout.String(), "\r\x1b") {
+		t.Fatalf("non-TTY output contains control codes: %q", stdout.String())
 	}
 }
 

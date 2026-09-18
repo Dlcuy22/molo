@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/player/decode"
 )
 
 // tickInterval is the position and meter refresh period. 4 Hz is smooth enough
@@ -52,7 +53,7 @@ const activeMarker = "▶"
 
 // helpText is the one-line key legend. It names only bindings the model
 // actually implements, so the legend is never a promise the UI cannot keep.
-const helpText = "space pause/resume  n/p next/prev  h/l seek  +/- volume  q quit"
+const helpText = "space pause/resume  n/p next/prev  h/l seek  +/- volume  c codec  q quit"
 
 var (
 	titleStyle  = lipgloss.NewStyle().Bold(true)
@@ -112,6 +113,16 @@ type model struct {
 	waveCtx context.Context
 	// cancelWave stops the in-flight pass when the track changes.
 	cancelWave context.CancelFunc
+
+	// The codec picker. codecs is the registry list read once at construction,
+	// because Codecs() is stable for the life of the process; codecSetting is
+	// the effective decoder preference mirrored from Settings, with "" meaning
+	// automatic. pickerOpen, pickerCursor and pickerErr are pure view state.
+	codecs       []decode.Codec
+	codecSetting string
+	pickerOpen   bool
+	pickerCursor int
+	pickerErr    error
 }
 
 // New builds the UI model over a Player. It is the entry point the command
@@ -134,6 +145,9 @@ func newModel(p player.Player) model {
 		width:   defaultWidth,
 		height:  defaultHeight,
 		waveCtx: context.Background(),
+		// The registry is process-wide and stable, so the chooser list is read
+		// once here rather than per frame.
+		codecs: decode.Default.Codecs(),
 	}
 	if p != nil {
 		m.events = p.Events()
@@ -142,6 +156,7 @@ func newModel(p player.Player) model {
 		// here means the first painted frame already shows the current track
 		// instead of an empty screen until the first tick.
 		m.snap = p.Snapshot()
+		m.codecSetting = p.Settings().Decoder
 	}
 
 	return m
@@ -264,6 +279,15 @@ func readTap(t player.Tap) tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// The picker is modal: while it is open every key goes to it, so the
+		// main view's controls cannot fire behind the overlay.
+		if m.pickerOpen {
+			return m.handlePickerKey(msg)
+		}
+		if msg.String() == "c" {
+			return m.openPicker(), nil
+		}
+
 		res := handleKey(m.p, msg)
 		if res.quit {
 			m.stopWave()
@@ -382,6 +406,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, nil
+
+	case codecResultMsg:
+		return m.applyCodecResult(msg), nil
 	}
 
 	return m, nil
@@ -502,6 +529,13 @@ func (m model) renderBody() string {
 	width := m.width
 	if width <= 0 {
 		width = defaultWidth
+	}
+
+	// The picker replaces the playing panel rather than overlaying it: a
+	// terminal has no z-order, and a list appended under a full queue would be
+	// easy to miss. The player keeps running behind it either way.
+	if m.pickerOpen {
+		return m.renderPicker(width)
 	}
 
 	var b strings.Builder

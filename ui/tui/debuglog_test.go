@@ -44,6 +44,8 @@ func TestDebugFormatters(t *testing.T) {
 		{"seek", formatSeekLine(12*time.Second, 42*time.Second, 3*time.Millisecond), "seek     0:12 -> 0:42  took 3ms"},
 		{"error", formatErrorLine(errFailed), "error    test failure"},
 		{"track", formatTrackLine("/music/a.opus"), "track    a.opus"},
+		{"codec", formatCodecLine("opus-pion"), "codec    opus-pion"},
+		{"codec auto", formatCodecLine(""), "codec    auto"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
