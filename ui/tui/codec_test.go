@@ -81,7 +81,7 @@ func TestCodecPickerListsEveryCodec(t *testing.T) {
 	m := openPicker(t, f)
 
 	frame := stripANSI(m.render())
-	for _, want := range []string{"codec", "applies to the next track", "Auto (per file)", "Alpha (alpha)", "Beta (beta)"} {
+	for _, want := range []string{"codec", "applies to the next track", "Auto (per file)", "Alpha", "Beta"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("picker is missing %q:\n%s", want, frame)
 		}
@@ -121,7 +121,7 @@ func TestCodecPickerMarksAutoWhenSettingEmpty(t *testing.T) {
 	if !markedLine(frame, "Auto (per file)") {
 		t.Fatalf("Auto row is not marked:\n%s", frame)
 	}
-	if markedLine(frame, "Alpha (alpha)") || markedLine(frame, "Beta (beta)") {
+	if markedLine(frame, "Alpha") || markedLine(frame, "Beta") {
 		t.Fatalf("a named codec is marked while the setting is auto:\n%s", frame)
 	}
 }
@@ -138,7 +138,7 @@ func TestCodecPickerMarksEffectiveCodec(t *testing.T) {
 	}
 
 	frame := stripANSI(m.render())
-	if !markedLine(frame, "Beta (beta)") {
+	if !markedLine(frame, "Beta") {
 		t.Fatalf("beta row is not marked:\n%s", frame)
 	}
 	if markedLine(frame, "Auto (per file)") {
@@ -170,7 +170,7 @@ func TestCodecPickerSelectAppliesAndMarks(t *testing.T) {
 	}
 
 	frame := stripANSI(m.render())
-	if !markedLine(frame, "Beta (beta)") {
+	if !markedLine(frame, "Beta") {
 		t.Fatalf("marker did not move to beta:\n%s", frame)
 	}
 }
@@ -232,10 +232,10 @@ func TestCodecPickerRejectionKeepsSelection(t *testing.T) {
 	if !strings.Contains(frame, "error:") {
 		t.Fatalf("picker does not show the error:\n%s", frame)
 	}
-	if !markedLine(frame, "Alpha (alpha)") {
+	if !markedLine(frame, "Alpha") {
 		t.Fatalf("previous selection is no longer marked:\n%s", frame)
 	}
-	if markedLine(frame, "Beta (beta)") {
+	if markedLine(frame, "Beta") {
 		t.Fatalf("rejected selection is marked:\n%s", frame)
 	}
 }
@@ -397,7 +397,7 @@ func TestScriptedCodecPickerRender(t *testing.T) {
 	frames := stripANSI(out.String())
 	t.Logf("captured codec picker frames:\n%s", frames)
 
-	if !strings.Contains(frames, "Auto (per file)") || !strings.Contains(frames, "Beta (beta)") {
+	if !strings.Contains(frames, "Auto (per file)") || !strings.Contains(frames, "Beta") {
 		t.Errorf("captured frames do not show the picker list:\n%s", frames)
 	}
 	if got := f.Settings().Decoder; got != "beta" {

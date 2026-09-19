@@ -22,6 +22,13 @@ const (
 	// the named codecs rather than hidden, because "" is a real choice the
 	// engine understands (per-file selection by weight).
 	pickerAutoLabel = "Auto (per file)"
+
+	// codecShowRegistryName appends the registry name to every codec row, e.g.
+	// "Opus Fastest (opus-libopusfile)". It is a developer switch, not a user
+	// setting: the registry name is the configuration key, useful while
+	// debugging but noise for a listener, so the shipped UI hides it. Turn it on
+	// locally to match a row against a config file or the debug panel.
+	codecShowRegistryName = false
 )
 
 // openPicker shows the picker with the cursor on the effective codec. The list
@@ -63,25 +70,67 @@ func (m model) codecNameAt(row int) string {
 	return m.codecs[row-1].Name
 }
 
-// codecLabel renders one row: the friendly name from the registry profile, with
-// the registry name in parentheses so a user can match it to configuration and
-// debug output.
+// codecLabel renders one row for the shipped UI. The registry-name suffix is
+// controlled by codecShowRegistryName so the format lives in one place.
 func (m model) codecLabel(name string) string {
 	if name == "" {
 		return pickerAutoLabel
 	}
 	for _, c := range m.codecs {
-		if c.Name != name {
-			continue
+		if c.Name == name {
+			return codecLabelFor(c.Name, c.FriendlyName, codecShowRegistryName)
 		}
-		if c.FriendlyName != "" {
-			return fmt.Sprintf("%s (%s)", c.FriendlyName, c.Name)
-		}
-
-		return c.Name
 	}
 
 	return name
+}
+
+// codecLabelFor builds a row label as "{Family} {FriendlyName}". The family is
+// the part of the registry name before its first dash, so verbose variants of
+// one codec collapse to a recognizable prefix: opus-pion and opus-pion-exact
+// both read "Opus ...". A factory without a profile falls back to its registry
+// name, and a name that is already its own family is not repeated, so "alpha"
+// reads "Alpha" rather than "Alpha Alpha".
+//
+// showRegistryName appends the registry name, which is the configuration key;
+// it is a developer aid rather than part of the shipped UI.
+func codecLabelFor(regName, friendly string, showRegistryName bool) string {
+	if regName == "" {
+		return pickerAutoLabel
+	}
+	if friendly == "" {
+		friendly = regName
+	}
+
+	family := regName
+	if i := strings.IndexByte(regName, '-'); i > 0 {
+		family = regName[:i]
+	}
+	family = titleFirst(family)
+	friendly = titleFirst(friendly)
+
+	label := friendly
+	if !strings.EqualFold(family, friendly) {
+		label = family + " " + friendly
+	}
+	if showRegistryName {
+		label = fmt.Sprintf("%s (%s)", label, regName)
+	}
+
+	return label
+}
+
+// titleFirst upper-cases the first byte of an ASCII word. Registry names and
+// friendly labels are ASCII, so this needs no unicode machinery.
+func titleFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-'a'+'A') + s[1:]
+	}
+
+	return s
 }
 
 // movePickerCursor walks the list, clamped at both ends. A short list must not
