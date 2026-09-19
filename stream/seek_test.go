@@ -36,7 +36,7 @@ func readFrames(t *testing.T, s *Streamer, count int) []float32 {
 func TestSeekNativeMatchesStraightDecodeWindow(t *testing.T) {
 	full := decodeFixture(t, "stereo_2s.opus")
 
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "stereo_2s.opus")), Config{})
+	s := newTestStreamer(t, pionExactOpener(fixturePath(t, "stereo_2s.opus")), Config{})
 	startStreamer(t, s)
 
 	if err := s.SeekFrame(seekTarget); err != nil {
@@ -62,7 +62,7 @@ func TestSeekFallbackMatchesStraightDecodeWindow(t *testing.T) {
 	// reason the Phase 1 decoder capability split exists.
 	full := decodeFixture(t, "stereo_2s.opus")
 
-	s := newTestStreamer(t, forwardOnlyOpener(fixturePath(t, "stereo_2s.opus")), Config{})
+	s := newTestStreamer(t, forwardOnlyExactOpener(fixturePath(t, "stereo_2s.opus")), Config{})
 	startStreamer(t, s)
 
 	if _, isSeeker := s.dec.(interface{ SeekFrame(int64) error }); isSeeker {
@@ -84,13 +84,13 @@ func TestSeekFallbackMatchesStraightDecodeWindow(t *testing.T) {
 }
 
 func TestSeekFallbackAndNativeAgreeByteForByte(t *testing.T) {
-	native := newTestStreamer(t, pionOpener(fixturePath(t, "stereo_2s.opus")), Config{})
+	native := newTestStreamer(t, pionExactOpener(fixturePath(t, "stereo_2s.opus")), Config{})
 	startStreamer(t, native)
 	if err := native.SeekFrame(seekTarget); err != nil {
 		t.Fatalf("native SeekFrame: %v", err)
 	}
 
-	fallback := newTestStreamer(t, forwardOnlyOpener(fixturePath(t, "stereo_2s.opus")), Config{})
+	fallback := newTestStreamer(t, forwardOnlyExactOpener(fixturePath(t, "stereo_2s.opus")), Config{})
 	startStreamer(t, fallback)
 	if err := fallback.SeekFrame(seekTarget); err != nil {
 		t.Fatalf("fallback SeekFrame: %v", err)
@@ -239,10 +239,12 @@ func TestPositionTracksTheDeliveredFrameCount(t *testing.T) {
 
 func TestSeekPositionIsInOutputFrames(t *testing.T) {
 	// After a seek, Position is the target and the next frame read is the
-	// target frame of a straight decode, with no rate conversion applied.
+	// target frame of a straight decode, with no rate conversion applied. The
+	// exact variant is used because this asserts the frame itself, not just a
+	// bounded neighbourhood of it.
 	full := decodeFixture(t, "stereo_2s.opus")
 
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "stereo_2s.opus")), Config{})
+	s := newTestStreamer(t, pionExactOpener(fixturePath(t, "stereo_2s.opus")), Config{})
 	startStreamer(t, s)
 
 	const at = 12345

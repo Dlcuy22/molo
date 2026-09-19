@@ -90,7 +90,7 @@ func TestOpusParityAfterSeek(t *testing.T) {
 		t.Fatalf("native read after seek: frames=%d err=%v", n, err)
 	}
 
-	pion, err := NewPionOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
+	pion, err := NewPionOpusExactFactory().Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("open pion: %v", err)
 	}

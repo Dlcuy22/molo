@@ -365,9 +365,11 @@ func TestForwardOggOpusReassemblesContinuedPacket(t *testing.T) {
 // seek the decoder must emit exactly the PCM a straight decode produced from
 // that frame, byte for byte. A granule seek starts mid-stream, so this would
 // catch an off-by-pre-skip conversion, a missed pre-roll discard, or a stale
-// position that only showed up as a small phase shift.
+// position that only showed up as a small phase shift. Only the exact variant
+// makes this guarantee; the fast default is bounded but not bit-exact, which
+// TestPionFastSeekTransientIsBoundedAndConfined pins instead.
 func TestPionSeekMatchesStraightDecodeBytes(t *testing.T) {
-	factory := NewPionOpusFactory()
+	factory := NewPionOpusExactFactory()
 	full := decodeFixture(t, "stereo_2s.opus")
 
 	targets := []int64{0, 1, 1000, 12345, 30000, 48000, 90000, 96000}
@@ -400,14 +402,15 @@ func TestPionSeekMatchesStraightDecodeBytes(t *testing.T) {
 
 // TestPionSeekMatchesStraightDecodeOnReference repeats the byte-identity check
 // on the 139 s file, where audio pages are large and each seek crosses several
-// of them, so a seek that only worked within one page would fail here.
+// of them, so a seek that only worked within one page would fail here. It uses
+// the exact variant, the only one that promises byte identity.
 func TestPionSeekMatchesStraightDecodeOnReference(t *testing.T) {
 	path := realOpusPath(t)
 	full := decodeFixturePath(t, path)
 
 	targets := []int64{5000, 48000, 240000, 1440000, 4800000}
 	for _, at := range targets {
-		d, err := NewPionOpusFactory().Open(path)
+		d, err := NewPionOpusExactFactory().Open(path)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -563,7 +566,7 @@ func TestSeekGranuleForAddsPreSkip(t *testing.T) {
 }
 
 func TestPionSeekMatchesPrefixOfFullDecode(t *testing.T) {
-	factory := NewPionOpusFactory()
+	factory := NewPionOpusExactFactory()
 	full := decodeFixture(t, "stereo_2s.opus")
 
 	d, err := factory.Open(fixturePath(t, "stereo_2s.opus"))

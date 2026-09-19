@@ -32,20 +32,43 @@ var opusTagsTag = []byte("OpusTags")
 // channels interleaved. One allocation at open covers every packet.
 const maxOpusPacketSamples = 48000 * 12 / 100 * 2
 
-// seekPrerollGranules is how far before a seek target the reader starts. It is
+// The warm-up window is how far before a seek target the reader starts. It is
 // passed to SeekGranule so the chosen page precedes the target and the codec
 // rebuilds inter-frame state from real packets before the target is reached.
-// RFC 7845 section 4.6 recommends 3840 samples (80 ms at 48 kHz).
-const seekPrerollGranules = 3840
+// The landing page plus the warm-up skip bound a seek's decoded packets by this
+// window instead of by the distance to the target, so the window is the one
+// knob that trades seek cost against how exactly the landing PCM matches a
+// straight decode.
+//
+// The two values below are the two points on that curve, exposed as two
+// registry entries:
+//
+//   - pionWarmupFast is the RFC 7845 section 4.6 nominal pre-roll, 3840 samples
+//     (80 ms). libopusfile uses this window too and documents that the first
+//     frames may differ from a straight decode. Measured on this repository's
+//     fixtures, the difference is a bounded transient (peak around -20 dBFS)
+//     whose RMS falls below -60 dBFS within 100 ms; exact float32 equality is
+//     reached by roughly 600 ms. It is the default because a seek costs about
+//     1 ms on 1 s pages.
+//   - pionWarmupExact is 38400 samples (800 ms). pion's CELT coarse-energy
+//     predictor carries state across roughly 30 frames, and only a window this
+//     large makes the seeked PCM byte-for-byte equal to a straight decode on
+//     these fixtures. It costs about 5x the fast seek, so it is an explicit
+//     opt-in.
+const (
+	pionWarmupFast  = 3840
+	pionWarmupExact = 38400
+)
 
-// init registers the pure-Go decoder. Its weight makes it the automatic
-// default for Ogg Opus: it has no runtime library dependency, unlike the
-// libopusfile path, so it is the safer choice when both are registered.
+// init registers both pure-Go variants. Only the fast one carries a weight
+// above libopusfile, so it stays the automatic default; the exact variant is
+// selected by name. Both need no runtime library, unlike the libopusfile path.
 func init() {
 	Register(NewPionOpusFactory())
+	Register(NewPionOpusExactFactory())
 }
 
-// PionOpusFactory decodes Ogg Opus without cgo.
+// PionOpusFactory decodes Ogg Opus without cgo, using the fast warm-up window.
 type PionOpusFactory struct{}
 
 func NewPionOpusFactory() *PionOpusFactory { return &PionOpusFactory{} }
@@ -56,31 +79,68 @@ func (f *PionOpusFactory) Name() string { return "opus-pion" }
 func (f *PionOpusFactory) FriendlyName() string { return "Portable" }
 
 // Weight makes this the automatic default over libopusfile: it needs no
-// runtime shared library.
+// runtime shared library. It is also above the exact variant, so adding the
+// bit-perfect option cannot move the default.
 func (f *PionOpusFactory) Weight() int { return 90 }
 
 func (f *PionOpusFactory) Exts() []string { return []string{".opus", ".ogg"} }
 
 // Match accepts any Ogg stream; Open then rejects non-Opus payloads. Checking
 // deeper would mean seeking, which sniffing must not do.
-func (f *PionOpusFactory) Match(magic []byte) bool {
-	return len(magic) >= 4 && string(magic[:4]) == oggCapture
-}
+func (f *PionOpusFactory) Match(magic []byte) bool { return matchOgg(magic) }
 
 func (f *PionOpusFactory) Open(path string) (Decoder, error) {
-	return newPionOpusDecoder(pionPathSource(path))
+	return newPionOpusDecoder(pionPathSource(path), pionWarmupFast)
 }
 
 // OpenReader decodes from a stream rather than a path. A reader that can seek
 // keeps native seek; one that cannot plays forward but refuses to reposition.
 func (f *PionOpusFactory) OpenReader(r io.Reader) (Decoder, error) {
-	return newPionOpusDecoder(pionReaderSource{r})
+	return newPionOpusDecoder(pionReaderSource{r}, pionWarmupFast)
 }
 
 // Probe reads the tail of the file for the final granule position. It never
 // decodes audio, so even a probe on a large file stays cheap.
 func (f *PionOpusFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo, error) {
 	return probeOggOpus(path, opts.Duration, oggTailWindow)
+}
+
+// PionOpusExactFactory is the same pure-Go codec with the large warm-up window
+// that makes a seek's PCM bit-exact against a straight decode. Its weight is
+// below PionOpusFactory's, so it is never chosen automatically.
+type PionOpusExactFactory struct{}
+
+func NewPionOpusExactFactory() *PionOpusExactFactory { return &PionOpusExactFactory{} }
+
+func (f *PionOpusExactFactory) Name() string { return "opus-pion-exact" }
+
+// FriendlyName is the label a UI shows for this codec.
+func (f *PionOpusExactFactory) FriendlyName() string { return "Bit-perfect" }
+
+// Weight keeps this below the fast pure-Go factory: it is bit-exact after a
+// seek but its warm-up makes a seek several times more expensive, so it must
+// never win automatic selection.
+func (f *PionOpusExactFactory) Weight() int { return 85 }
+
+func (f *PionOpusExactFactory) Exts() []string { return []string{".opus", ".ogg"} }
+
+func (f *PionOpusExactFactory) Match(magic []byte) bool { return matchOgg(magic) }
+
+func (f *PionOpusExactFactory) Open(path string) (Decoder, error) {
+	return newPionOpusDecoder(pionPathSource(path), pionWarmupExact)
+}
+
+func (f *PionOpusExactFactory) OpenReader(r io.Reader) (Decoder, error) {
+	return newPionOpusDecoder(pionReaderSource{r}, pionWarmupExact)
+}
+
+func (f *PionOpusExactFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo, error) {
+	return probeOggOpus(path, opts.Duration, oggTailWindow)
+}
+
+// matchOgg is the shared content check for both pure-Go factories.
+func matchOgg(magic []byte) bool {
+	return len(magic) >= 4 && string(magic[:4]) == oggCapture
 }
 
 // pionSource supplies the container stream. open is called once, when the
@@ -128,6 +188,7 @@ type opusPacketSource interface {
 	OutputGainQ78() int16
 	TotalGranule() int64
 	Position() int64
+	PositionExact() bool
 	ReadPacket() (packet []byte, granule int64, err error)
 	SeekGranule(target, preroll int64) error
 }
@@ -150,6 +211,11 @@ type pionOpusDecoder struct {
 	reader    opusPacketSource
 	dec       opus.Decoder
 
+	// warmup is the seek pre-roll in granules: the profile's fast/exact window.
+	// It is per-decoder rather than a package constant because the two registry
+	// entries are the same codec at two points on the cost/accuracy curve.
+	warmup int64
+
 	// gain is the linear form of the header's Q7.8 dB output gain.
 	gain float32
 
@@ -162,6 +228,11 @@ type pionOpusDecoder struct {
 	pending []float32
 	decBuf  []float32
 
+	// decodedPackets counts codec invocations. A seek uses it to prove that
+	// packets which contribute nothing to the output are skipped rather than
+	// decoded and discarded; it is read only by tests.
+	decodedPackets int
+
 	// total is the playable frame count from the granule index, or -1 when the
 	// source is forward-only or the stream is truncated. It is cached so Info
 	// stays valid even after Close.
@@ -171,9 +242,10 @@ type pionOpusDecoder struct {
 	closed bool
 }
 
-func newPionOpusDecoder(src pionSource) (*pionOpusDecoder, error) {
+func newPionOpusDecoder(src pionSource, warmup int64) (*pionOpusDecoder, error) {
 	d := &pionOpusDecoder{
 		src:    src,
+		warmup: warmup,
 		decBuf: make([]float32, maxOpusPacketSamples),
 	}
 	if err := d.openSource(); err != nil {
@@ -299,9 +371,9 @@ func (d *pionOpusDecoder) fill() error {
 			return err
 		}
 
-		n, err := d.dec.DecodeToFloat32(packet, d.decBuf)
+		n, err := d.decodePacket(packet)
 		if err != nil {
-			return fmt.Errorf("decode: opus packet: %w", err)
+			return err
 		}
 
 		frames := d.trim(d.scale(d.decBuf[:n*2]))
@@ -312,6 +384,20 @@ func (d *pionOpusDecoder) fill() error {
 
 		return nil
 	}
+}
+
+// decodePacket runs the codec on one packet into decBuf and returns the frame
+// count. Every codec call goes through here so the decoded-packet budget is
+// measured in one place.
+func (d *pionOpusDecoder) decodePacket(packet []byte) (int, error) {
+	d.decodedPackets++
+
+	n, err := d.dec.DecodeToFloat32(packet, d.decBuf)
+	if err != nil {
+		return 0, fmt.Errorf("decode: opus packet: %w", err)
+	}
+
+	return n, nil
 }
 
 func (d *pionOpusDecoder) scale(samples []float32) []float32 {
@@ -347,8 +433,9 @@ func (d *pionOpusDecoder) trim(samples []float32) []float32 {
 
 // SeekFrame repositions the stream so the next frame delivered is frame. The
 // frame target is mapped to the granule domain (which counts pre-skip), the
-// reader jumps to a page at or before it, and the codec decodes and discards
-// the short remainder. No reopen and no decode from zero.
+// reader jumps to a page at or before it, packets that end before the codec's
+// warm-up window are advanced over without decoding, and only the short
+// remainder is decoded and discarded. No reopen and no decode from zero.
 func (d *pionOpusDecoder) SeekFrame(frame int64) error {
 	if d.closed {
 		return ErrClosed
@@ -361,23 +448,90 @@ func (d *pionOpusDecoder) SeekFrame(frame int64) error {
 	}
 
 	preSkip := int64(d.reader.PreSkip())
-	if err := d.reader.SeekGranule(seekGranuleFor(frame, preSkip), seekPrerollGranules); err != nil {
+	target := seekGranuleFor(frame, preSkip)
+	if err := d.reader.SeekGranule(target, d.warmup); err != nil {
 		return fmt.Errorf("decode: seek to frame %d: %w", frame, err)
 	}
 
 	// The jump lands before the target, so the codec starts without the state
-	// earlier packets built. A fresh decoder is warmed from the pre-roll page
-	// on the way to the target. Position is a granule lower bound for the next
-	// packet, so subtracting pre-skip yields a playable frame at or before the
-	// target; the discard loop closes the rest of the gap.
-	dec, err := opus.NewDecoderWithOutput(48000, 2)
-	if err != nil {
-		return fmt.Errorf("decode: init Opus decoder: %w", err)
+	// earlier packets built. The existing decoder is reset in place: Init is the
+	// OPUS_RESET_STATE equivalent and clears coarse energy, overlap, the
+	// postfilter, the range decoder and the SILK resamplers, so reusing it is a
+	// fresh decode without a fresh allocation. It is warmed from the pre-roll
+	// page on the way to the target. Position is a granule lower bound for the
+	// next packet, so subtracting pre-skip yields a playable frame at or before
+	// the target; the discard loop closes the rest of the gap.
+	if err := d.dec.Init(48000, 2); err != nil {
+		return fmt.Errorf("decode: reset Opus decoder: %w", err)
 	}
-	d.dec = dec
 	d.pending = nil
 	d.skip = 0
 	d.pos = d.reader.Position() - preSkip
+
+	// Everything more than the warm-up window before the target is decoded
+	// only to be thrown away. Advance over it packet by packet instead; the
+	// packet that straddles the window is decoded, then the discard loop below
+	// closes the remaining gap.
+	if err := d.skipWarmup(frame, target-d.warmup); err != nil {
+		return err
+	}
+
+	return d.discardTo(frame)
+}
+
+// skipWarmup advances the reader over whole packets whose end lies at or before
+// limit (granule domain) without decoding them, leaving the first packet that
+// crosses limit for the decode path.
+//
+// The position of a packet within a page is not in the container, so a running
+// sum of packet durations is kept. That sum is only trustworthy when it starts
+// at a known packet boundary: a seek can land on a page whose first packet
+// continues an unread one, and then the reader drops that packet and a sum from
+// the landing granule starts too low, which could skip a packet the codec
+// needed. PositionExact reports that case, and the skip is abandoned so the codec
+// decodes the landing page as before. From an exact start the sum stays exact
+// across page boundaries and spanning packets, so no re-anchoring is needed. A
+// packet whose TOC yields no duration is decoded.
+func (d *pionOpusDecoder) skipWarmup(frame, limit int64) error {
+	if limit <= 0 || !d.reader.PositionExact() {
+		return nil
+	}
+
+	preSkip := int64(d.reader.PreSkip())
+	pos := d.pos + preSkip // granule position of the next packet.
+	for pos < limit {
+		packet, _, err := d.reader.ReadPacket()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// The discard loop reports a target past the end.
+				return nil
+			}
+
+			return err
+		}
+
+		samples := int64(opusPacketSamples48(packet))
+		if samples <= 0 || pos+samples > limit {
+			d.pos = pos - preSkip
+
+			return d.discardFromPacket(frame, packet)
+		}
+		pos += samples
+	}
+
+	d.pos = pos - preSkip
+
+	return nil
+}
+
+// discardFromPacket decodes one already-read packet and then hands off to the
+// ordinary discard loop, which reads the packets that follow.
+func (d *pionOpusDecoder) discardFromPacket(frame int64, packet []byte) error {
+	n, err := d.decodePacket(packet)
+	if err != nil {
+		return err
+	}
+	d.pending = d.trim(d.scale(d.decBuf[:n*2]))
 
 	return d.discardTo(frame)
 }
@@ -505,6 +659,10 @@ func (f *forwardOggOpus) TotalGranule() int64 { return -1 }
 // Position is the granule lower bound for the next packet, mirroring the
 // seekable reader so the decoder's discard logic works unchanged.
 func (f *forwardOggOpus) Position() int64 { return f.pos }
+
+// PositionExact is false: a forward-only stream never seeks, so its position is
+// only ever a lower bound.
+func (f *forwardOggOpus) PositionExact() bool { return false }
 
 // SeekGranule always fails: a forward-only stream cannot be repositioned. The
 // decoder checks rewindable before calling this, so it is a backstop.

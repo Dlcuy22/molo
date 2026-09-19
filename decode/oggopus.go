@@ -72,12 +72,14 @@ var (
 // oggOpusPageEntry is one seekable page. start is the granule at which the
 // first packet on the page begins, which is the previous page's granule by the
 // contiguity rule in RFC 7845 section 4. It is a lower bound: pages before the
-// first audio page may have been cropped, and individual packets on the page
-// begin later than start.
+// first audio page may have been cropped, and a page whose first packet
+// continues an earlier one (continued) begins mid-packet, so its start names the
+// continuation's start rather than a packet boundary.
 type oggOpusPageEntry struct {
-	offset  int64
-	granule int64
-	start   int64
+	offset    int64
+	granule   int64
+	start     int64
+	continued bool
 }
 
 // oggOpusPage is a parsed page held by the packet reader.
@@ -130,6 +132,13 @@ type OggOpusReader struct {
 	// pos is the granule lower bound for the next packet, updated at page
 	// boundaries where the exact value is known.
 	pos int64
+
+	// posExact records whether pos is the exact granule at which the next
+	// packet starts, rather than a lower bound. A seek sets it from the chosen
+	// page: a page whose first packet continues from an unread page has an
+	// unknown prefix, so its start is only a bound. A decoder uses it to decide
+	// whether packet durations may be trusted for a skip.
+	posExact bool
 }
 
 // NewOggOpusReader parses the stream headers and indexes its audio pages.
@@ -406,6 +415,7 @@ func (o *OggOpusReader) resetTo(offset int64) error {
 	o.pendingGranule = 0
 	o.packetStart = offset
 	o.pos = 0
+	o.posExact = false
 
 	return nil
 }
@@ -471,7 +481,12 @@ func (o *OggOpusReader) buildIndex(start int64) error {
 			if granule < lastGranule {
 				return fmt.Errorf("decode: Ogg Opus granule %d precedes %d", granule, lastGranule)
 			}
-			o.index = append(o.index, oggOpusPageEntry{offset: offset, granule: granule, start: lastGranule})
+			o.index = append(o.index, oggOpusPageEntry{
+				offset:    offset,
+				granule:   granule,
+				start:     lastGranule,
+				continued: header[5]&oggFlagContinued != 0,
+			})
 			lastGranule = granule
 		}
 		offset = end
@@ -691,6 +706,7 @@ func (o *OggOpusReader) SeekGranule(target int64, preroll int64) error {
 		return err
 	}
 	o.pos = entry.start
+	o.posExact = !entry.continued
 
 	return nil
 }
@@ -699,3 +715,8 @@ func (o *OggOpusReader) SeekGranule(target int64, preroll int64) error {
 // lower bound. It is exact at page boundaries and never exceeds the true value,
 // so a caller can use it as the point from which to discard forward.
 func (o *OggOpusReader) Position() int64 { return o.pos }
+
+// PositionExact reports whether Position is the exact granule at which the next
+// packet starts rather than a lower bound. It is false when a seek lands on a
+// page whose first packet continues an unread one, where the prefix is unknown.
+func (o *OggOpusReader) PositionExact() bool { return o.posExact }

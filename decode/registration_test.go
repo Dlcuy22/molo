@@ -42,7 +42,7 @@ func TestRegisteredDecodersShareOneContract(t *testing.T) {
 			t.Fatalf("%s has no name or extensions", f.Name())
 		}
 	}
-	for _, want := range []string{"opus-pion", "opus-libopusfile"} {
+	for _, want := range []string{"opus-pion", "opus-pion-exact", "opus-libopusfile"} {
 		if !slices.ContainsFunc(factories, func(f Factory) bool { return f.Name() == want }) {
 			t.Fatalf("factory %s is not registered", want)
 		}

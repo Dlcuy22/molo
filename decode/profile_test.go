@@ -18,12 +18,17 @@ type profiledFactory struct {
 func (f *profiledFactory) FriendlyName() string { return f.friendly }
 func (f *profiledFactory) Weight() int          { return f.weight }
 
-// TestProfileOfOpusFactories pins both Opus codecs' UI labels and weights, so a
-// change to either is a deliberate edit rather than a silent default flip.
+// TestProfileOfOpusFactories pins every Opus codec's UI labels and weights, so a
+// change to any of them is a deliberate edit rather than a silent default flip.
 func TestProfileOfOpusFactories(t *testing.T) {
 	friendly, weight := ProfileOf(NewPionOpusFactory())
 	if friendly != "Portable" || weight != 90 {
 		t.Fatalf("pion profile = %q/%d, want Portable/90", friendly, weight)
+	}
+
+	friendly, weight = ProfileOf(NewPionOpusExactFactory())
+	if friendly != "Bit-perfect" || weight != 85 {
+		t.Fatalf("pion exact profile = %q/%d, want Bit-perfect/85", friendly, weight)
 	}
 
 	friendly, weight = ProfileOf(NewLibopusfileFactory())
