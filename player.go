@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/player/decode"
 	"github.com/dlcuy22/player/internal/session"
 	"github.com/dlcuy22/player/meta"
 )
@@ -85,6 +86,12 @@ func ValidateDecoder(name string) error { return session.ValidateDecoder(name) }
 // ValidateBackend reports whether name is a usable playback backend, with empty
 // meaning the default. Same rule as ApplySettings enforces.
 func ValidateBackend(name string) error { return session.ValidateBackend(name) }
+
+// SupportedExtensions lists the file extensions this build can decode, each
+// lowercased and including the leading dot (" .flac"). A caller that wants to
+// turn a directory into a queue uses it to tell a playable file from a stray
+// one without opening anything.
+func SupportedExtensions() []string { return decode.Default.Supported() }
 
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
