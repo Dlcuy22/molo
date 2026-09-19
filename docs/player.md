@@ -206,7 +206,7 @@ Dua hal yang berbeda dan sengaja dipisah:
 | Peran | Tanggung jawab | Contoh |
 |---|---|---|
 | **Parser** | membongkar container: framing, packet, granule, metadata stream | Ogg (RFC 3533), header Opus (RFC 7845) |
-| **Decoder** | mengubah bitstream codec menjadi PCM | `pion/opus`, `libopusfile`, `go-flac` |
+| **Decoder** | mengubah bitstream codec menjadi PCM | `pion/opus`, `libopusfile`, `go-flac`, `go-wav`, `go-mp3`, `go-aac` |
 
 Kenapa dipisah: parser Ogg Opus tahu di mana sebuah posisi berada (granule
 index), sedangkan decoder hanya tahu cara mengubah satu paket menjadi sampel.
@@ -259,6 +259,37 @@ Dua hal yang perlu diketahui konsumen:
 - **Seek-nya jujur.** `Info().TotalFrames` sudah pasti sejak header, dan seek
   memakai SEEKTABLE bila ada (tanpa table ~2× lebih lambat). Tidak ada index
   yang dibangun saat open, karena frame FLAC tidak menyimpan panjangnya sendiri.
+
+### Codec lain dari keluarga yang sama
+
+Empat format lagi memakai library `github.com/tphakala/*` yang sama, semuanya
+pure Go tanpa cgo. Ketiganya berbagi satu lapisan konversi (`pcmConvert`) dan
+satu loop pengiriman (`readCanonical`), jadi rate, kanal, dan lebar sampel
+ditangani dengan aturan yang sama seperti FLAC.
+
+| Codec | Label | Ekstensi | Lossless | `TotalFrames` | Seek |
+|---|---|---|---|---|---|
+| `wav` | Wav | `.wav` | ya (PCM mentah) | pasti (header) | frame (native) |
+| `flac` | Lossless | `.flac` | ya | pasti (STREAMINFO) | binary search frame |
+| `m4a` | M4a | `.m4a`, `.mp4` | tidak (AAC-LC) | pasti (edit list) | tidak ada |
+| `aac` | Aac | `.aac` | tidak (ADTS) | **-1** (tak ada di header) | tidak ada |
+| `mp3` | Mp3 | `.mp3` | tidak | pasti bila ada tag Xing/VBRI, else -1 | sample (exact) |
+
+Yang perlu diketahui konsumen:
+
+- **`aac` sengaja melaporkan `TotalFrames = -1`.** ADTS tidak menyimpan total di
+  mana pun; satu-satunya cara mengetahuinya adalah men-decode seluruh file, dan
+  itu justru yang tidak boleh dilakukan `Probe`. Jadi durasinya dipelajari
+  sambil diputar.
+- **`m4a` hanya AAC-LC.** MP4 berisi Opus atau FLAC ditolak dengan error yang
+  menyebut path, bukan gagal diam-diam. HE-AAC juga ditolak, dan errornya tetap
+  bisa dicocokkan lewat `errors.Is` dengan sentinel library.
+- **`m4a` menghormati edit list.** Decoder mentah mengeluarkan priming encoder
+  dan padding ekor; adapter membuang priming dan `readCanonical` memangkas ke
+  panjang presentasi, sehingga `TotalFrames` dan audio yang dikirim cocok.
+- **Mislabelled file diselamatkan.** Ekstensi hanya dipercaya bila magic tidak
+  membantahnya, jadi stream ADTS bernama `.m4a` dirutekan ke decoder AAC, bukan
+  ke parser MP4.
 
 ### Interface inti
 
@@ -346,9 +377,17 @@ Nilai saat ini:
 | Codec | FriendlyName | Weight |
 |---|---|---|
 | `opus-pion` | Portable | 90 |
-| `flac` | Lossless | 90 (ekstensi berbeda, tidak berkompetisi) |
+| `flac` | Lossless | 90 |
+| `wav` | Wav | 90 |
+| `mp3` | Mp3 | 90 |
+| `aac` | Aac | 90 |
+| `m4a` | M4a | 90 |
 | `opus-pion-exact` | Bit-perfect | 85 |
 | `opus-libopusfile` | Fastest | 80 |
+
+Weight hanya memutus seri antara codec yang mengklaim ekstensi yang sama. Di
+tabel ini setiap baris memiliki ekstensi sendiri, jadi weight 90 pada mereka
+tidak pernah berkompetisi.
 
 ### Aturan pemilihan
 

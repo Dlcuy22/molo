@@ -13,6 +13,10 @@ require (
 
 require (
 	github.com/jfreymuth/pulse v0.1.3 // indirect
-	github.com/tphakala/simd v1.8.0 // indirect
+	github.com/tphakala/go-aac v0.7.0 // indirect
+	github.com/tphakala/go-m4a v0.5.0 // indirect
+	github.com/tphakala/go-mp3 v0.1.0 // indirect
+	github.com/tphakala/go-wav v1.1.0 // indirect
+	github.com/tphakala/simd v1.9.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
