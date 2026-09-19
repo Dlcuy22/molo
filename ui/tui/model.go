@@ -20,14 +20,26 @@ import (
 	"github.com/dlcuy22/player/decode"
 )
 
-// tickInterval is the position and meter refresh period. 4 Hz is smooth enough
-// for a clock that shows whole seconds and cheap enough that polling never
-// competes with the decoder.
+// tickInterval is the position refresh period. 4 Hz is smooth enough for a
+// clock that shows whole seconds and cheap enough that polling never competes
+// with the decoder. The level meter is deliberately not on this clock; a 4 Hz
+// meter both lags and shimmers, so it runs on meterInterval instead.
 const tickInterval = 250 * time.Millisecond
 
-// meterBlockFrames bounds one tap read, about 21 ms at 48 kHz. It is the same
-// size the engine publishes in, so a read usually returns a whole block.
-const meterBlockFrames = 1024
+// meterInterval is the level meter refresh period. The tap drops frames it is
+// not read fast enough, so a slow reader loses detail rather than seeing it
+// late. 20 Hz is fast enough to look continuous and slow enough that the RMS
+// pass stays negligible next to the decoder.
+const meterInterval = 50 * time.Millisecond
+
+// meterReadBlockFrames bounds one tap read, about 21 ms at 48 kHz, so a read
+// usually returns one whole published block.
+const meterReadBlockFrames = 1024
+
+// meterMaxBlocks bounds how many blocks one meter tick drains. The tap holds
+// about 680 ms, so 64 blocks (about 1.3 s) always empties it; the bound exists
+// only so a stalled consumer cannot make a single tick spin.
+const meterMaxBlocks = 64
 
 // seekFlushDelay is how long a seek batch waits after the last key before it is
 // issued. On the pure-Go Opus decoder a seek costs time proportional to its
@@ -80,6 +92,10 @@ type model struct {
 
 	meter meter
 	err   error
+
+	// now is the clock the meter releases against. It is a field so a test can
+	// advance time deterministically; production leaves the default.
+	now func() time.Time
 
 	// debug is the bounded technical log shown under the main panel. The two
 	// guards make the per-track identity lines fire once, not once per tick.
@@ -145,6 +161,7 @@ func newModel(p player.Player) model {
 		width:   defaultWidth,
 		height:  defaultHeight,
 		waveCtx: context.Background(),
+		now:     time.Now,
 		// The registry is process-wide and stable, so the chooser list is read
 		// once here rather than per frame.
 		codecs: decode.Default.Codecs(),
@@ -166,7 +183,7 @@ func newModel(p player.Player) model {
 // poll, the queue read and the visualizer tap. None of them blocks the event
 // loop, because each is a Cmd that runs off the Update goroutine.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.nextEvent(), m.tick(), readQueue(m.p), readTap(m.tap))
+	return tea.Batch(m.nextEvent(), m.tick(), readQueue(m.p), meterTickCmd())
 }
 
 // nextEvent re-arms the event bridge unless the engine has closed its channel.
@@ -180,6 +197,13 @@ func (m model) nextEvent() tea.Cmd {
 
 func (m model) tick() tea.Cmd {
 	return tea.Tick(tickInterval, func(time.Time) tea.Msg { return tickMsg(time.Now()) })
+}
+
+// meterTickCmd arms the next meter read. The meter owns this interval rather
+// than riding the position tick, so the level can look live while the engine
+// snapshot and queue poll stay at 4 Hz.
+func meterTickCmd() tea.Cmd {
+	return tea.Tick(meterInterval, func(time.Time) tea.Msg { return meterTick{} })
 }
 
 // addSeek folds one seek key into the pending batch. The window is
@@ -255,24 +279,24 @@ func readQueue(p player.Player) tea.Cmd {
 	return func() tea.Msg { return queueMsg{paths: p.Queue()} }
 }
 
-// readTap performs one non-blocking read of the visualizer feed. The engine's
-// Tap never blocks and drops frames rather than stalling the audio thread, so a
-// slow UI loses meter detail, never sound. The read runs in a Cmd goroutine,
-// which keeps even that bounded copy off the Update path.
+// readTap drains the visualizer feed and returns the level of everything it
+// held, as a command. It is a Cmd because even a bounded copy belongs off the
+// Update goroutine; the engine's Tap never blocks and drops frames rather than
+// stalling the audio thread, so a slow UI loses meter detail, never sound.
 //
-// The destination is allocated per read rather than shared on the model: two
-// ticks can overlap in flight, and a shared buffer would be a data race.
+// It drains the whole feed rather than one block. At 20 Hz a tick covers about
+// 50 ms while the device publishes in ~100 ms chunks, so a single read would
+// often return nothing and the meter would strobe; draining also keeps the
+// reader from skipping the frames a partial read would leave behind.
 func readTap(t player.Tap) tea.Cmd {
 	if t == nil {
 		return nil
 	}
 
-	buf := make([]float32, meterBlockFrames)
-
 	return func() tea.Msg {
-		n := t.Read(buf)
+		level, frames := drainTap(t, meterReadBlockFrames)
 
-		return meterMsg{level: rms(buf[:n])}
+		return meterMsg{level: level, frames: frames}
 	}
 }
 
@@ -338,7 +362,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recordIdentity()
 		}
 
-		return m, tea.Batch(m.tick(), readQueue(m.p), readTap(m.tap))
+		// The meter is not read here: it has its own stream at meterInterval.
+		// Reading the tap from both would make two streams race to drain the
+		// same ring, each seeing an arbitrary subset of the audio.
+		return m, tea.Batch(m.tick(), readQueue(m.p))
 
 	case stateMsg:
 		m.snap.State = msg.to
@@ -391,9 +418,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case meterMsg:
-		m.meter.push(msg.level)
+		// No frames means nothing was published since the last read; holding the
+		// level is right, decaying it would read as a dropout that never
+		// happened.
+		if msg.frames > 0 {
+			m.meter.push(msg.level, m.now())
+		}
 
 		return m, nil
+
+	case meterTick:
+		return m, tea.Batch(meterTickCmd(), readTap(m.tap))
 
 	case waveMsg:
 		// A pass that finished after its track was replaced must not paint

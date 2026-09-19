@@ -219,10 +219,13 @@ func (f *fakePlayer) setSnapshot(fn func(*player.Snapshot)) {
 }
 
 // fakeTap serves canned mono frames. Read is non-blocking by contract; this one
-// is too.
+// is too. Like the real tap it consumes what it returns, so a reader that drains
+// the feed sees each frame exactly once and a second read with nothing left
+// reports zero — the distinction the meter relies on.
 type fakeTap struct {
 	mu      sync.Mutex
 	samples []float32
+	read    int
 	reads   int
 }
 
@@ -230,14 +233,20 @@ func (t *fakeTap) Read(dst []float32) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.reads++
+	if t.read >= len(t.samples) {
+		return 0
+	}
+	n := copy(dst, t.samples[t.read:])
+	t.read += n
 
-	return copy(dst, t.samples)
+	return n
 }
 
 func (t *fakeTap) setSamples(s []float32) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.samples = append([]float32(nil), s...)
+	t.read = 0
 }
 
 func (t *fakeTap) readCount() int {

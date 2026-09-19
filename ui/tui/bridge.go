@@ -43,9 +43,17 @@ type (
 	// queueMsg carries a refreshed queue.
 	queueMsg struct{ paths []string }
 
-	// meterMsg carries the level of one non-blocking read of the visualizer
-	// tap.
-	meterMsg struct{ level float64 }
+	// meterMsg carries the level of one drain of the visualizer tap. frames is
+	// how many it held: zero means the audio path published nothing since the
+	// last read, which is different from silence and must not decay the meter.
+	meterMsg struct {
+		level  float64
+		frames int
+	}
+
+	// meterTick asks for one meter read and re-arms the next, so the meter runs
+	// on its own clock instead of the slower position poll.
+	meterTick struct{}
 
 	// seekFlushMsg closes a seek batch. The sequence is the batch it was armed
 	// for, so a timer that fires after a later key press re-arms instead of

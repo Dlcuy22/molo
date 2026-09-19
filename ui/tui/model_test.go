@@ -184,11 +184,49 @@ func TestUpdateQueueIdenticalDoesNotResetTitles(t *testing.T) {
 func TestUpdateMeterMessage(t *testing.T) {
 	m := newModel(newFakePlayer())
 
-	next, _ := m.Update(meterMsg{level: 0.5})
+	next, _ := m.Update(meterMsg{level: 0.5, frames: 1024})
 	got := next.(model)
 
 	if got.meter.level != 0.5 {
 		t.Fatalf("meter level = %v, want 0.5", got.meter.level)
+	}
+}
+
+// TestUpdateMeterWithNoFramesHoldsLevel pins the "nothing published" case: a
+// tick that drained no audio must hold the level, not decay it as if the sound
+// had stopped.
+func TestUpdateMeterWithNoFramesHoldsLevel(t *testing.T) {
+	m := newModel(newFakePlayer())
+	m.meter.push(0.8, time.Now())
+
+	next, _ := m.Update(meterMsg{level: 0, frames: 0})
+	got := next.(model)
+
+	if got.meter.level < 0.7 {
+		t.Fatalf("an empty read decayed the meter to %v", got.meter.level)
+	}
+}
+
+// TestMeterTickRearmsAndReads proves the meter stream is self-driving: each tick
+// requests another and performs one read.
+func TestMeterTickRearmsAndReads(t *testing.T) {
+	f := newFakePlayer()
+	f.tap.setSamples([]float32{1, -1, 1, -1})
+	m := newModel(f)
+
+	next, cmd := m.Update(meterTick{})
+	got := next.(model)
+
+	if cmd == nil {
+		t.Fatal("meterTick returned no command; the meter stream would stop")
+	}
+	if got.tap == nil {
+		t.Fatal("model has no tap")
+	}
+	if level, frames := drainTap(got.tap, meterReadBlockFrames); frames == 0 {
+		t.Fatal("meterTick did not leave a readable feed")
+	} else if level != 1 {
+		t.Fatalf("drained level = %v, want 1", level)
 	}
 }
 

@@ -130,8 +130,8 @@ func TestFrameSequence(t *testing.T) {
 		{"seeked event", seekedMsg{position: 5 * time.Second}},
 		{"+ (volume up)", keyPress("+")},
 		{"tick after volume", tickMsg(time.Now())},
-		{"tap level 0.7", meterMsg{level: 0.7}},
-		{"tap level 0.2 (decay)", meterMsg{level: 0.2}},
+		{"meter tick (loud)", meterMsg{level: 0.7, frames: 2048}},
+		{"meter tick (quiet, release)", meterMsg{level: 0.2, frames: 2048}},
 		{"q (quit)", keyPress("q")},
 	}
 
@@ -173,7 +173,7 @@ func TestScriptedRenderSnapshotFrame(t *testing.T) {
 	m.queue = f.queue
 	m.titles = []string{"", "Real Track", ""}
 	m.snap = f.snap
-	m.meter.push(0.6)
+	m.meter.push(0.6, time.Time{})
 
 	frame := stripANSI(m.render())
 	t.Logf("frame:\n%s", frame)

@@ -95,7 +95,7 @@ func TestTrackChangeResetsUIState(t *testing.T) {
 		meta.Meta{Tags: meta.Tags{Title: "Old Title", Artist: "Old Artist", Album: "Old Album"}},
 	)
 	m.err = errFailed
-	m.meter.push(1)
+	m.meter.push(1, time.Time{})
 
 	next, _ := m.Update(trackMsg{index: 1, path: "/music/b.opus"})
 	got := next.(model)

@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRMS(t *testing.T) {
@@ -28,26 +29,27 @@ func TestRMS(t *testing.T) {
 }
 
 func TestMeterDecaysRatherThanSnapping(t *testing.T) {
+	t0 := time.Unix(0, 0)
+
 	var m meter
-	m.push(1)
+	m.push(1, t0)
 	if m.level != 1 {
 		t.Fatalf("first push = %v, want 1", m.level)
 	}
 
 	// Silence must fall gradually, not jump to zero: a meter that snaps looks
-	// like a glitch, and the decay is the one piece of smoothing the UI does.
-	m.push(0)
+	// like a glitch, and the release is the one piece of smoothing the UI does.
+	// The time-based shape is pinned in TestMeterReleaseIsTimeBased; here it is
+	// enough that a quiet reading decays partway rather than holding or snapping.
+	m.push(0, t0.Add(meterHalfLife/2))
 	if m.level <= 0 || m.level >= 1 {
-		t.Fatalf("decay = %v, want strictly between 0 and 1", m.level)
-	}
-	if want := meterDecay; math.Abs(m.level-want) > 1e-9 {
-		t.Fatalf("decay = %v, want %v", m.level, want)
+		t.Fatalf("release = %v, want strictly between 0 and 1", m.level)
 	}
 }
 
 func TestMeterResets(t *testing.T) {
 	var m meter
-	m.push(1)
+	m.push(1, time.Time{})
 	m.reset()
 	if m.level != 0 {
 		t.Fatalf("reset level = %v, want 0", m.level)
@@ -56,11 +58,11 @@ func TestMeterResets(t *testing.T) {
 
 func TestMeterPushClamps(t *testing.T) {
 	var m meter
-	m.push(2)
+	m.push(2, time.Time{})
 	if m.level != 1 {
 		t.Fatalf("push above one = %v, want 1", m.level)
 	}
-	m.push(-1)
+	m.push(-1, time.Time{})
 	if m.level < 0 {
 		t.Fatalf("push below zero produced %v", m.level)
 	}
