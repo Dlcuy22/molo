@@ -206,7 +206,7 @@ Dua hal yang berbeda dan sengaja dipisah:
 | Peran | Tanggung jawab | Contoh |
 |---|---|---|
 | **Parser** | membongkar container: framing, packet, granule, metadata stream | Ogg (RFC 3533), header Opus (RFC 7845) |
-| **Decoder** | mengubah bitstream codec menjadi PCM | `pion/opus`, `libopusfile` |
+| **Decoder** | mengubah bitstream codec menjadi PCM | `pion/opus`, `libopusfile`, `go-flac` |
 
 Kenapa dipisah: parser Ogg Opus tahu di mana sebuah posisi berada (granule
 index), sedangkan decoder hanya tahu cara mengubah satu paket menjadi sampel.
@@ -230,6 +230,35 @@ titik setel:
 - **`opus-libopusfile`** — parser dan decoder menyatu di dalam library C
   `libopusfile`, diakses lewat `purego` (tanpa cgo). Seek-nya paling murah
   karena preroll 80 ms-nya ditunda sampai `read` pertama.
+
+### FLAC: `flac`
+
+FLAC adalah satu-satunya codec **lossless** di sini, lewat
+`github.com/tphakala/go-flac` (pure Go, tanpa cgo). Ia bukan varian Opus dan
+tidak berbagi parser: FLAC tidak memakai Ogg (varian Ogg FLAC yang langka
+memang ditolak), jadi framing-nya adalah frame `fLaC` native.
+
+| | `flac` |
+|---|---|
+| Label | Lossless |
+| Ekstensi | `.flac` |
+| Baca PCM | bit-exact (terverifikasi vs decoder referensi) |
+| Sample rate | 8–96 kHz, **dinormalkan ke 48000** |
+| Kanal | 1–8, dipetakan ke stereo |
+| Bit depth | 4–32 |
+| Seek | binary search frame, ~3 ms (180 s file) |
+
+Dua hal yang perlu diketahui konsumen:
+
+- **Rate dinormalkan.** Device dan ring hanya menerima 48000 Hz stereo float32,
+  dan engine tidak punya resampler (modul `core.Module` tidak boleh mengubah
+  jumlah frame). Karena itu decoder FLAC mengubah 44.1 kHz dan lainnya ke
+  48000 Hz dengan interpolasi linear, sama seperti decoder Opus yang juga selalu
+  melaporkan 48000. Konsekuensinya: file 44.1 kHz tidak lagi bit-exact setelah
+  konversi, meski sumbernya lossless.
+- **Seek-nya jujur.** `Info().TotalFrames` sudah pasti sejak header, dan seek
+  memakai SEEKTABLE bila ada (tanpa table ~2× lebih lambat). Tidak ada index
+  yang dibangun saat open, karena frame FLAC tidak menyimpan panjangnya sendiri.
 
 ### Interface inti
 
@@ -317,6 +346,7 @@ Nilai saat ini:
 | Codec | FriendlyName | Weight |
 |---|---|---|
 | `opus-pion` | Portable | 90 |
+| `flac` | Lossless | 90 (ekstensi berbeda, tidak berkompetisi) |
 | `opus-pion-exact` | Bit-perfect | 85 |
 | `opus-libopusfile` | Fastest | 80 |
 
