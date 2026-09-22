@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=player
+Exec=player
+Icon=player
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false

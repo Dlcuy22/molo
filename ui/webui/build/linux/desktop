@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Player
+Comment=Local audio player
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/player-webui %u
+Terminal=false
+Type=Application
+Icon=player-webui
+Categories=Utility;
+StartupWMClass=player-webui
+
+ 
