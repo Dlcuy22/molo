@@ -44,6 +44,12 @@ type feedEvent struct {
 type routedProvider struct {
 	gain *dsp.Gain
 
+	// chain is the post-ring effect chain, applied before the master gain. It
+	// is shared with the controller, which may publish a new effect list at
+	// any time; Process loads the list once per buffer, so a swap here can
+	// never make one buffer run a mix of the old and new chains.
+	chain *dsp.Chain
+
 	// tap observes the post-gain samples on their way to the device. It is
 	// created once and reused for the session's life, so a visualizer keeps
 	// reading across track changes. publish is a single atomic load until the
@@ -66,8 +72,8 @@ type routedProvider struct {
 	done <-chan struct{}
 }
 
-func newRoutedProvider(gain *dsp.Gain, t *tap, feed chan<- feedEvent, done <-chan struct{}) *routedProvider {
-	return &routedProvider{gain: gain, tap: t, feed: feed, done: done}
+func newRoutedProvider(chain *dsp.Chain, gain *dsp.Gain, t *tap, feed chan<- feedEvent, done <-chan struct{}) *routedProvider {
+	return &routedProvider{chain: chain, gain: gain, tap: t, feed: feed, done: done}
 }
 
 // setCurrent points the device at a new streamer, or at nothing when s is nil.
@@ -81,8 +87,8 @@ func (p *routedProvider) current() *stream.Streamer {
 }
 
 // ReadFrames satisfies playback.Provider. It is the seam where the post-ring
-// gain runs, so volume is applied to exactly the samples the device receives,
-// with no allocation and no lock on the hot path.
+// effects and the master gain run, so both are applied to exactly the samples
+// the device receives, with no allocation and no lock on the hot path.
 func (p *routedProvider) ReadFrames(dst []float32) (int, error) {
 	for {
 		s := p.cur.Load()
@@ -92,6 +98,17 @@ func (p *routedProvider) ReadFrames(dst []float32) (int, error) {
 
 		n, err := s.ReadFrames(dst)
 		if n > 0 {
+			// Effects run first, then the master gain, then the tap observes.
+			// That order is fixed: the master volume is final, so an effect
+			// that trims its own output cannot be overridden by the user's
+			// volume, and the tap sees exactly what the listener hears. Both
+			// stages load their state atomically, so a chain or volume swap
+			// mid-buffer is safe and Process never blocks.
+			if perr := p.chain.Process(dst, n); perr != nil {
+				p.notify(feedEvent{kind: feedError, stream: s, err: perr})
+
+				return n, perr
+			}
 			if perr := p.gain.Process(dst, n); perr != nil {
 				p.notify(feedEvent{kind: feedError, stream: s, err: perr})
 

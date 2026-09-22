@@ -46,7 +46,7 @@ func renderWave(w *Wave, width int) string {
 		return ""
 	}
 
-	const levels = " ▁▂▃▄▅▆▇█"
+	const levels = " ▂▃▄▅▆▇█"
 
 	cells := make([]byte, width)
 	for i := 0; i < width; i++ {

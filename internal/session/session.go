@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -137,6 +138,11 @@ type Config struct {
 	// starting value; Settings can change it while the session runs.
 	Decoder string
 
+	// Pipeline is the post-ring effect chain. Zero is an empty chain, which is
+	// today's behaviour: only the master gain runs. The Pre half is the
+	// streamer's business and is ignored here.
+	Pipeline dsp.Pipeline
+
 	// validateDecoder overrides the decoder-name check. Tests that drive the
 	// session with fake codecs set it, so they do not have to register into the
 	// process-wide registry. Production code leaves it nil and the real
@@ -168,6 +174,14 @@ type runtimeSettings struct {
 	decoder   string
 	backend   string
 	probeMode core.DurationMode
+	pipeline  dsp.Pipeline
+
+	// pipelineGen counts accepted pipeline changes. A build captures it
+	// together with the pipeline it built, and the control loop installs that
+	// build's effects only while the generation still matches. Without it, a
+	// pipeline change that landed while a track was building would be
+	// overwritten by the older snapshot the build had already started from.
+	pipelineGen uint64
 }
 
 func (r *runtimeSettings) snapshot() (decoder, backend string, mode core.DurationMode) {
@@ -185,11 +199,102 @@ func (r *runtimeSettings) set(decoder, backend string, mode core.DurationMode) {
 	r.mu.Unlock()
 }
 
+// pipelineSnapshot returns a copy of the current pipeline and the generation it
+// belongs to. The stage slices are cloned so a caller cannot mutate the ones in
+// force; the Params maps are shared because they are only read while a stage
+// compiles its own state.
+func (r *runtimeSettings) pipelineSnapshot() (dsp.Pipeline, uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return clonePipeline(r.pipeline), r.pipelineGen
+}
+
+// setPipeline stores the pipeline as the one in force and advances the
+// generation. It is how the initial Config pipeline is adopted, where a change
+// count is meaningless because nothing existed before.
+func (r *runtimeSettings) setPipeline(p dsp.Pipeline) uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pipeline = clonePipeline(p)
+	r.pipelineGen++
+
+	return r.pipelineGen
+}
+
+// setPipelineIfChanged stores the pipeline only when it differs from the one in
+// force and reports whether it did. The compare and the store share one lock, so
+// two concurrent callers cannot both decide a change is new. Skipping an
+// identical pipeline is what stops a settings change that does not touch the
+// chain from re-installing it, resetting effect state mid-track and emitting a
+// spurious PipelineChanged.
+//
+// Only the Post halves are compared: this is the same Post-only surface Settings
+// exposes, and a Pre change is not this method's business. Normalising with
+// clonePipeline is what makes a Pipeline carrying a Pre half compare equal to
+// the stored one that has none.
+func (r *runtimeSettings) setPipelineIfChanged(p dsp.Pipeline) (bool, uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if reflect.DeepEqual(r.pipeline, clonePipeline(p)) {
+		return false, r.pipelineGen
+	}
+	r.pipeline = clonePipeline(p)
+	r.pipelineGen++
+
+	return true, r.pipelineGen
+}
+
+// pipelineGenNow reports the current generation without copying the pipeline.
+func (r *runtimeSettings) pipelineGenNow() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.pipelineGen
+}
+
+// Pipeline returns a copy of the pipeline in force. Verifying a pipeline round
+// trips is reading it back, so the copy is deliberate: a caller that mutates
+// what it gets cannot reach the engine's copy.
+func (r *runtimeSettings) Pipeline() dsp.Pipeline {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return clonePipeline(r.pipeline)
+}
+
+// clonePipeline copies the post-ring stages of a pipeline. The session's
+// effect surface is Post-only: the Pre half belongs to the streamer, so it is
+// dropped here rather than stored and echoed back unused. A nil and an empty
+// slice both mean "no stages", so the copy preserves nil.
+func clonePipeline(p dsp.Pipeline) dsp.Pipeline {
+	return dsp.Pipeline{Post: append([]dsp.Spec(nil), p.Post...)}
+}
+
 func (r *runtimeSettings) decoderName() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	return r.decoder
+}
+
+func (r *runtimeSettings) setDecoder(name string) {
+	r.mu.Lock()
+	r.decoder = name
+	r.mu.Unlock()
+}
+
+func (r *runtimeSettings) setBackend(name string) {
+	r.mu.Lock()
+	r.backend = name
+	r.mu.Unlock()
+}
+
+func (r *runtimeSettings) backendName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.backend
 }
 
 func (r *runtimeSettings) probeDurationMode() core.DurationMode {
@@ -205,7 +310,13 @@ type command struct {
 	kind  cmdKind
 	path  string
 	paths []string
+	name  string
 	pos   time.Duration
+
+	// effects is a pre-built, configured post-ring chain an ApplyPipeline or
+	// SetSettings accepted. It was built on the caller's goroutine, so the
+	// control loop only has to publish it with an atomic swap.
+	effects []dsp.Effect
 }
 
 type cmdKind uint8
@@ -219,19 +330,27 @@ const (
 	cmdResume
 	cmdStop
 	cmdSeek
+	cmdSwapDecoder
+	cmdSwapBackend
+	cmdApplyPipeline
 )
 
 // openResult is a finished synchronous pipeline build, delivered to the
-// control loop so the build itself never runs there.
+// control loop so the build itself never runs there. effects is the post-ring
+// chain the worker built and reset for this track, and pipelineGen is the
+// generation it was built from, so a pipeline change that landed while the build
+// ran is not clobbered by the older snapshot the build started with.
 type openResult struct {
-	seq      uint64
-	index    int
-	path     string
-	streamer *stream.Streamer
-	info     core.StreamInfo
-	decoder  string
-	parser   string
-	err      error
+	seq         uint64
+	index       int
+	path        string
+	streamer    *stream.Streamer
+	effects     []dsp.Effect
+	pipelineGen uint64
+	info        core.StreamInfo
+	decoder     string
+	parser      string
+	err         error
 }
 
 type probeResult struct {
@@ -251,9 +370,17 @@ type metaResult struct {
 // seekResult is a finished reposition, delivered to the control loop so the
 // seek itself never runs there. stream and seq identify the track it was
 // started for, so the controller can drop a result whose track has moved on.
+// The same type carries a decoder swap (decoder/parser name the new
+// implementation) and a backend swap (device is the newly opened one), because
+// all three are the same "one slow engine step at a time" contract.
 type seekResult struct {
 	seq     uint64
 	stream  *stream.Streamer
+	kind    requestKind
+	name    string
+	decoder string
+	parser  string
+	device  playback.Device
 	target  time.Duration
 	from    time.Duration
 	resume  bool
@@ -292,6 +419,7 @@ type view struct {
 type Session struct {
 	cfg    Config
 	gain   *dsp.Gain
+	chain  *dsp.Chain
 	tap    *tap
 	events *eventQueue
 	v      view
@@ -343,13 +471,31 @@ type Session struct {
 	seekPending *seekRequest
 }
 
-// seekRequest is one accepted seek, either in flight or waiting to replace an
-// in-flight one. from is captured when the device has been parked, so it is
-// the frame the reposition actually started from.
+// requestKind selects what a queued engine step does. A plain seek and a
+// decoder swap both reposition the streamer; a backend swap rebuilds the
+// device. They share one worker and one latest-wins slot so they cannot race
+// each other on the same streamer or device.
+type requestKind uint8
+
+const (
+	requestSeek requestKind = iota
+	requestSwapDecoder
+	requestSwapBackend
+)
+
+// seekRequest is one accepted seek, swap or device rebuild, either in flight or
+// waiting to replace an in-flight one. from is captured when the device has
+// been parked, so it is the position the operation actually started from; for a
+// decoder swap frame is that same position in the streamer's frame domain, kept
+// exact so the swap does not quantise the position through a duration.
 type seekRequest struct {
 	seq    uint64
 	stream *stream.Streamer
+	kind   requestKind
+	name   string
+	path   string
 	target time.Duration
+	frame  int64
 	from   time.Duration
 	resume bool
 }
@@ -387,7 +533,9 @@ func New(cfg Config) (*Session, error) {
 	}
 
 	// An invalid initial preference is a programming error, so it is rejected
-	// here rather than becoming a Failed event on the first Play.
+	// here rather than becoming a Failed event on the first Play. The pipeline
+	// is validated the same way: building each stage is what resolves its kind
+	// and coerces its parameters, so a bad preset fails here.
 	if err := cfg.validate(cfg.Decoder, ValidateDecoder); err != nil {
 		return nil, err
 	}
@@ -397,10 +545,14 @@ func New(cfg Config) (*Session, error) {
 	if err := ValidateVolume(cfg.Volume); err != nil {
 		return nil, err
 	}
+	if err := ValidatePipeline(cfg.Pipeline); err != nil {
+		return nil, err
+	}
 
 	s := &Session{
 		cfg:     cfg,
 		gain:    dsp.NewGain(cfg.Volume),
+		chain:   dsp.NewChain(),
 		tap:     newTap(),
 		events:  newEventQueue(cfg.EventBuffer),
 		v:       view{state: StateIdle, queueIndex: -1},
@@ -414,12 +566,59 @@ func New(cfg Config) (*Session, error) {
 		seekCh:  make(chan seekResult, 1),
 	}
 	s.runtime.set(cfg.Decoder, cfg.Backend, *cfg.ProbeMode)
+	s.runtime.setPipeline(cfg.Pipeline)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.provider = newRoutedProvider(s.gain, s.tap, s.feed, s.closing)
+	s.provider = newRoutedProvider(s.chain, s.gain, s.tap, s.feed, s.closing)
 
 	go s.run()
 
 	return s, nil
+}
+
+// buildPost compiles the post-ring half of a pipeline into configured effects.
+// Building is also validation: resolving each kind and coercing each parameter
+// is what rejects an unknown kind or parameter. The effects are Configured for
+// the canonical post-ring format and Reset before they are handed to a caller,
+// so the first buffer an effect sees is never stale state from a previous
+// install.
+func buildPost(p dsp.Pipeline) ([]dsp.Effect, error) {
+	effects, err := dsp.BuildPost(p)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range effects {
+		if _, err := e.Configure(canonical); err != nil {
+			return nil, fmt.Errorf("dsp: %s configure: %w", e.Name(), err)
+		}
+		if err := e.Reset(); err != nil {
+			return nil, fmt.Errorf("dsp: %s reset: %w", e.Name(), err)
+		}
+	}
+
+	return effects, nil
+}
+
+// ValidatePipeline reports whether every post-ring stage can be built. It is
+// the same check ApplyPipeline runs, exposed so a caller can reject a preset
+// without applying it. The Pre half is never built here: it belongs to the
+// streamer, which does not exist yet at validation time.
+func ValidatePipeline(p dsp.Pipeline) error {
+	_, err := buildPost(p)
+
+	return err
+}
+
+// EffectSchema returns the parameter schema of the implementation automatic
+// selection would build for a kind, so a UI can render controls without
+// instantiating an effect. An unknown kind is an error, never an empty schema.
+func (s *Session) EffectSchema(kind string) ([]dsp.Param, error) {
+	return dsp.Default.Schema(kind)
+}
+
+// EffectKinds lists the registered effect kinds, sorted, so a UI can offer the
+// stages this build supports without hard-coding them.
+func (s *Session) EffectKinds() []string {
+	return dsp.Default.Kinds()
 }
 
 // validateDecoderName runs the caller's override when one is set, so a test can
@@ -442,13 +641,44 @@ func (s *Session) Settings() Settings {
 		Decoder:   decoder,
 		Backend:   backend,
 		ProbeMode: mode,
+		Pipeline:  s.runtime.Pipeline(),
 	}
 }
+
+// ApplyPipeline validates every post-ring stage before applying any of them,
+// matching SetSettings: a pipeline with an unknown kind or an unknown parameter
+// is rejected whole and leaves the chain in force untouched. Validation happens
+// on the caller's goroutine: building an effect is bounded and never touches
+// the device, just as validation of a decoder name never opens a file.
+//
+// The accepted effects are handed to the control loop, which publishes them with
+// an atomic swap. A successful call therefore means the pipeline is accepted,
+// not that the audio path has already switched to it; the PipelineChanged event
+// confirms the install.
+func (s *Session) ApplyPipeline(p dsp.Pipeline) error {
+	effects, err := buildPost(p)
+	if err != nil {
+		return err
+	}
+	s.installPipeline(effects, p)
+
+	return nil
+}
+
+// Pipeline returns the post-ring effect chain in force. The returned Pipeline
+// is a copy: mutating it cannot reach the engine, and ApplyPipeline must be used
+// to change anything.
+func (s *Session) Pipeline() dsp.Pipeline { return s.runtime.Pipeline() }
 
 // SetSettings validates every field before applying any of them, so a partial
 // update is impossible: either the whole set is accepted or nothing changes.
 // Validation runs here, on the caller's goroutine, so a bad value is reported
 // as an error instead of surfacing as a Failed event on the next track.
+//
+// Pipeline is validated as part of the same all-or-nothing rule. It differs
+// from the other fields in that it is applied by the control loop rather than
+// here, because installing a chain must not race a build; the whole set is
+// still rejected before anything is written.
 func (s *Session) SetSettings(next Settings) error {
 	if err := ValidateVolume(next.Volume); err != nil {
 		return err
@@ -463,13 +693,36 @@ func (s *Session) SetSettings(next Settings) error {
 		return err
 	}
 
+	// Build the effects before anything is written, so an unbuildable stage
+	// rejects the whole update. A nil Post half is an empty chain, which is a
+	// valid request: it clears the chain.
+	effects, err := buildPost(next.Pipeline)
+	if err != nil {
+		return err
+	}
+
 	// Everything is valid, so apply. Volume is the only one that takes effect
 	// immediately; decoder and probe mode are read per track, and backend is
 	// read when a device is built.
 	s.gain.SetVolume(next.Volume)
 	s.runtime.set(next.Decoder, next.Backend, next.ProbeMode)
+	s.installPipeline(effects, next.Pipeline)
 
 	return nil
+}
+
+// installPipeline records a validated pipeline and, when it actually changed,
+// hands its prebuilt effects to the control loop to publish. Building the
+// effects already happened on the caller's goroutine, so the control loop only
+// performs an atomic chain swap and never blocks on effect construction. An
+// identical pipeline is a no-op: the effects are discarded and nothing is
+// emitted, so a settings edit that leaves the chain alone cannot reset it.
+func (s *Session) installPipeline(effects []dsp.Effect, p dsp.Pipeline) {
+	changed, _ := s.runtime.setPipelineIfChanged(p)
+	if !changed {
+		return
+	}
+	s.enqueue(command{kind: cmdApplyPipeline, effects: effects})
 }
 
 // Settings is the mutable half of a Session's configuration: the values a
@@ -484,11 +737,18 @@ func (s *Session) SetSettings(next Settings) error {
 //   - Backend is read when a device is built. An already-open device keeps
 //     playing on the old backend, so the change lands on the next Play that
 //     has to build one.
+//   - Pipeline applies to the running audio as soon as the control loop
+//     accepts it, which PipelineChanged confirms. Only the Post half is used;
+//     Pre belongs to the streamer.
 type Settings struct {
 	Volume    float64
 	Decoder   string
 	Backend   string
 	ProbeMode core.DurationMode
+
+	// Pipeline is the post-ring effect chain. Zero is an empty chain, which is
+	// today's behaviour: only the master gain runs.
+	Pipeline dsp.Pipeline
 }
 
 // probeWithDefaultRegistry asks the process-wide decoder registry for a
@@ -517,6 +777,19 @@ func (s *Session) Snapshot() Snapshot {
 		pos = stream.FramesToDuration(live.Position())
 		stats = live.Stats()
 	}
+	// The chain delays what is heard behind what the streamer has read, so the
+	// reported position is the heard position. Nothing shipped adds latency
+	// today, and Chain.Latency is an atomic load plus a scan of a short list,
+	// so this stays cheap. The clamp is what keeps a chain whose latency
+	// exceeds the position at the start of a track from reporting a negative
+	// time.
+	if latency := s.chain.Latency(); latency > 0 {
+		if pos > latency {
+			pos -= latency
+		} else {
+			pos = 0
+		}
+	}
 
 	return Snapshot{
 		State:         v.state,
@@ -526,6 +799,7 @@ func (s *Session) Snapshot() Snapshot {
 		Duration:      v.duration,
 		Volume:        s.gain.Volume(),
 		Format:        canonical,
+		Backend:       s.runtime.backendName(),
 		QueueIndex:    v.queueIndex,
 		QueueLen:      v.queueLen,
 		Stats:         stats,
@@ -611,6 +885,32 @@ func (s *Session) Seek(d time.Duration) error {
 		return ErrNegativeSeek
 	}
 	s.enqueue(command{kind: cmdSeek, pos: d})
+
+	return nil
+}
+
+// SwapDecoder forces the named decoder for the current track, reopening it at
+// the position playback has reached. Empty means automatic selection. A bad
+// name is rejected synchronously and changes nothing; an engine failure
+// surfaces as a Failed event while the old decoder keeps playing.
+func (s *Session) SwapDecoder(name string) error {
+	if err := s.cfg.validate(name, ValidateDecoder); err != nil {
+		return err
+	}
+	s.enqueue(command{kind: cmdSwapDecoder, name: name})
+
+	return nil
+}
+
+// SwapBackend forces the named playback backend for the current device,
+// reopening it against the same stable provider. Empty means the default. An
+// unknown name is rejected synchronously; an engine failure surfaces as a
+// Failed event while the old device keeps playing.
+func (s *Session) SwapBackend(name string) error {
+	if err := ValidateBackend(name); err != nil {
+		return err
+	}
+	s.enqueue(command{kind: cmdSwapBackend, name: name})
 
 	return nil
 }
@@ -734,7 +1034,18 @@ func (s *Session) apply(c command) {
 		}
 	case cmdResume:
 		if s.state() == StatePaused && s.device != nil {
-			_ = s.device.Resume()
+			// A device installed by a paused backend swap was never started, so
+			// Resume has to Start it; on a device that is already playing this
+			// is the ordinary continue.
+			if s.deviceStarted {
+				_ = s.device.Resume()
+			} else if err := s.device.Start(); err != nil {
+				s.fail(err, true)
+
+				return
+			} else {
+				s.deviceStarted = true
+			}
 			s.setState(StatePlaying)
 		}
 	case cmdStop:
@@ -743,7 +1054,30 @@ func (s *Session) apply(c command) {
 		}
 	case cmdSeek:
 		s.requestSeek(c.pos)
+	case cmdSwapDecoder:
+		s.requestSwapDecoder(c.name)
+	case cmdSwapBackend:
+		s.requestSwapBackend(c.name)
+	case cmdApplyPipeline:
+		s.setChain(c.effects)
 	}
+}
+
+// setChain publishes a built effect list to the audio path. It is the control
+// loop's whole share of a pipeline change: Chain.Set is an atomic pointer store,
+// so installing a chain never builds anything here and never blocks. The audio
+// thread picks the new list up on its next buffer.
+func (s *Session) setChain(effects []dsp.Effect) {
+	s.chain.Set(effects)
+	s.emit(PipelineChanged{Stages: len(effects)})
+}
+
+// resetChain clears the effect state after the device has been parked, so a
+// discontinuity in the stream is not blended across by a stateful effect. The
+// caller must have parked the device first: Reset touches the same filter state
+// Process reads, and parking is what guarantees Process is not running.
+func (s *Session) resetChain() {
+	_ = s.chain.Reset()
 }
 
 // next advances the queue, or stops at the end. It is the command path; the
@@ -873,14 +1207,27 @@ func (s *Session) openTrack(seq uint64, index int, path string) {
 	}()
 }
 
-// build creates and starts a streamer over the path. The decoder's stream
-// info is captured here because only the decoder knows it. An opener that runs
-// after Close is refused, so shutdown cannot be extended by a new file open.
+// build creates and starts a streamer over the path, and builds the post-ring
+// effect chain that goes with it. The decoder's stream info is captured here
+// because only the decoder knows it. An opener that runs after Close is
+// refused, so shutdown cannot be extended by a new file open.
+//
+// The chain is built on this worker, not the control loop, because building an
+// effect can be arbitrarily expensive and the control loop must stay
+// responsive. The pipeline snapshot and its generation are captured before the
+// effects are built, so the loop can tell whether a change landed while this
+// ran and prefer the newer one.
 func (s *Session) build(seq uint64, index int, path string) openResult {
 	select {
 	case <-s.closing:
 		return openResult{seq: seq, index: index, path: path, err: ErrClosed}
 	default:
+	}
+
+	pipeline, gen := s.runtime.pipelineSnapshot()
+	effects, err := buildPost(pipeline)
+	if err != nil {
+		return openResult{seq: seq, index: index, path: path, err: err}
 	}
 
 	var info core.StreamInfo
@@ -917,7 +1264,8 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 
 	return openResult{
 		seq: seq, index: index, path: path,
-		streamer: st, info: info, decoder: decoderName, parser: parserName,
+		streamer: st, effects: effects, pipelineGen: gen,
+		info: info, decoder: decoderName, parser: parserName,
 	}
 }
 
@@ -969,6 +1317,14 @@ func (s *Session) activate(res openResult) {
 	}
 
 	s.live = res.streamer
+	// Install the effects the worker built for this track before the provider
+	// is pointed at the streamer, so the first buffer the device reads already
+	// has the chain. If a pipeline change landed while this build ran, its
+	// generation is newer and its chain is already in force; installing this
+	// older list would silently undo the change, so it is dropped.
+	if res.pipelineGen == s.runtime.pipelineGenNow() {
+		s.chain.Set(res.effects)
+	}
 	s.provider.setCurrent(res.streamer)
 	s.inFlight = true
 
@@ -1137,31 +1493,149 @@ func (s *Session) requestSeek(d time.Duration) {
 	// the pre-seek position, so it goes too.
 	s.park()
 
+	// The chain must not blend the tail before the jump into the audio after
+	// it. Reset is safe here, and only here: the device is parked, so no
+	// Process is running against the filter state Reset clears.
+	s.resetChain()
+
 	// Capture the origin once the device is parked, so the reported position is
 	// the frame the seek actually started from rather than a moving target.
+	frame := live.Position()
 	req := &seekRequest{
 		seq:    s.seq,
 		stream: live,
+		kind:   requestSeek,
 		target: d,
-		from:   stream.FramesToDuration(live.Position()),
+		frame:  frame,
+		from:   stream.FramesToDuration(frame),
 		resume: s.state() == StatePlaying,
 	}
 
+	s.submit(req)
+}
+
+// requestSwapDecoder accepts a live decoder change. With a streamer playing it
+// parks the device and queues a reopen at the current frame; with none it just
+// records the preference, so the next track uses it. The reopen runs on the
+// same single worker as a seek, so only one engine step ever touches a
+// streamer.
+func (s *Session) requestSwapDecoder(name string) {
+	live := s.live
+	if live == nil {
+		s.runtime.setDecoder(name)
+
+		return
+	}
+
+	s.park()
+	// A decoder swap reopens the stream at a frame, which is a discontinuity
+	// like a seek, so the chain state is cleared for the same reason: the
+	// device is parked, so nothing is in Process.
+	s.resetChain()
+	frame := live.Position()
+	req := &seekRequest{
+		seq:    s.seq,
+		stream: live,
+		kind:   requestSwapDecoder,
+		name:   name,
+		path:   s.trackPath(),
+		frame:  frame,
+		from:   stream.FramesToDuration(frame),
+		resume: s.state() == StatePlaying,
+	}
+
+	s.submit(req)
+}
+
+// requestSwapBackend accepts a live backend change. With no device open it just
+// records the preference for the next build; with one it parks the old device
+// and queues a rebuild on the worker, because opening an audio server is slow
+// and must not run on the control loop. Empty means the session's default
+// backend, resolved here so the runtime never stores a nameless backend that
+// the next Open would reject.
+func (s *Session) requestSwapBackend(name string) {
+	if name == "" {
+		name = s.cfg.Backend
+	}
+	if s.device == nil {
+		s.runtime.setBackend(name)
+
+		return
+	}
+
+	// Park first so the old device is not mid-read while it is replaced, and so
+	// the queued pre-swap audio goes with it.
+	s.park()
+
+	req := &seekRequest{
+		seq:  s.seq,
+		kind: requestSwapBackend,
+		name: name,
+	}
+
+	s.submit(req)
+}
+
+// submit queues a request, collapsing a burst to the newest one. The in-flight
+// worker is not disturbed; its completion starts the newest not-yet-started
+// request.
+func (s *Session) submit(req *seekRequest) {
 	if s.seekBusy {
-		// Latest-wins: overwrite the target that has not started yet. The
-		// in-flight worker is not disturbed; its completion starts this one.
 		s.seekPending = req
 
 		return
 	}
 
-	s.startSeek(req)
+	s.startRequest(req)
 }
 
-// startSeek hands one accepted request to a worker. At most one worker runs at
-// a time, so two repositions never share a streamer. The worker owns the
-// SeekFrame call and reports back on seekCh; it must not touch session state.
-func (s *Session) startSeek(req *seekRequest) {
+// trackPath returns the path of the current track, which a swap needs to reopen
+// it. The control goroutine owns the view, so reading it here is safe.
+func (s *Session) trackPath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.v.path
+}
+
+// openerLabels holds what a swapped decoder reports about itself. The opener
+// runs inside the producer goroutine, so these are read only after the streamer
+// has acknowledged the swap that used them.
+type openerLabels struct {
+	decoder string
+	parser  string
+}
+
+// decoderOpener builds an Opener for the named decoder plus the place its
+// labels land. It is a fresh opener per request, because the preference can
+// change between requests and the streamer must be free to rebuild with the
+// exact implementation that was asked for.
+func (s *Session) decoderOpener(name, path string) (stream.Opener, *openerLabels) {
+	labels := &openerLabels{}
+	open := func(<-chan struct{}) (decode.Decoder, error) {
+		select {
+		case <-s.closing:
+			return nil, ErrClosed
+		default:
+		}
+
+		d, err := s.cfg.openDecoder(name, path)
+		if err != nil {
+			return nil, err
+		}
+		labels.decoder, labels.parser = decode.Describe(d)
+
+		return d, nil
+	}
+
+	return open, labels
+}
+
+// startRequest hands one accepted request to a worker. At most one worker runs
+// at a time, so two engine steps never share a streamer or a device. The worker
+// owns the slow call and reports back on seekCh; it must not touch session
+// state.
+func (s *Session) startRequest(req *seekRequest) {
 	s.seekBusy = true
 	s.workerWG.Add(1)
 
@@ -1169,64 +1643,124 @@ func (s *Session) startSeek(req *seekRequest) {
 		defer s.workerWG.Done()
 
 		start := time.Now()
-		err := req.stream.SeekFrame(framesFor(req.target))
 		res := seekResult{
-			seq:     req.seq,
-			stream:  req.stream,
-			target:  req.target,
-			from:    req.from,
-			resume:  req.resume,
-			elapsed: time.Since(start),
-			err:     err,
+			seq:    req.seq,
+			stream: req.stream,
+			kind:   req.kind,
+			name:   req.name,
+			target: req.target,
+			from:   req.from,
+			resume: req.resume,
 		}
+
+		switch req.kind {
+		case requestSwapBackend:
+			res.device, res.err = s.buildDevice(req.name)
+		case requestSwapDecoder:
+			open, labels := s.decoderOpener(req.name, req.path)
+			res.err = req.stream.SwapDecoder(req.frame, open)
+			if res.err == nil {
+				res.decoder, res.parser = labels.decoder, labels.parser
+			}
+		default:
+			res.err = req.stream.SeekFrame(framesFor(req.target))
+		}
+		res.elapsed = time.Since(start)
+
 		select {
 		case s.seekCh <- res:
 		case <-s.closing:
+			// Shutdown is already tearing down; a device this worker built has
+			// no owner to close it, so it does here. The control loop drains
+			// whatever made it into the channel.
+			if res.device != nil {
+				_ = res.device.Close()
+			}
 		}
 	}()
 }
 
-// startPendingSeek launches the newest not-yet-started target, if any, and
-// reports whether it did. A pending request for a track that has since moved
-// on is stale and dropped.
-func (s *Session) startPendingSeek() bool {
+// buildDevice constructs and opens a device for the named backend against the
+// session's stable provider. A failure closes the half-built device so a failed
+// swap leaks nothing.
+func (s *Session) buildDevice(name string) (playback.Device, error) {
+	dev, err := s.cfg.newDevice(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := dev.Open(canonical, s.provider); err != nil {
+		_ = dev.Close()
+
+		return nil, err
+	}
+
+	return dev, nil
+}
+
+// startPendingRequest launches the newest not-yet-started request, if any, and
+// reports whether it did. A pending request for a track that has since moved on
+// is stale and dropped.
+func (s *Session) startPendingRequest() bool {
 	req := s.seekPending
 	s.seekPending = nil
-	if req == nil {
+	if !s.requestCurrent(req) {
 		return false
 	}
-	if req.stream != s.live || req.seq != s.seq {
-		return false
-	}
-	s.startSeek(req)
+	s.startRequest(req)
 
 	return true
 }
 
-// handleSeek applies a finished reposition. A result whose track is no longer
+// requestCurrent reports whether a queued request still belongs to the live
+// track. A backend swap is about the device, which outlives a track, so it only
+// needs the session generation; a seek or decoder swap is bound to its streamer
+// and must also still be the live one.
+func (s *Session) requestCurrent(req *seekRequest) bool {
+	if req == nil {
+		return false
+	}
+	if req.kind == requestSwapBackend {
+		return req.seq == s.seq
+	}
+
+	return req.stream == s.live && req.seq == s.seq
+}
+
+// handleSeek applies a finished engine step. A result whose track is no longer
 // live is stale and ignored whole: it must not move the new track or resume a
-// device the user asked to leave alone. The device is resumed only when the
-// seek intended it and the session is still playing.
+// device the user asked to leave alone.
 func (s *Session) handleSeek(res seekResult) {
 	s.seekBusy = false
 
+	switch res.kind {
+	case requestSwapBackend:
+		s.handleBackendSwap(res)
+	case requestSwapDecoder:
+		s.handleDecoderSwap(res)
+	default:
+		s.handleReposition(res)
+	}
+}
+
+// handleReposition applies a finished seek. The device is resumed only when the
+// seek intended it and the session is still playing.
+func (s *Session) handleReposition(res seekResult) {
 	if res.stream != s.live || res.seq != s.seq {
-		s.startPendingSeek()
+		s.startPendingRequest()
 
 		return
 	}
 
 	if res.err != nil {
 		s.emit(Failed{Err: res.err})
-		s.startPendingSeek()
+		s.startPendingRequest()
 
 		return
 	}
 
 	// A newer target replaced this one, so stay parked until it lands: a resumed
 	// device would be handed a half-flushed ring by the next reposition.
-	pending := s.startPendingSeek()
-	if pending {
+	if s.startPendingRequest() {
 		// This result was superseded before anyone could act on it, so it is an
 		// internal step rather than an observable seek: emitting Seeked here
 		// would tell a consumer "the position is now X" when the target has
@@ -1239,6 +1773,114 @@ func (s *Session) handleSeek(res seekResult) {
 	}
 
 	s.emit(Seeked{Position: res.target, From: res.from, Elapsed: res.elapsed})
+}
+
+// handleDecoderSwap applies a finished live decoder change. On success it
+// records the preference and the new labels and emits Swapped; on failure it
+// reports Failed and resumes the old decoder, which the streamer already
+// restored at the swap position.
+func (s *Session) handleDecoderSwap(res seekResult) {
+	if res.stream != s.live || res.seq != s.seq {
+		s.startPendingRequest()
+
+		return
+	}
+
+	if res.err != nil {
+		s.emit(Failed{Err: res.err})
+		if s.startPendingRequest() {
+			// A newer swap replaced this one; stay parked until it lands.
+			return
+		}
+		if res.resume && s.state() == StatePlaying && s.device != nil {
+			_ = s.device.Resume()
+		}
+
+		return
+	}
+
+	// The decoder really is the new one now, so the labels must say so even
+	// when a newer swap supersedes this result: if that swap later fails, the
+	// streamer restores this decoder and the snapshot has to match it.
+	s.runtime.setDecoder(res.name)
+	s.updateView(func(v *view) {
+		v.decoder = res.decoder
+		v.parser = res.parser
+	})
+
+	if s.startPendingRequest() {
+		// This swap was superseded before it could be reported. It still
+		// happened, which is why the labels above were updated, but emitting
+		// Swapped here would name a decoder that is about to be replaced.
+		return
+	}
+
+	if res.resume && s.state() == StatePlaying && s.device != nil {
+		_ = s.device.Resume()
+	}
+
+	s.emit(Swapped{Kind: "decoder", Name: res.name, Elapsed: res.elapsed})
+}
+
+// handleBackendSwap installs a finished device rebuild. The old device is
+// closed only after the new one opened, so the silent gap stays as short as
+// possible. A device that started successfully keeps deviceStarted true; one
+// installed while paused is left unstarted, so a later Resume starts it
+// instead of asking an unstarted device to continue.
+func (s *Session) handleBackendSwap(res seekResult) {
+	if res.seq != s.seq {
+		if res.device != nil {
+			_ = res.device.Close()
+		}
+		s.startPendingRequest()
+
+		return
+	}
+
+	if res.err != nil {
+		s.emit(Failed{Err: res.err})
+		if s.startPendingRequest() {
+			// A newer swap replaced this one; stay parked until it lands.
+			return
+		}
+		if s.state() == StatePlaying && s.device != nil {
+			_ = s.device.Resume()
+		}
+
+		return
+	}
+
+	old := s.device
+	s.device = res.device
+	if old != nil {
+		_ = old.Close()
+	}
+
+	// Follow the live state, not the state captured at request time: the user
+	// may have paused or resumed while the swap was building. A new device must
+	// be Started when the session is playing, and left unstarted when paused so
+	// a later Resume starts it rather than asking it to continue.
+	if s.state() == StatePlaying {
+		if err := res.device.Start(); err != nil {
+			s.startPendingRequest()
+			s.fail(err, true)
+
+			return
+		}
+		s.deviceStarted = true
+	} else {
+		s.deviceStarted = false
+	}
+
+	s.runtime.setBackend(res.name)
+
+	if s.startPendingRequest() {
+		// A newer swap is already building, so this one is an internal step:
+		// emitting Swapped would name a backend about to be replaced.
+		return
+	}
+
+	s.emit(Swapped{Kind: "backend", Name: res.name, Elapsed: res.elapsed})
 }
 
 // shutdown is the single teardown path. It runs on the control goroutine, so
@@ -1259,6 +1901,13 @@ func (s *Session) shutdown() {
 		case res := <-s.openCh:
 			if res.streamer != nil {
 				_ = res.streamer.Close()
+			}
+		case res := <-s.seekCh:
+			// A finished backend swap may have delivered a device the control
+			// loop never got to install. Closing it here is what keeps Close
+			// from leaking an audio server handle.
+			if res.device != nil {
+				_ = res.device.Close()
 			}
 		default:
 			s.events.close()

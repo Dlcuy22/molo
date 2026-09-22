@@ -234,7 +234,7 @@ func TestSetSettingsIsAtomicAcrossFields(t *testing.T) {
 	}
 
 	after := s.Settings()
-	if after != before {
+	if !settingsEqual(after, before) {
 		t.Fatalf("a rejected update changed state: before %+v, after %+v", before, after)
 	}
 }
@@ -251,7 +251,7 @@ func TestSetSettingsValidAppliesEverything(t *testing.T) {
 	if err := s.SetSettings(next); err != nil {
 		t.Fatalf("SetSettings: %v", err)
 	}
-	if got := s.Settings(); got != next {
+	if got := s.Settings(); !settingsEqual(got, next) {
 		t.Fatalf("Settings() = %+v, want %+v", got, next)
 	}
 	// Volume is the one field that applies immediately.
@@ -288,7 +288,7 @@ func TestSetSettingsValidationCoversEachField(t *testing.T) {
 			if err := s.SetSettings(next); !errors.Is(err, tt.want) {
 				t.Fatalf("SetSettings error = %v, want %v", err, tt.want)
 			}
-			if got := s.Settings(); got != base {
+			if got := s.Settings(); !settingsEqual(got, base) {
 				t.Fatalf("rejected update changed state: %+v", got)
 			}
 		})

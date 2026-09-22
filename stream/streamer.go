@@ -116,6 +116,12 @@ type Streamer struct {
 	seekSeq     uint64
 	seekApplied uint64
 	seekErr     error
+	// A swap request carries its opener through the same gated slot as a seek
+	// target, because only the producer may replace s.dec/s.open. The fields
+	// are read together with seekSeq, so a newer request always overwrites
+	// them whole.
+	seekOpen Opener
+	seekSwap bool
 
 	eos    bool
 	eosErr error
@@ -379,8 +385,31 @@ func (s *Streamer) finishRead(n, want int, eos bool, err error) (int, error) {
 // has run: the ring is flushed, the decoder is repositioned, position is reset
 // and the ring is refilled. Concurrent seeks collapse to the latest target.
 func (s *Streamer) SeekFrame(frame int64) error {
-	if frame < 0 {
-		return fmt.Errorf("%w: negative target %d", ErrSeekRange, frame)
+	return s.requestPosition(frame, nil, false)
+}
+
+// SwapDecoder reopens the stream with a different opener, repositions to
+// target, resets the pre-modules and refills. Same gate and latest-wins
+// discipline as SeekFrame.
+//
+// A swap always builds a new decoder: it never reuses the current one's native
+// seek, because that would keep the implementation being replaced. The opener
+// is handed through the gated slot rather than written to s.open here, since
+// the producer goroutine is the only one that may replace the decoder.
+func (s *Streamer) SwapDecoder(target int64, open Opener) error {
+	if open == nil {
+		return errors.New("stream: SwapDecoder requires an opener")
+	}
+
+	return s.requestPosition(target, open, true)
+}
+
+// requestPosition is the shared gate for SeekFrame and SwapDecoder. carrying an
+// optional opener and a swap flag through the same sequence is what serialises
+// the two: at most one reposition runs at a time, and the newest request wins.
+func (s *Streamer) requestPosition(target int64, open Opener, swap bool) error {
+	if target < 0 {
+		return fmt.Errorf("%w: negative target %d", ErrSeekRange, target)
 	}
 
 	s.startMu.Lock()
@@ -404,7 +433,9 @@ func (s *Streamer) SeekFrame(frame int64) error {
 
 	s.seekSeq++
 	seq := s.seekSeq
-	s.seekTarget = frame
+	s.seekTarget = target
+	s.seekOpen = open
+	s.seekSwap = swap
 	s.gate.cond.Broadcast()
 
 	for s.seekApplied < seq && !s.gate.closed && !s.finished.Load() {
@@ -533,9 +564,9 @@ func (s *Streamer) refillReady() bool {
 	return s.seekApplied < s.seekSeq || s.ring.Len() <= s.low
 }
 
-// applyPendingSeek runs the latest requested seek, if any. A newer request that
-// arrives while one is running simply overwrites the target; callers older than
-// the applied request are released once it lands.
+// applyPendingSeek runs the latest requested seek or swap, if any. A newer
+// request that arrives while one is running simply overwrites the target (and
+// opener); callers older than the applied request are released once it lands.
 func (s *Streamer) applyPendingSeek() bool {
 	s.gate.mu.Lock()
 	if s.seekApplied >= s.seekSeq {
@@ -544,10 +575,12 @@ func (s *Streamer) applyPendingSeek() bool {
 		return false
 	}
 	target := s.seekTarget
+	open := s.seekOpen
+	swap := s.seekSwap
 	seq := s.seekSeq
 	s.gate.mu.Unlock()
 
-	err := s.doSeek(target)
+	err := s.doSeek(target, open, swap)
 
 	s.gate.mu.Lock()
 	s.seekApplied = seq
@@ -558,28 +591,60 @@ func (s *Streamer) applyPendingSeek() bool {
 	return true
 }
 
-// doSeek is the gated seek sequence. Flushing first means no consumer can be
-// handed a pre-seek frame once the seek is under way; the refill at the end
-// means a consumer that wakes up after it finds data, not an empty ring.
-func (s *Streamer) doSeek(target int64) error {
+// doSeek is the gated seek/swap sequence. Flushing first means no consumer can
+// be handed a pre-seek frame once the operation is under way; the refill at the
+// end means a consumer that wakes up after it finds data, not an empty ring.
+func (s *Streamer) doSeek(target int64, open Opener, swap bool) error {
 	s.gate.mu.Lock()
 	s.ring.Reset()
 	s.pending = s.pending[:0]
 	s.gate.mu.Unlock()
 
-	if err := s.reposition(target); err != nil {
-		// A decoder that failed to reposition may be left at an unknown frame,
-		// so the stream cannot continue honestly. A shutdown that interrupted
-		// the seek is not a decode failure, so it does not close Done.
-		if !s.gateClosed() {
-			s.finish(err)
+	if !swap {
+		if err := s.reposition(target); err != nil {
+			// A decoder that failed to reposition may be left at an unknown
+			// frame, so the stream cannot continue honestly. A shutdown that
+			// interrupted the seek is not a decode failure, so it does not
+			// close Done.
+			if !s.gateClosed() {
+				s.finish(err)
+			}
+
+			return err
+		}
+
+		return s.complete(target)
+	}
+
+	// Capture the position and the opener before anything is replaced: both are
+	// what the fallback restores if the new implementation cannot take over.
+	prev, prevOpen := s.Position(), s.open
+	if err := s.repositionWith(target, open); err != nil {
+		// A failed swap must not leave the stream without a working decoder.
+		// Put the previous implementation back at the position the swap started
+		// from so the track keeps playing on it, then report the error.
+		if rerr := s.repositionWith(prev, prevOpen); rerr != nil {
+			joined := errors.Join(err, rerr)
+			if !s.gateClosed() {
+				s.finish(joined)
+			}
+
+			return joined
+		}
+		if rerr := s.complete(prev); rerr != nil {
+			return errors.Join(err, rerr)
 		}
 
 		return err
 	}
 
-	// Pre-modules that carry filter state must not blend across the jump; the
-	// decoder now sits at target, so they restart from a clean state.
+	return s.complete(target)
+}
+
+// complete finishes a reposition that landed at target: reset the pre-modules,
+// publish the new position and refill the ring. Pre-modules that carry filter
+// state must not blend across the jump, so they restart from a clean state.
+func (s *Streamer) complete(target int64) error {
 	for _, m := range s.mods {
 		if err := m.Reset(); err != nil {
 			return fmt.Errorf("stream: module %s reset after seek: %w", m.Name(), err)
@@ -600,22 +665,66 @@ func (s *Streamer) reposition(target int64) error {
 		return seeker.SeekFrame(target)
 	}
 
-	return s.reopenAndDiscard(target)
+	return s.reopenAndDiscard(target, s.open)
+}
+
+// repositionWith always reopens, even for a decoder with a native seek: a swap
+// is replacing the implementation, so reusing the old one's reposition would
+// defeat it. The opener is explicit because the restore path passes the one
+// being restored rather than the current s.open.
+func (s *Streamer) repositionWith(target int64, open Opener) error {
+	if err := s.reopenWith(open); err != nil {
+		return err
+	}
+	if seeker, ok := s.dec.(decode.Seeker); ok {
+		return seeker.SeekFrame(target)
+	}
+
+	return s.discardTo(target)
+}
+
+// reopenWith closes the current decoder and opens a new one, recording the
+// opener on success. A decoder whose format does not match the stream's input
+// is refused: the ring and the pre-module chain were configured for one layout,
+// so a different rate or channel count could not be carried. A failed open
+// leaves s.open untouched, so the caller still knows which opener to restore.
+func (s *Streamer) reopenWith(open Opener) error {
+	s.dec.Close()
+	// A terminal error delivered alongside a short read belongs to the decoder
+	// being replaced; carrying it over would make the new one report the old
+	// one's end immediately.
+	s.readErr = nil
+
+	dec, err := open(s.stopDec)
+	if err != nil {
+		return err
+	}
+	if got := dec.Info().Format; !got.Equal(s.formats[0]) {
+		dec.Close()
+
+		return fmt.Errorf("stream: decoder reports %+v, the stream takes %+v", got, s.formats[0])
+	}
+	s.dec = dec
+	s.open = open
+
+	return nil
 }
 
 // reopenAndDiscard is the fallback for decoders without native seek. It reopens
 // the source at frame zero and decodes forward until the target is reached,
 // keeping any frames past the target so the refill does not decode them twice.
 // The result is the same PCM a straight decode would produce from that frame.
-func (s *Streamer) reopenAndDiscard(target int64) error {
-	s.dec.Close()
-
-	dec, err := s.open(s.stopDec)
-	if err != nil {
+func (s *Streamer) reopenAndDiscard(target int64, open Opener) error {
+	if err := s.reopenWith(open); err != nil {
 		return err
 	}
-	s.dec = dec
 
+	return s.discardTo(target)
+}
+
+// discardTo decodes forward from the current decoder's start until target,
+// retaining the frames that cross it.
+func (s *Streamer) discardTo(target int64) error {
 	var discarded int64
 	for discarded < target {
 		n, err := s.decodeChunk()

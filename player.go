@@ -13,6 +13,7 @@ import (
 
 	"github.com/dlcuy22/player/core"
 	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/player/dsp"
 	"github.com/dlcuy22/player/internal/session"
 	"github.com/dlcuy22/player/meta"
 )
@@ -49,6 +50,14 @@ type TrackChanged = session.TrackChanged
 // Seeked confirms a seek after it has been applied.
 type Seeked = session.Seeked
 
+// Swapped confirms a live decoder or backend change on the current track.
+// Kind is "decoder" or "backend".
+type Swapped = session.Swapped
+
+// PipelineChanged confirms that a new post-ring effect chain is in force.
+// Stages is how many effects the chain runs after the change.
+type PipelineChanged = session.PipelineChanged
+
 // TrackEnded is emitted once per track when it reaches its natural end.
 type TrackEnded = session.TrackEnded
 
@@ -71,6 +80,12 @@ type Tap = session.Tap
 //   - Backend is read when a device is built. An open device cannot be
 //     re-bound, so a backend change lands on the next Play that has to build
 //     one.
+//   - Pipeline is applied to the running audio as soon as the engine accepts
+//     it, confirmed by a PipelineChanged event. Only its Post half is used;
+//     Pre belongs to the streamer.
+//
+// Changing Decoder or Backend here is for the next build; to change what is
+// playing now, call SwapDecoder or SwapBackend.
 type Settings = session.Settings
 
 // ErrInvalidSetting reports a rejected Settings update. It wraps a
@@ -111,12 +126,37 @@ type Player interface {
 	Seek(d time.Duration) error
 	SetVolume(v float64)
 
+	// SwapDecoder forces the named decoder for the current track, reopening it
+	// at the position playback has reached. Empty means automatic selection. A
+	// bad name is rejected synchronously and changes nothing. With no live
+	// track it just sets the preference the next track uses.
+	SwapDecoder(name string) error
+	// SwapBackend forces the named playback backend for the current device,
+	// reopening the device against the same provider without touching the
+	// stream. Empty means the default. An unknown name is rejected
+	// synchronously. With no open device it just sets the preference the next
+	// device uses.
+	SwapBackend(name string) error
+
 	// Settings reads the mutable configuration in effect.
 	Settings() Settings
 	// ApplySettings validates every field before applying any of them: a
 	// rejected update changes nothing, so a UI can report the error without
 	// worrying about partial state. It never blocks on disk or the device.
 	ApplySettings(s Settings) error
+
+	// Pipeline returns the effect chain in effect.
+	Pipeline() dsp.Pipeline
+	// ApplyPipeline validates every stage before applying any of them,
+	// matching ApplySettings: a rejected update changes nothing. The accepted
+	// chain is handed to the engine, which confirms it with PipelineChanged.
+	ApplyPipeline(p dsp.Pipeline) error
+	// EffectSchema returns the parameter schema for an effect kind, so a UI
+	// can render controls without building the effect. It returns an error for
+	// an unknown kind.
+	EffectSchema(kind string) ([]dsp.Param, error)
+	// EffectKinds lists the registered effect kinds, sorted.
+	EffectKinds() []string
 
 	// Tap returns the visualizer feed. The feed starts publishing on the first
 	// Read, so holding a Tap without reading it costs the audio path nothing.
@@ -172,6 +212,14 @@ func WithDecoder(name string) Option {
 	return func(c *session.Config) { c.Decoder = name }
 }
 
+// WithPipeline sets the initial post-ring effect chain. Only the Post half is
+// used; the Pre half belongs to the streamer. Each stage is validated when the
+// player is built, so a bad stage fails New rather than becoming a Failed event
+// on the first Play. ApplyPipeline can change the chain while the player runs.
+func WithPipeline(p dsp.Pipeline) Option {
+	return func(c *session.Config) { c.Pipeline = p }
+}
+
 // player is the facade implementation. It adds nothing to the session: its
 // whole job is to keep internal/session out of a UI's import graph.
 type player struct {
@@ -209,8 +257,14 @@ func (p *player) Resume() error              { return p.session.Resume() }
 func (p *player) Stop() error                { return p.session.Stop() }
 func (p *player) Seek(d time.Duration) error { return p.session.Seek(d) }
 func (p *player) SetVolume(v float64)        { p.session.SetVolume(v) }
-func (p *player) Tap() Tap                   { return p.session.Tap() }
-func (p *player) Settings() Settings         { return p.session.Settings() }
+func (p *player) SwapDecoder(name string) error {
+	return p.session.SwapDecoder(name)
+}
+func (p *player) SwapBackend(name string) error {
+	return p.session.SwapBackend(name)
+}
+func (p *player) Tap() Tap           { return p.session.Tap() }
+func (p *player) Settings() Settings { return p.session.Settings() }
 
 // ApplySettings validates on the caller's goroutine and never touches the
 // control loop, so a bad value is an immediate error rather than a Failed
@@ -223,4 +277,25 @@ func (p *player) ApplySettings(s Settings) error {
 
 	return nil
 }
+
+// Pipeline returns the post-ring effect chain in effect.
+func (p *player) Pipeline() dsp.Pipeline { return p.session.Pipeline() }
+
+// ApplyPipeline validates on the caller's goroutine and, when the pipeline is
+// accepted, queues its install. A bad stage is an immediate error rather than a
+// Failed event, and nothing changes. The engine confirms the install with a
+// PipelineChanged event.
+func (p *player) ApplyPipeline(next dsp.Pipeline) error {
+	return p.session.ApplyPipeline(next)
+}
+
+// EffectSchema returns the parameter schema for an effect kind. It reads the
+// registry, so it works before anything is built; an unknown kind is an error.
+func (p *player) EffectSchema(kind string) ([]dsp.Param, error) {
+	return p.session.EffectSchema(kind)
+}
+
+// EffectKinds lists the registered effect kinds, sorted.
+func (p *player) EffectKinds() []string { return p.session.EffectKinds() }
+
 func (p *player) Close() error { return p.session.Close() }

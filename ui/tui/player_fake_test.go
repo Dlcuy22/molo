@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/player/dsp"
 	"github.com/dlcuy22/player/meta"
 )
 
@@ -200,6 +201,24 @@ func (f *fakePlayer) SetVolume(v float64) {
 
 func (f *fakePlayer) Tap() player.Tap { return f.tap }
 
+func (f *fakePlayer) SwapDecoder(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("SwapDecoder")
+	f.settings.Decoder = name
+
+	return nil
+}
+
+func (f *fakePlayer) SwapBackend(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("SwapBackend")
+	f.settings.Backend = name
+
+	return nil
+}
+
 func (f *fakePlayer) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -277,5 +296,30 @@ func (f *fakePlayer) ApplySettings(s player.Settings) error {
 
 	return nil
 }
+
+// Pipeline, ApplyPipeline, EffectSchema and EffectKinds satisfy the facade's
+// effect surface. The model does not drive them yet, so they keep just enough
+// state for a test that checks the fake stays a valid Player.
+func (f *fakePlayer) Pipeline() dsp.Pipeline {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.settings.Pipeline
+}
+
+func (f *fakePlayer) ApplyPipeline(p dsp.Pipeline) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ApplyPipeline")
+	f.settings.Pipeline = p
+
+	return nil
+}
+
+func (f *fakePlayer) EffectSchema(kind string) ([]dsp.Param, error) {
+	return dsp.Default.Schema(kind)
+}
+
+func (f *fakePlayer) EffectKinds() []string { return dsp.Default.Kinds() }
 
 var _ player.Player = (*fakePlayer)(nil)

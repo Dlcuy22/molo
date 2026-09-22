@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -429,6 +430,17 @@ func testConfig() Config {
 		Volume:      1,
 		Resolver:    meta.Default(),
 	}
+}
+
+// settingsEqual compares two Settings. Settings carries a Pipeline, whose stage
+// slices make the struct non-comparable, so a field-by-field comparison is the
+// only way to tell whether a rejected update really changed nothing.
+func settingsEqual(a, b Settings) bool {
+	return a.Volume == b.Volume &&
+		a.Decoder == b.Decoder &&
+		a.Backend == b.Backend &&
+		a.ProbeMode == b.ProbeMode &&
+		reflect.DeepEqual(a.Pipeline, b.Pipeline)
 }
 
 // newSession starts a session and closes it when the test ends.

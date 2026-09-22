@@ -39,17 +39,36 @@ type Seeked struct {
 // TrackEnded is emitted once per track when it reaches its natural end.
 type TrackEnded struct{}
 
+// Swapped confirms a live component change: the decoder or playback backend of
+// the current track was rebuilt. Kind is "decoder" or "backend", Name is the
+// forced component name (empty for automatic selection), and Elapsed is how
+// long the rebuild took.
+type Swapped struct {
+	Kind    string
+	Name    string
+	Elapsed time.Duration
+}
+
+// PipelineChanged confirms that a new post-ring effect chain is in force.
+// Stages is how many effects the chain runs after the change, so a UI can tell
+// an effect being added from the chain being cleared.
+type PipelineChanged struct {
+	Stages int
+}
+
 // Failed reports a decode or device error that stopped playback. The session
 // is still usable afterwards: the next Play creates a fresh pipeline.
 type Failed struct {
 	Err error
 }
 
-func (StateChanged) isEvent() {}
-func (TrackChanged) isEvent() {}
-func (Seeked) isEvent()       {}
-func (TrackEnded) isEvent()   {}
-func (Failed) isEvent()       {}
+func (StateChanged) isEvent()    {}
+func (TrackChanged) isEvent()    {}
+func (Seeked) isEvent()          {}
+func (TrackEnded) isEvent()      {}
+func (Swapped) isEvent()         {}
+func (PipelineChanged) isEvent() {}
+func (Failed) isEvent()          {}
 
 // eventQueue is a non-blocking event sink. It is a channel plus a drop-oldest
 // policy: a push never waits for a consumer, and when the buffer is full the
@@ -153,6 +172,11 @@ type Snapshot struct {
 	// debug view. Empty when the decoder does not describe itself.
 	Decoder string
 	Parser  string
+
+	// Backend names the playback backend the device was opened against. It is
+	// the runtime preference, which a SwapBackend can change while a track
+	// plays, so it matches Settings().Backend once the swap lands.
+	Backend string
 
 	// DroppedEvents counts events discarded because the consumer fell behind.
 	DroppedEvents int64
