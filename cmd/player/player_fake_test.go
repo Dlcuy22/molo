@@ -151,6 +151,14 @@ func (f *fakePlayer) Next() error {
 	return nil
 }
 
+func (f *fakePlayer) PlayIndex(index int) error {
+	f.mu.Lock()
+	f.record("PlayIndex")
+	f.mu.Unlock()
+
+	return nil
+}
+
 func (f *fakePlayer) Prev() error {
 	f.mu.Lock()
 	f.record("Prev")

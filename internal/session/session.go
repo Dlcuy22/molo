@@ -35,6 +35,9 @@ var (
 	ErrEmptyQueue = errors.New("session: queue is empty")
 	// ErrEmptyPath means Play was handed an empty path.
 	ErrEmptyPath = errors.New("session: path is empty")
+	// ErrIndexOutOfRange means PlayIndex named a queue position that does not
+	// exist.
+	ErrIndexOutOfRange = errors.New("session: queue index out of range")
 	// ErrNegativeSeek means a seek target was negative.
 	ErrNegativeSeek = errors.New("session: seek target is negative")
 	// ErrNoProber means the registry has no duration probe for the path. The
@@ -313,6 +316,11 @@ type command struct {
 	name  string
 	pos   time.Duration
 
+	// index is the queue position a cmdPlayIndex jumps to. It is a plain int
+	// rather than a replayed path list so the jump reuses the queue the
+	// controller already holds, the way Next and Prev do.
+	index int
+
 	// effects is a pre-built, configured post-ring chain an ApplyPipeline or
 	// SetSettings accepted. It was built on the caller's goroutine, so the
 	// control loop only has to publish it with an atomic swap.
@@ -324,6 +332,7 @@ type cmdKind uint8
 const (
 	cmdPlay cmdKind = iota
 	cmdPlayQueue
+	cmdPlayIndex
 	cmdNext
 	cmdPrev
 	cmdPause
@@ -834,6 +843,23 @@ func (s *Session) PlayQueue(paths []string) error {
 	return nil
 }
 
+// PlayIndex starts the queue entry at index without replacing the queue, which
+// is what a click on a row in a track list means: jump there, keep the rest.
+// The bound is checked here so an out-of-range jump is an immediate error
+// rather than a silent no-op, and the control loop re-checks it because the
+// queue can change between the two.
+func (s *Session) PlayIndex(index int) error {
+	s.mu.Lock()
+	out := index < 0 || index >= len(s.queue)
+	s.mu.Unlock()
+	if out {
+		return fmt.Errorf("%w: %d", ErrIndexOutOfRange, index)
+	}
+	s.enqueue(command{kind: cmdPlayIndex, index: index})
+
+	return nil
+}
+
 // Next advances within the queue. Past the last track it stops.
 func (s *Session) Next() error {
 	s.enqueue(command{kind: cmdNext})
@@ -1023,6 +1049,13 @@ func (s *Session) apply(c command) {
 	case cmdPlayQueue:
 		s.setQueue(c.paths)
 		s.startIndex(0)
+	case cmdPlayIndex:
+		// Re-check the range here: the queue is the control loop's, and a
+		// PlayQueue processed since the synchronous check may have replaced it
+		// with a shorter one.
+		if c.index >= 0 && c.index < len(s.queue) {
+			s.startIndex(c.index)
+		}
 	case cmdNext:
 		s.next()
 	case cmdPrev:

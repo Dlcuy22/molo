@@ -2,43 +2,39 @@ package main
 
 import (
 	"embed"
-
-	"log"
-	"time"
+	"log/slog"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
-
-// Wails uses Go's `embed` package to embed the frontend files into the binary.
-// Any files in the frontend/dist folder will be embedded into the binary and
-// made available to the frontend.
-// See https://pkg.go.dev/embed for more information.
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
-func init() {
-	// Register a custom event whose associated data type is string.
-	// This is not required, but the binding generator will pick up registered events
-	// and provide a strongly typed JS/TS API for them.
-	application.RegisterEvent[string]("time")
-}
+// Application identity. These are the values a packaged build shows in the
+// window title, the about box and the dock, so they name the product rather
+// than the framework.
+const (
+	appName        = "Player"
+	appDescription = "A desktop audio player for the files on this machine"
+)
 
-// main function serves as the application's entry point. It initializes the application, creates a window,
-// and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
-// logs any error that might occur.
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
-	// Create a new Wails application by providing the necessary options.
-	// Variables 'Name' and 'Description' are for application metadata.
-	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
-	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
-	// 'Mac' options tailor the application when running an macOS.
+	// Registering the payload types is what gives the frontend a typed event
+	// envelope; an unregistered name still travels, but untyped.
+	application.RegisterEvent[Snapshot](eventSnapshot)
+	application.RegisterEvent[[]float64](eventFrame)
+
+	service := newPlayerService()
+
 	app := application.New(application.Options{
-		Name:        "player-webui",
-		Description: "A demo of using raw HTML & CSS",
+		Name:        appName,
+		Description: appDescription,
 		Services: []application.Service{
-			application.NewService(&GreetService{}),
+			application.NewService(service),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -46,42 +42,41 @@ func main() {
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
-	})
-
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
-		// Window sized to the golden ratio (1000 / 618 ≈ 1.618).
-		Width:  1000,
-		Height: 618,
-		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
+		Server: application.ServerOptions{
+			Host: "127.0.0.1",
+			Port: 18080,
 		},
-		BackgroundColour: application.NewRGB(6, 7, 15),
-		URL:              "/",
 	})
 
-	// Create a goroutine that emits an event containing the current time every second.
-	// The frontend can listen to this event and update the UI accordingly.
-	go func() {
-		for {
-			now := time.Now().Format(time.RFC1123)
-			app.Event.Emit("time", now)
-			time.Sleep(time.Second)
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            appName,
+		Width:            1180,
+		Height:           720,
+		MinWidth:         820,
+		MinHeight:        560,
+		BackgroundColour: application.NewRGB(0x1d, 0x1d, 0x20),
+		// Files dropped on the window are the other half of "add tracks": a
+		// listener folds them into the queue through the same service call the
+		// picker uses.
+		EnableFileDrop: true,
+		URL:            "/",
+	})
+
+	// The drop arrives as a window event, not a bound method, so it is wired
+	// here where the window exists. The files are handed to the service rather
+	// than loaded here, keeping all queue logic in one place.
+	window.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		files := e.Context().DroppedFiles()
+		if len(files) == 0 {
+			return
 		}
-	}()
+		if err := service.LoadPaths(files); err != nil {
+			slog.Error("load dropped files", "error", err)
+		}
+	})
 
-	// Run the application. This blocks until the application has been exited.
-	err := app.Run()
-
-	// If an error occurred while running the application, log it and exit.
-	if err != nil {
-		log.Fatal(err)
+	if err := app.Run(); err != nil {
+		slog.Error("application exited", "error", err)
+		os.Exit(1)
 	}
 }

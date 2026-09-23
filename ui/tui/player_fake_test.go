@@ -112,6 +112,23 @@ func (f *fakePlayer) Next() error {
 	return nil
 }
 
+// PlayIndex jumps within the fake's queue, recording the call so a test can
+// assert a row click reached the engine as a jump rather than a rebuild.
+func (f *fakePlayer) PlayIndex(index int) error {
+	f.mu.Lock()
+	f.record("PlayIndex")
+	if index < 0 || index >= len(f.queue) {
+		f.mu.Unlock()
+
+		return player.ErrIndexOutOfRange
+	}
+	f.snap.QueueIndex = index - 1
+	f.advanceLocked(1)
+	f.mu.Unlock()
+
+	return nil
+}
+
 func (f *fakePlayer) Prev() error {
 	f.mu.Lock()
 	f.record("Prev")

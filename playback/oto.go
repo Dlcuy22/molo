@@ -96,7 +96,7 @@ var (
 // ever hold, come back short, and be counted as an underrun even when audio is
 // flowing perfectly. Matching the engine's own chunk size keeps reads whole and
 // the underrun counter meaningful, at the cost of a little robustness margin.
-var playerBufferFrames = deviceRate * 100 / 1000
+var playerBufferFrames = deviceRate * 25 / 1000
 
 type deviceState uint8
 

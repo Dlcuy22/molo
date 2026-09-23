@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens transcribed from DESIGN.md. The names match the token list, so
+ * a value is never repeated inline and the palette stays in one place.
+ *
+ * Dark only by the owner's decision, so there is no light variant to keep in
+ * sync and no theme toggle to get half-right.
+ */
+@theme {
+  --color-bg: #1d1d20;
+  --color-surface: #2f2f32;
+  --color-fg: #f2f0ea;
+  --color-muted: #b0aca2;
+  --color-line: #454548;
+  --color-hover: #3a3a3e;
+  --color-selected: #434347;
+  --color-accent: #3584e4;
+  --color-focus: #648cc1;
+  --color-danger: #c44536;
+  --color-track: #454548;
+  --color-disabled: #6e6e72;
+
+  /* Panels 6px, rows 4px, play button round. A flat scale on purpose: radius
+   * separates a panel from a row, it does not decorate. */
+  --radius-panel: 6px;
+  --radius-row: 4px;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+/* The window is an app frame, not a document: the text is not selectable, and
+ * the empty chrome drags the window. */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#app {
+  height: 100%;
+}
+
+/* Focus is a real ring in the focus token, never a removed outline. Applies to
+ * keyboard focus only, so a click does not leave a ring behind. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* A thin scrollbar that belongs to the surface rather than the OS default. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 10px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* A range input that reads as part of the surface: a track line with an accent
+ * fill up to the thumb. The fill is driven by a --fill-frac custom property
+ * (0..1) the component sets from the value. The stop is inset by half a thumb
+ * on each side, because the thumb's centre travels the track minus one thumb
+ * width; a plain percentage would overshoot the thumb everywhere off-centre. */
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+.range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0,
+    var(--color-accent) calc(7px + (100% - 14px) * var(--fill-frac, 0)),
+    var(--color-track) calc(7px + (100% - 14px) * var(--fill-frac, 0)),
+    var(--color-track) 100%
+  );
+}
+.range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0,
+    var(--color-accent) calc(7px + (100% - 14px) * var(--fill-frac, 0)),
+    var(--color-track) calc(7px + (100% - 14px) * var(--fill-frac, 0)),
+    var(--color-track) 100%
+  );
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--color-fg);
+  border: none;
+}
+.range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-fg);
+  border: none;
+}
+.range:disabled::-webkit-slider-thumb {
+  background: var(--color-disabled);
+}
+.range:disabled {
+  cursor: default;
+}

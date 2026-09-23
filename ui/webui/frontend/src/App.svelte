@@ -1,106 +1,87 @@
 <script lang="ts">
-  import {onMount} from 'svelte';
-  import {Events, WML} from "@wailsio/runtime";
-  import {GreetService} from "../bindings/github.com/dlcuy22/player/ui/webui";
+  import { onMount } from "svelte";
+  import { Warning } from "phosphor-svelte";
+  import { connect, player, ready } from "./lib/store";
+  import { displayTitle } from "./lib/format";
+  import Transport from "./lib/components/Transport.svelte";
+  import TrackInfo from "./lib/components/TrackInfo.svelte";
+  import Queue from "./lib/components/Queue.svelte";
+  import Spectrum from "./lib/components/Spectrum.svelte";
+  import Controls from "./lib/components/Controls.svelte";
 
-  const wailsVersion = "v3.0.0-beta.25";
+  // The one subscription to the Go push stream. connect returns its own
+  // teardown, so a hot reload does not leave a second listener behind.
+  onMount(connect);
 
-  let name: string = $state('');
-  let time: string = $state('Listening for Time event...');
-
-  let titleNameEl: HTMLElement;
-  let toastEl: HTMLElement;
-  let resultEl: HTMLElement;
-  let toastTimer: ReturnType<typeof setTimeout>;
-
-  onMount(() => {
-    Events.On('time', (v: any) => {
-      // On a narrow screen the full RFC1123 stamp is too wide for the footer, so
-      // show just the clock time there (matching the CSS breakpoint).
-      const full = v.data;
-      const compact = (full.match(/\d{1,2}:\d{2}:\d{2}/) || [full])[0];
-      time = window.matchMedia('(max-width: 640px)').matches ? compact : full;
-    });
-    // Wire up data-wml-openURL links (logos + footer "Docs" link).
-    WML.Reload();
-  });
-
-  // Crossfade the framework word in the heading ("Wails + Svelte") to the name
-  // the user entered ("Wails + <name>"): the old word fades out while the new one
-  // fades in over the same spot.
-  function swapTitleName(name: string): void {
-    const current = titleNameEl.querySelector('.title-name-text:not(.is-outgoing)');
-    if (!current || current.textContent === name) {
-      return;
-    }
-    const incoming = document.createElement('span');
-    incoming.className = 'title-name-text is-entering';
-    incoming.textContent = name;
-    current.classList.add('is-outgoing');
-    titleNameEl.appendChild(incoming);
-    // Force a reflow so the transitions run from the starting state.
-    void incoming.offsetWidth;
-    incoming.classList.remove('is-entering');
-    current.classList.add('is-leaving');
-    current.addEventListener('transitionend', () => current.remove(), {once: true});
-  }
-
-  // Pop the toast with the message Go returned, then auto-dismiss it.
-  function showToast(message: string): void {
-    resultEl.innerText = message;
-    toastEl.classList.add('is-visible');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('is-visible'), 4000);
-  }
-
-  const doGreet = (): void => {
-    let n = name || 'anonymous';
-    swapTitleName(n);
-    GreetService.Greet(n).then(showToast).catch(console.error);
-  }
+  const snap = $derived($player);
+  const hasQueue = $derived(snap.queue.length > 0);
 </script>
 
-<main class="container">
-  <header class="brand">
-    <span class="brand-mark" data-wml-openURL="https://v3.wails.io">
-      <img src="/wails.png" class="brand-logo" alt="Wails logo"/>
-    </span>
-    <span class="brand-badge" data-wml-openURL="https://svelte.dev">
-      <img src="/svelte.svg" alt="Svelte logo"/>
-    </span>
-  </header>
+<!--
+  Layout: the spectrum spans the full width because it is the widest thing the
+  app draws, then the queue and the controls share the row below it, and the
+  transport anchors the bottom. One focal point per band of the window: the
+  track title, then the spectrum, then the play button.
+-->
+<div class="flex h-full flex-col bg-bg text-fg">
+  <main class="flex min-h-0 flex-1 flex-col gap-3 p-4">
+    <TrackInfo {snap} />
 
-  <h1 class="title"><span class="title-accent">Wails +</span> <span class="title-name" bind:this={titleNameEl}><span class="title-name-text">Svelte</span></span></h1>
-  <p class="subtitle">Build beautiful cross-platform apps with Go and Svelte.</p>
+    <Spectrum />
 
-  <div class="greet">
-    <div class="input-box">
-      <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <input aria-label="input" class="input" bind:value={name} type="text" placeholder="Your name" autocomplete="off"/>
-      <button aria-label="greet-btn" class="btn" onclick={doGreet}>Greet
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-      </button>
+    <!-- min-h-0 lets the queue scroll inside the flex row instead of growing
+         the page. -->
+    <div class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+      <section class="flex min-h-0 flex-1 flex-col rounded-[6px] border border-line bg-surface">
+        <div class="flex items-center justify-between px-3 pb-1 pt-3">
+          <h2 class="text-xs font-medium text-muted">Queue</h2>
+          {#if hasQueue}
+            <span class="text-[11px] tabular-nums text-muted">
+              {snap.queueIdx + 1} / {snap.queue.length}
+            </span>
+          {/if}
+        </div>
+        <div class="min-h-0 flex-1">
+          <Queue queue={snap.queue} queueIdx={snap.queueIdx} />
+        </div>
+      </section>
+
+      <section class="flex w-full flex-col gap-3 lg:w-[26rem] lg:shrink-0">
+        <div class="rounded-[6px] border border-line bg-surface p-3">
+          <Controls decoderPref={snap.decoderPref} backend={snap.backend} />
+        </div>
+      </section>
     </div>
-  </div>
-</main>
+  </main>
 
-<hr class="footer-divider"/>
-<footer class="footer">
-  <span class="footer-version">{wailsVersion}</span>
-  <span class="footer-time">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    <span>{time}</span>
-  </span>
-  <a class="footer-docs" data-wml-openURL="https://v3.wails.io" aria-label="Wails documentation">Docs
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
-  </a>
-</footer>
+  <!-- Status and transport share the bottom bar. An error replaces the status
+       line rather than stacking, because only one of them is ever the reason
+       the user should look down here. -->
+  <footer class="flex flex-col gap-2 border-t border-line bg-surface px-4 py-3">
+    {#if snap.error}
+      <!-- The error colour is only ~3:1 on this surface, so it is the icon's
+           job here and the message itself uses the readable foreground. The
+           colour still carries the state; the words stay legible. -->
+      <p class="flex items-center gap-2 text-xs text-fg" role="alert">
+        <Warning size="15" weight="fill" class="shrink-0 text-danger" />
+        <span class="min-w-0 flex-1 truncate" title={snap.error}>{snap.error}</span>
+      </p>
+    {:else if !$ready}
+      <p class="text-xs text-muted" role="status">Starting the player…</p>
+    {:else}
+      <p class="text-xs text-muted">
+        {#if snap.state === "playing"}
+          Playing {displayTitle(snap.title, snap.path)}
+        {:else if snap.state === "paused"}
+          Paused
+        {:else if snap.state === "stopped"}
+          Stopped
+        {:else}
+          Ready
+        {/if}
+      </p>
+    {/if}
 
-<div class="toast" bind:this={toastEl} role="status" aria-live="polite">
-  <span class="toast-label">From Go</span>
-  <span aria-label="result" class="toast-msg" bind:this={resultEl}></span>
+    <Transport {snap} />
+  </footer>
 </div>
-
-<style>
-  /* Put your standard CSS here */
-</style>

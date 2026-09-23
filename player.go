@@ -16,6 +16,7 @@ import (
 	"github.com/dlcuy22/player/dsp"
 	"github.com/dlcuy22/player/internal/session"
 	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/player/playback"
 )
 
 // State is the playback lifecycle. It is an alias of the controller's type, so
@@ -92,6 +93,11 @@ type Settings = session.Settings
 // field-specific error, so a UI can tell "bad value" apart from other failures.
 var ErrInvalidSetting = session.ErrInvalidSetting
 
+// ErrIndexOutOfRange reports a PlayIndex jump to a queue position that does not
+// exist. Like the other command errors it is returned synchronously, before the
+// request reaches the engine.
+var ErrIndexOutOfRange = session.ErrIndexOutOfRange
+
 // ValidateDecoder reports whether name is a usable decoder preference: empty
 // means automatic selection. It is the same rule ApplySettings enforces, exposed
 // so a caller can check a value before offering it (a CLI flag, a settings
@@ -108,6 +114,19 @@ func ValidateBackend(name string) error { return session.ValidateBackend(name) }
 // one without opening anything.
 func SupportedExtensions() []string { return decode.Default.Supported() }
 
+// Codec is one selectable decoder, re-exported so a UI can build a chooser
+// without importing the decode registry itself.
+type Codec = decode.Codec
+
+// Codecs lists the registered decoders, sorted, for a UI that offers a choice.
+// The Name is the configuration key Settings.Decoder and SwapDecoder accept;
+// a UI shows FriendlyName.
+func Codecs() []Codec { return decode.Default.Codecs() }
+
+// Backends lists the registered playback backend names, for a UI that offers a
+// choice. Empty is always valid and means the default.
+func Backends() []string { return playback.Names() }
+
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
 type Player interface {
@@ -116,6 +135,10 @@ type Player interface {
 
 	Play(path string) error
 	PlayQueue(paths []string) error
+	// PlayIndex starts the queue entry at index, keeping the queue. It is what
+	// a click on a row in a track list means. An index outside the queue is
+	// rejected synchronously and changes nothing.
+	PlayIndex(index int) error
 	Next() error
 	Prev() error
 	Queue() []string
@@ -249,6 +272,7 @@ func (p *player) Play(path string) error { return p.session.Play(path) }
 func (p *player) PlayQueue(paths []string) error {
 	return p.session.PlayQueue(paths)
 }
+func (p *player) PlayIndex(index int) error  { return p.session.PlayIndex(index) }
 func (p *player) Next() error                { return p.session.Next() }
 func (p *player) Prev() error                { return p.session.Prev() }
 func (p *player) Queue() []string            { return p.session.Queue() }

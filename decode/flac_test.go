@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dlcuy22/player/core"
+	"github.com/tphakala/go-flac/pcm"
 )
 
 // readFlacAll decodes a fixture to the end and returns interleaved stereo
@@ -232,6 +235,55 @@ func TestFlacSeekPastEndIsSafe(t *testing.T) {
 	}
 	if err := d.(Seeker).SeekFrame(-1); err == nil {
 		t.Fatal("SeekFrame(-1) returned nil, want an error")
+	}
+}
+
+// TestFlacInexactLengthStillDecodes is the regression for a silent truncation:
+// a 44.1 kHz source almost never holds a sample count divisible by 147, the
+// exactness condition of canonicalFrames. Discarding that function's ok bool
+// defaulted the total to 0, and readCanonical clamps delivery to the declared
+// total, so every real 44.1 kHz file ended at frame zero. The fix reports an
+// unknown total (-1), matching the MP3 and WAV decoders, and the resampler
+// delivers the whole stream.
+func TestFlacInexactLengthStillDecodes(t *testing.T) {
+	// 0.25 s of 44.1 kHz is 11025 samples, which happens to be exact; one more
+	// sample makes the canonical total non-integral, the common real-file case.
+	const samples = 11026
+
+	pcmBytes := make([]byte, 0, samples*2*2)
+	for i := range samples {
+		// A small non-silent ramp, little-endian stereo int16.
+		v := int16((i*97)%3000 - 1500)
+		for range 2 {
+			pcmBytes = append(pcmBytes, byte(v), byte(v>>8))
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "inexact_44k.flac")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cfg := pcm.Config{SampleRate: 44100, BitDepth: 16, Channels: 2}
+	if err := pcm.EncodeInterleaved(f, cfg, pcmBytes); err != nil {
+		f.Close()
+		t.Fatalf("encode: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	d, err := NewFlacFactory().Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	if got := d.Info().TotalFrames; got != -1 {
+		t.Fatalf("TotalFrames = %d, want -1 for an inexact canonical length", got)
+	}
+	if got := readFlacAll(t, d); len(got)/2 == 0 {
+		t.Fatal("decoded 0 frames from a valid 44.1 kHz FLAC: delivery was clamped to a zero total")
 	}
 }
 

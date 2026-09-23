@@ -142,7 +142,16 @@ func newFlacDecoder(file *os.File, dec *pcm.Decoder) (*flacDecoder, error) {
 
 	bytesPS := (sm.BitDepth + 7) / 8
 	frameBytes := sm.Channels * bytesPS
-	total, _ := canonicalFrames(sm.TotalSamples, sm.SampleRate)
+	// A 44.1 kHz source almost never lands on an exact 48 kHz frame boundary,
+	// so canonicalFrames reports ok=false for most real files. Discarding that
+	// bool would default total to 0, and readCanonical clamps delivery to it,
+	// turning every such file into an immediate end of stream. An inexact
+	// length is reported as unknown (-1), the same contract the MP3 and WAV
+	// decoders follow, so the resampler delivers the tail instead.
+	total := int64(-1)
+	if frames, ok := canonicalFrames(sm.TotalSamples, sm.SampleRate); ok {
+		total = frames
+	}
 
 	d := &flacDecoder{
 		file:  file,
