@@ -61,8 +61,10 @@
     // Counters behind the debug overlay. The rAF rate is the display's own
     // refresh rate; the draw rate counts frames actually painted, which is
     // capped by how often new spectrum frames arrive. The gap is the wall
-    // clock spacing between arrivals, averaged over the same second: a gap
-    // near 90 ms with a 60 fps display is the choppiness made visible.
+    // clock spacing between arrivals, averaged over the same second: with the
+    // runner's jitter buffer the pump should deliver near the 16 ms display
+    // interval, so a gap approaching the device pull is the choppiness coming
+    // back.
     let renders = 0;
     let rafs = 0;
     let arrivals = 0;

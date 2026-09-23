@@ -3,7 +3,19 @@ package spectrum
 import (
 	"math"
 	"testing"
+	"time"
 )
+
+// testClock is a fake wall clock. The tap advances it by the duration of every
+// publish, so publishing audio also moves time forward at the sample rate and
+// the jitter buffer's wall-clock pacing is deterministic under test.
+type testClock struct{ t time.Time }
+
+func (c *testClock) now() time.Time { return c.t }
+
+func (c *testClock) advance(n int) {
+	c.t = c.t.Add(time.Duration(n) * time.Second / 48000)
+}
 
 // sliceTap models the engine's tap: a producer cursor the test advances, and a
 // reader cursor that drains what has been published. Read returns zero once it
@@ -15,11 +27,46 @@ type sliceTap struct {
 	// chunk bounds one Read, so the multi-read drain path is exercised the way
 	// the real tap's bounded reads are.
 	chunk int
+	// clock, when set, advances with each publish so the runner paces off the
+	// same timeline the audio arrives on.
+	clock *testClock
 }
 
 // publish makes count more samples available, wrapping through the sample
 // slice so a tone can keep playing for any number of frames.
-func (t *sliceTap) publish(count int) { t.write += count }
+func (t *sliceTap) publish(count int) {
+	t.write += count
+	if t.clock != nil {
+		t.clock.advance(count)
+	}
+}
+
+// arrive makes count more samples available without moving the clock, so a test
+// can model a coarse device pull landing while the display pump keeps its own
+// cadence.
+func (t *sliceTap) arrive(count int) { t.write += count }
+
+// tick moves the clock by samples worth of time without publishing, modelling
+// one display frame elapsing between the tap's bursts.
+func (t *sliceTap) tick(samples int) {
+	if t.clock != nil {
+		t.clock.advance(samples)
+	}
+}
+
+// runner builds a Runner paced by this tap's clock, so a test that publishes
+// audio and calls Frame sees the wall clock advance with the audio.
+func (t *sliceTap) runner(tb testing.TB, cfg Config) *Runner {
+	tb.Helper()
+	t.clock = &testClock{t: time.Unix(1, 0)}
+	r, err := New(t, cfg)
+	if err != nil {
+		tb.Fatalf("New: %v", err)
+	}
+	r.now = t.clock.now
+
+	return r
+}
 
 func (t *sliceTap) Read(dst []float32) int {
 	if t.read >= t.write || len(t.samples) == 0 {
@@ -120,10 +167,7 @@ func TestSilenceStaysFlat(t *testing.T) {
 func TestToneRaisesSomeBarsAndLeavesOthersEmpty(t *testing.T) {
 	const freq = 3000
 	tap := &sliceTap{samples: tone(freq, 2048), chunk: 1024}
-	r, err := New(tap, Config{Bars: 100, FFT: 2048})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 100, FFT: 2048})
 
 	// Publish enough frames for the rolling window and the peak follower to
 	// settle on the tone.
@@ -174,10 +218,7 @@ func noise(amp float64, n int) []float32 {
 // slow display trailing the beat.
 func TestFramesAreTemporallySmooth(t *testing.T) {
 	tap := &sliceTap{samples: noise(0.3, 8192), chunk: 1440}
-	r, err := New(tap, Config{Bars: 150, FFT: 8192})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 150, FFT: 8192})
 	tap.feed(r, 8192*4, 1440)
 
 	var total, steps float64
@@ -200,10 +241,7 @@ func TestFramesAreTemporallySmooth(t *testing.T) {
 // neighbour-to-neighbour step must stay small once settled.
 func TestBandsAreSmoothAcrossFrequency(t *testing.T) {
 	tap := &sliceTap{samples: noise(0.3, 8192), chunk: 1440}
-	r, err := New(tap, Config{Bars: 150, FFT: 8192})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 150, FFT: 8192})
 	tap.feed(r, 8192*8, 1440)
 
 	bands := r.Bands()
@@ -218,25 +256,28 @@ func TestBandsAreSmoothAcrossFrequency(t *testing.T) {
 
 // TestPeakHoldsStillOnStationaryInput pins the EasyEffects-style axis
 // hysteresis: once settled on unchanging audio, the scale must not wander.
+//
+// The measure is the mean absolute move from the settled peak, not the worst
+// single frame. The periodogram itself fluctuates frame to frame on noise (the
+// same flicker TestFramesAreTemporallySmooth allows), so one excursion says
+// nothing about the follower: it just says which window the run happened to
+// land on. A release fast enough to track that flicker shows up as a large mean
+// move, which is the drift this pins out.
 func TestPeakHoldsStillOnStationaryInput(t *testing.T) {
 	tap := &sliceTap{samples: noise(0.3, 8192), chunk: 1440}
-	r, err := New(tap, Config{Bars: 150, FFT: 8192})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 150, FFT: 8192})
 	tap.feed(r, 8192*8, 1440)
 	settled := r.peak
 
-	wander := 0.0
-	for done := 0; done < 8192*8; done += 1440 {
+	const frames = 500
+	var move float64
+	for range frames {
 		tap.publish(1440)
 		r.Frame()
-		if d := math.Abs(r.peak - settled); d > wander {
-			wander = d
-		}
+		move += math.Abs(r.peak - settled)
 	}
-	if wander > 0.5 {
-		t.Fatalf("peak wandered %.3f dB on stationary input, want <= 0.5", wander)
+	if mean := move / frames; mean > 0.3 {
+		t.Fatalf("peak moved %.3f dB/frame on stationary input, want <= 0.3", mean)
 	}
 }
 
@@ -286,10 +327,7 @@ func TestPeakFollowsPromptlyWithoutYanking(t *testing.T) {
 func TestTonePeaksAtItsFrequency(t *testing.T) {
 	const freq = 1000
 	tap := &sliceTap{samples: tone(freq, 8192), chunk: 4096}
-	r, err := New(tap, Config{Bars: 100, FFT: 8192})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 100, FFT: 8192})
 	tap.feed(r, 8192*12, 4096)
 
 	bands := r.Bands()
@@ -315,10 +353,7 @@ func TestBandValueRisesWithLevel(t *testing.T) {
 			samples[i] *= float32(amp)
 		}
 		tap := &sliceTap{samples: samples, chunk: 1024}
-		r, err := New(tap, Config{Bars: 64, FFT: 2048})
-		if err != nil {
-			t.Fatalf("New: %v", err)
-		}
+		r := tap.runner(t, Config{Bars: 64, FFT: 2048})
 		tap.feed(r, 2048*12, 1024)
 
 		peak := 0.0
@@ -348,10 +383,7 @@ func TestBandValueRisesWithLevel(t *testing.T) {
 // last frame is stuck": once the tap goes quiet the bars must fall, not freeze.
 func TestFrameDecaysAfterAudioStops(t *testing.T) {
 	tap := &sliceTap{samples: tone(1000, 2048), chunk: 1024}
-	r, err := New(tap, Config{Bars: 64, FFT: 2048})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 64, FFT: 2048})
 	tap.feed(r, 2048*12, 1024)
 
 	before := 0.0
@@ -385,10 +417,7 @@ func TestFrameDecaysAfterAudioStops(t *testing.T) {
 // the next full tick jumps them back, which reads as tremor.
 func TestEmptyFramesHoldBeforeDrain(t *testing.T) {
 	tap := &sliceTap{samples: tone(1000, 2048), chunk: 1024}
-	r, err := New(tap, Config{Bars: 64, FFT: 2048})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	r := tap.runner(t, Config{Bars: 64, FFT: 2048})
 	tap.feed(r, 2048*12, 1024)
 
 	settled := append([]float64(nil), r.Bands()...)
@@ -450,7 +479,97 @@ func TestPartialFrameIsSilent(t *testing.T) {
 	}
 }
 
-// TestBarCentersSpanTheRange checks the bars sample the configured range:
+// TestJitterBufferSlidesThroughBursts pins the load-bearing jitter-buffer
+// behaviour: when the tap delivers audio in coarse bursts (the device pull)
+// while the display pump keeps ticking, the window must still advance on every
+// pump frame. Before the buffer, each burst jumped the window to the newest
+// sample and the pump frames in between found nothing new, so the display
+// stepped at the buffer's rate instead of sliding at the pump's.
+func TestJitterBufferSlidesThroughBursts(t *testing.T) {
+	// A burst every 4800 samples (100 ms) against a 60 Hz pump (800 samples a
+	// tick): exactly the measured device cadence.
+	const burst, tick = 4800, 800
+
+	tap := &sliceTap{samples: tone(1000, 8192), chunk: 4096}
+	r := tap.runner(t, Config{Bars: 64, FFT: 2048})
+
+	// Prime with a couple of bursts, letting the pump run between them.
+	for range 2 {
+		tap.arrive(burst)
+		for range burst / tick {
+			tap.tick(tick)
+			r.Frame()
+		}
+	}
+
+	// Count how many pump frames actually move the display.
+	moved := 0
+	for range 6 {
+		tap.arrive(burst)
+		for range burst / tick {
+			tap.tick(tick)
+			before := append([]float64(nil), r.Bands()...)
+			r.Frame()
+			for b, v := range r.Bands() {
+				if v != before[b] {
+					moved++
+					break
+				}
+			}
+		}
+	}
+	if want := 6 * burst / tick; moved < want {
+		t.Fatalf("display advanced on %d of %d pump frames across bursts, want all", moved, want)
+	}
+}
+
+// TestJitterBufferHoldsCushion pins that the window never races to the newest
+// sample: it keeps a reserve so a late burst cannot starve the next frames. The
+// reserve is what turns a stalling catch-up into a smooth hold.
+func TestJitterBufferHoldsCushion(t *testing.T) {
+	const burst, tick = 4800, 800
+
+	tap := &sliceTap{samples: tone(1000, 8192), chunk: 4096}
+	r := tap.runner(t, Config{Bars: 64, FFT: 2048})
+
+	// Feed a long run so the backlog settles, then one burst and let the pump
+	// drain it dry. The cushion must survive: the backlog never reaches zero.
+	for range 4 {
+		tap.arrive(burst)
+		for range burst / tick {
+			tap.tick(tick)
+			r.Frame()
+		}
+	}
+	tap.arrive(burst)
+	for range 2 * burst / tick {
+		tap.tick(tick)
+		r.Frame()
+	}
+	if got := len(r.backlog); got < r.targetLag() {
+		t.Fatalf("backlog fell to %d, below the %d cushion", got, r.targetLag())
+	}
+}
+
+// TestJitterBufferCapsLag pins the other bound: a consumer that stalls must not
+// let the backlog (and with it the display lag) grow without bound. Beyond the
+// cap the oldest samples are dropped, the same lose-history trade the tap
+// makes.
+func TestJitterBufferCapsLag(t *testing.T) {
+	tap := &sliceTap{samples: tone(1000, 8192), chunk: 4096}
+	r := tap.runner(t, Config{Bars: 64, FFT: 2048})
+
+	// Dump far more audio than the cap allows without advancing the clock, so
+	// the backlog would grow past its bound if nothing trimmed it.
+	for range 20 {
+		tap.arrive(4800)
+		r.Frame()
+	}
+	if maxLen := len(r.window) + r.maxBacklog(); len(r.backlog) > maxLen {
+		t.Fatalf("backlog = %d, above cap %d", len(r.backlog), maxLen)
+	}
+}
+
 // one center per bar, strictly rising, inside [MinHz, MaxHz], and evenly
 // spaced in log frequency so equal pitch intervals get equal width.
 func TestBarCentersSpanTheRange(t *testing.T) {

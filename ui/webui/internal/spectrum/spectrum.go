@@ -9,6 +9,7 @@ package spectrum
 
 import (
 	"math"
+	"time"
 )
 
 // Tap is the read side of the engine's visualizer feed. It is declared here as
@@ -107,10 +108,22 @@ type Runner struct {
 	window []float32
 	filled int
 
-	// tmp is the drain buffer. The tap overwrites oldest when a consumer falls
-	// behind, so a frame drains everything buffered and keeps the newest FFT
-	// samples rather than reading one stale block.
+	// tmp is the drain buffer: one bounded read from the tap, appended to the
+	// backlog below.
 	tmp []float32
+
+	// backlog is the jitter buffer. The tap delivers audio in coarse bursts
+	// (the device pull, about 100 ms), and the window must advance smoothly at
+	// the display rate rather than jump to the newest sample on every arrival.
+	// Samples land here first and are folded into the window by a wall-clock
+	// step, so the display slides instead of stepping. backlog[0] is the oldest
+	// sample not yet in the window, so len(backlog) is the display lag.
+	backlog []float32
+
+	// last is the time of the previous Frame, used to size this call's step.
+	// now is the clock, injectable so tests drive the pacing deterministically.
+	last time.Time
+	now  func() time.Time
 
 	// mags is the raw per-bin spectrum; bands is the per-bar magnitude
 	// resampled from it, converted to dB by toDB; out is the smoothed display
@@ -131,10 +144,11 @@ type Runner struct {
 	// built on.
 	peak float64
 
-	// emptyTicks counts consecutive Frame calls that found no new samples on
-	// the tap. A few empty frames are normal scheduling jitter between the
-	// device pulls and this ticker, so the display holds through them; only a
-	// sustained drought means playback really stopped and the bars drain.
+	// emptyTicks counts consecutive Frame calls that had nothing to slide in
+	// because the backlog was at or below the cushion. A few are normal when
+	// the ticker lands between device pulls, so the display holds through them;
+	// only a sustained drought means playback really stopped and the bars
+	// drain.
 	emptyTicks int
 }
 
@@ -159,6 +173,8 @@ func New(tap Tap, cfg Config) (*Runner, error) {
 		an:      an,
 		window:  make([]float32, cfg.FFT),
 		tmp:     make([]float32, cfg.FFT*2),
+		backlog: make([]float32, 0, cfg.FFT*3),
+		now:     time.Now,
 		mags:    make([]float64, an.Bins()),
 		bands:   make([]float64, cfg.Bars),
 		out:     make([]float64, cfg.Bars),
@@ -218,6 +234,21 @@ const drainFactor = 0.5
 // onset within a couple of frames at the 60 Hz pump.
 const peakRise = 0.65
 
+// maxStep caps one Frame's window advance, so a stalled or hidden pump cannot
+// slide the window through a large chunk of backlog in a single call.
+const maxStep = 200 * time.Millisecond
+
+// targetLagDivisor sizes the jitter buffer's cushion as SampleRate/divisor,
+// about 100 ms: roughly one device pull, enough that a late burst cannot starve
+// the next few frames. It is the display's fixed delay.
+const targetLagDivisor = 10
+
+// maxLagDivisor bounds the backlog at SampleRate/divisor, about 250 ms, on top
+// of the window. A stalled consumer (a hidden window, a slow frame) would
+// otherwise let the backlog grow to the whole tap ring and the display lag with
+// it; dropping the oldest keeps the lag bounded.
+const maxLagDivisor = 4
+
 // Bands returns the current smoothed frame, one value per bar in [0, 1]. It is
 // the same slice Frame writes, so a caller that keeps it must copy.
 func (r *Runner) Bands() []float64 { return r.out }
@@ -225,23 +256,35 @@ func (r *Runner) Bands() []float64 { return r.out }
 // Config returns the effective config, defaults resolved.
 func (r *Runner) Config() Config { return r.cfg }
 
-// Frame drains the tap, transforms the newest window, and updates the bands. It
-// returns the same slice as Bands. It is safe to call from one goroutine; the
-// runner is not internally synchronised because its owner is the ticker.
+// Frame drains the tap, advances the window by one display step, transforms it,
+// and updates the bands. It returns the same slice as Bands. It is safe to call
+// from one goroutine; the runner is not internally synchronised because its
+// owner is the ticker.
+//
+// The advance is paced by the wall clock, not by data arrival: the tap delivers
+// coarse bursts (one device pull, about 100 ms), and jumping to the newest
+// sample on each burst is what made the display step instead of slide. Instead
+// every call folds in only the samples that real time has advanced past,
+// leaving the rest in the backlog. With the cushion in targetLagDivisor, the
+// window slides by one display step per call whether or not a burst arrived, so
+// the visualizer runs at the display rate rather than at the buffer's rate.
 func (r *Runner) Frame() []float64 {
-	got := r.drain()
-	if got > 0 {
-		r.emptyTicks = 0
-		r.an.Magnitudes(r.window[:r.filled], r.mags)
+	r.refill()
+
+	step := r.stepSamples()
+	if step > 0 {
+		r.slide(step)
+		r.an.Magnitudes(r.window, r.mags)
 		r.sampleBands()
 		r.toDB()
 		r.trackPeak()
+		r.emptyTicks = 0
 
 		// The display shows the fresh analysis directly, the way EasyEffects
-		// replaces its series every frame with no follower in between:
-		// consecutive windows overlap ~90% at the 60 Hz pump, so the motion
-		// is already continuous. A per-bar attack/release here only adds
-		// lag, which reads as a slow display trailing the beat.
+		// replaces its series every frame with no follower in between: the
+		// window slides one small step per call, so the motion is already
+		// continuous. A per-bar attack/release here only adds lag, which reads
+		// as a slow display trailing the beat.
 		for b := range r.out {
 			r.out[b] = r.bandValue(b)
 		}
@@ -249,11 +292,10 @@ func (r *Runner) Frame() []float64 {
 		return r.out
 	}
 
-	// No new samples is the ticker landing between device pulls, not
-	// silence: hold the display bit for bit so the bars never dip on
-	// scheduling jitter. Only a sustained drought drains toward zero, which
-	// is what clears the bars when playback stops rather than leaving the
-	// last frame frozen on screen.
+	// Nothing to fold in: the backlog is at or below the cushion, so there is
+	// no audio to slide into (paused, stopped, or the very first call). Hold
+	// the display bit for bit through the cushion, then drain, so a real stop
+	// clears the bars instead of leaving the last frame frozen.
 	r.emptyTicks++
 	if r.emptyTicks <= holdEmptyTicks {
 		return r.out
@@ -263,6 +305,101 @@ func (r *Runner) Frame() []float64 {
 	}
 
 	return r.out
+}
+
+// refill drains the tap into the backlog and caps its length. The tap
+// overwrites its oldest frames when a consumer falls behind, so a bounded read
+// loses history rather than blocking; the cap here drops the oldest backlog
+// samples, which bounds the display lag if the consumer stalls.
+func (r *Runner) refill() {
+	for {
+		n := r.tap.Read(r.tmp)
+		if n <= 0 {
+			break
+		}
+		r.backlog = append(r.backlog, r.tmp[:n]...)
+	}
+
+	maxLen := len(r.window) + r.maxBacklog()
+	if len(r.backlog) > maxLen {
+		drop := len(r.backlog) - maxLen
+		rest := copy(r.backlog, r.backlog[drop:])
+		r.backlog = r.backlog[:rest]
+	}
+}
+
+// stepSamples is how many samples the window should advance this call: the
+// number of samples real time has passed at the source rate, clamped so a
+// stalled pump cannot jump and never more than the backlog holds.
+func (r *Runner) stepSamples() int {
+	now := r.now()
+	if r.last.IsZero() {
+		r.last = now
+
+		return 0
+	}
+
+	elapsed := now.Sub(r.last)
+	r.last = now
+	if elapsed <= 0 {
+		return 0
+	}
+	if elapsed > maxStep {
+		elapsed = maxStep
+	}
+
+	step := int(elapsed.Nanoseconds() * int64(r.cfg.SampleRate) / int64(time.Second))
+
+	// Hold the cushion back: never slide closer than targetLag to the newest
+	// sample. That reserve is what keeps a late burst from starving the next
+	// few frames, because the window stops at the cushion and waits instead of
+	// catching up to the newest sample and stalling there.
+	if room := len(r.backlog) - r.targetLag(); step > room {
+		step = room
+	}
+	if step < 0 {
+		step = 0
+	}
+
+	return step
+}
+
+// targetLag is the cushion the jitter buffer holds between the window and the
+// newest sample, about one device pull. It is the display's fixed lag and the
+// reserve that rides out a burst arriving late.
+func (r *Runner) targetLag() int { return r.cfg.SampleRate / targetLagDivisor }
+
+// maxBacklog bounds the backlog so a stalled consumer cannot grow it (and the
+// display lag with it) without bound; beyond it the oldest samples are dropped,
+// which is the same lose-history trade the tap itself makes.
+func (r *Runner) maxBacklog() int { return r.cfg.SampleRate / maxLagDivisor }
+
+// slide advances the window by n samples: drop the oldest n, append the next n
+// from the backlog. The window holds exactly len(window) samples once the
+// backlog can fill it. The backlog is compacted in place rather than resliced
+// forward, so the steady state allocates nothing.
+func (r *Runner) slide(n int) {
+	if n <= 0 {
+		return
+	}
+
+	p := r.backlog[:n]
+	if n >= len(r.window) {
+		copy(r.window, p[len(p)-len(r.window):])
+		r.filled = len(r.window)
+	} else {
+		keep := r.filled + n
+		if keep > len(r.window) {
+			drop := keep - len(r.window)
+			copy(r.window, r.window[drop:r.filled])
+			r.filled -= drop
+		}
+		copy(r.window[r.filled:], p)
+		r.filled += n
+	}
+
+	rest := copy(r.backlog, r.backlog[n:])
+	r.backlog = r.backlog[:rest]
 }
 
 // bandValue maps one band's dB to a display level in [0, 1] against the dynamic
@@ -285,44 +422,6 @@ func (r *Runner) bandValue(b int) float64 {
 	}
 
 	return v
-}
-
-// drain reads everything buffered and keeps the newest FFT samples. The tap
-// overwrites the oldest frames when the consumer is slow, so reading one block
-// per frame would skip audio and make the display jitter; draining makes a slow
-// frame lose history instead. It returns how many frames this call read, so a
-// caller can tell silence from a frame that simply had no new audio.
-func (r *Runner) drain() int {
-	got := 0
-	for {
-		n := r.tap.Read(r.tmp)
-		if n <= 0 {
-			break
-		}
-		r.advance(r.tmp[:n])
-		got += n
-	}
-
-	return got
-}
-
-// advance folds n new samples into the rolling window, discarding the oldest.
-func (r *Runner) advance(p []float32) {
-	if len(p) >= len(r.window) {
-		copy(r.window, p[len(p)-len(r.window):])
-		r.filled = len(r.window)
-
-		return
-	}
-
-	keep := r.filled + len(p)
-	if keep > len(r.window) {
-		drop := keep - len(r.window)
-		copy(r.window, r.window[drop:r.filled])
-		r.filled -= drop
-	}
-	copy(r.window[r.filled:], p)
-	r.filled += len(p)
 }
 
 // toDB converts band magnitudes to dB relative to full scale. A silent band is
