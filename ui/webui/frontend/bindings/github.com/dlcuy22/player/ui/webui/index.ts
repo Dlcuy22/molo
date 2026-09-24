@@ -9,6 +9,8 @@ export {
 export type {
     CodecOption,
     Options,
+    PreviewConfig,
+    PreviewState,
     QueueRow,
     Snapshot,
     SpectrumConfig

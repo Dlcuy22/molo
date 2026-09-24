@@ -98,7 +98,8 @@ func TestStateNameCoversEveryState(t *testing.T) {
 // TestQueueRowsMarksExactlyOne checks the active marker lands on the current
 // index and no row is marked when nothing is playing.
 func TestQueueRowsMarksExactlyOne(t *testing.T) {
-	rows := queueRows([]string{"/a/one.flac", "/b/two.flac"}, 1)
+	svc := newPlayerService()
+	rows := svc.queueRows([]string{"/a/one.flac", "/b/two.flac"}, 1)
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
@@ -109,7 +110,7 @@ func TestQueueRowsMarksExactlyOne(t *testing.T) {
 		t.Errorf("name = %q, want two.flac", rows[1].Name)
 	}
 
-	none := queueRows([]string{"/a/one.flac"}, -1)
+	none := svc.queueRows([]string{"/a/one.flac"}, -1)
 	if none[0].Active {
 		t.Error("a row is active with index -1")
 	}

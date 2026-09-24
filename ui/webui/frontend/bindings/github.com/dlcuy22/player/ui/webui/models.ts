@@ -20,12 +20,48 @@ export interface Options {
 }
 
 /**
- * QueueRow is one entry in the bound queue view.
+ * PreviewConfig is the preview window. StartMs and LengthMs are milliseconds
+ * from the start of the track; a LengthMs of 0 means "to the end". FadeMs is
+ * the ramp at each edge, Loop repeats the window until the selection changes,
+ * and Volume is the preview's own level in [0, 1].
+ */
+export interface PreviewConfig {
+    "startMs": number;
+    "lengthMs": number;
+    "fadeMs": number;
+    "loop": boolean;
+    "volume": number;
+}
+
+/**
+ * PreviewState is the preview's contribution to the snapshot: which row is
+ * sounding, how far into the window, and whether it loops. Active is false
+ * when no preview is running, which is the signal to draw nothing.
+ */
+export interface PreviewState {
+    "active": boolean;
+    "path": string;
+    "position": number;
+    "duration": number;
+    "loop": boolean;
+}
+
+/**
+ * QueueRow is one entry in the bound queue view. Title, Artist and Album are
+ * the tags the tag index resolved for the track; they are empty until the
+ * resolver lands, and the palette falls back to Name when they are. They are
+ * on the row rather than behind a second call so the search reads one payload.
+ * CoverID identifies the track's embedded art; the palette fetches the bytes
+ * through QueueCover only for the rows on screen.
  */
 export interface QueueRow {
     "index": number;
     "path": string;
     "name": string;
+    "title": string;
+    "artist": string;
+    "album": string;
+    "coverId": string;
     "active": boolean;
 }
 
@@ -80,6 +116,12 @@ export interface Snapshot {
     "sampleRate": number;
     "channels": number;
     "error": string;
+
+    /**
+     * Preview is the palette's audition state, so the palette can draw the
+     * previewing row and its progress from the same payload as everything else.
+     */
+    "preview": PreviewState;
 }
 
 /**

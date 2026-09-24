@@ -90,6 +90,41 @@ export function Prev(): $CancellablePromise<void> {
 }
 
 /**
+ * PreviewConfig reads the preview window settings in force.
+ */
+export function PreviewConfig(): $CancellablePromise<$models.PreviewConfig> {
+    return $Call.ByID(3365288066);
+}
+
+/**
+ * PreviewStart begins previewing the queued track at path, or replaces the
+ * current preview. It pauses the main track once for the session and resumes it
+ * when the session ends, so arrow navigation never flaps the main track.
+ */
+export function PreviewStart(path: string): $CancellablePromise<void> {
+    return $Call.ByID(3793691400, path);
+}
+
+/**
+ * PreviewStop ends the preview and resumes the main track if the session had
+ * paused it. It is safe to call when no preview is running.
+ */
+export function PreviewStop(): $CancellablePromise<void> {
+    return $Call.ByID(757197420);
+}
+
+/**
+ * QueueCover returns the artwork of one queued track as an inline data URL, or
+ * an empty string when it has none. The palette asks only for the rows it is
+ * about to draw, so a large queue never pays to decode art the user will not
+ * see. The cache is keyed by the content id the row carries, so a repeat ask
+ * and a track that reappears are both served without re-reading the file.
+ */
+export function QueueCover(path: string): $CancellablePromise<string> {
+    return $Call.ByID(4120849334, path);
+}
+
+/**
  * SeekTo repositions the current track. Milliseconds keep the bound signature
  * plain; the facade takes a time.Duration. It is named SeekTo rather than Seek
  * because Seek(int64) error is the io.Seeker shape by signature but not in
@@ -114,6 +149,14 @@ export function SetBackend(name: string): $CancellablePromise<void> {
  */
 export function SetCodec(name: string): $CancellablePromise<void> {
     return $Call.ByID(3320687474, name);
+}
+
+/**
+ * SetPreviewConfig replaces the preview window settings. The values are
+ * normalized, so a UI can send what it has without clamping first.
+ */
+export function SetPreviewConfig(cfg: $models.PreviewConfig): $CancellablePromise<void> {
+    return $Call.ByID(3789468178, cfg);
 }
 
 /**

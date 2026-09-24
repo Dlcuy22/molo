@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/player/meta"
 	"github.com/dlcuy22/player/ui/webui/internal/cover"
 	"github.com/dlcuy22/player/ui/webui/internal/spectrum"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -59,11 +60,26 @@ type PlayerService struct {
 
 	mu        sync.Mutex
 	lastError string
+	// indexedQueue is the queue the tag index was last reconciled against, so
+	// the 4 Hz snapshot does not re-walk an unchanged queue.
+	indexedQueue []string
 
 	events  <-chan player.Event
 	tap     player.Tap
 	closing chan struct{}
 	wg      sync.WaitGroup
+
+	// index resolves and caches the tags of every queued track, so the palette
+	// can search a queue the engine has not described. ctx is cancelled on
+	// shutdown to stop any reader still opening a file.
+	index  *tagIndex
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// preview is the palette's short-window audition, played on a second
+	// player so the main track can stay loaded and paused underneath. It is
+	// built on startup, once the engine exists.
+	preview *previewer
 
 	// coverMu guards the decoded-artwork cache. Art arrives with the resolved
 	// tags, so it is decoded on the first request and kept under the id the
@@ -88,10 +104,15 @@ type PlayerService struct {
 }
 
 func newPlayerService() *PlayerService {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &PlayerService{
 		closing:     make(chan struct{}),
 		spectrumCfg: spectrum.DefaultConfig(),
 		coverCache:  make(map[string]string),
+		index:       newTagIndex(),
+		ctx:         ctx,
+		cancel:      cancel,
 		log:         slog.Default(),
 	}
 }
@@ -109,6 +130,16 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	if err := s.rebuildRunner(); err != nil {
 		return err
 	}
+
+	// The preview player is a second instance over the same process-wide oto
+	// context, which oto mixes. It is built here so a failure to construct it
+	// surfaces at startup rather than on the first Ctrl+Alt+P.
+	pp, err := player.New()
+	if err != nil {
+		return fmt.Errorf("build preview player: %w", err)
+	}
+	s.preview = newPreviewer(s, pp)
+	s.preview.start()
 
 	// The engine's event channel is drained on its own goroutine and fanned out
 	// to Wails events. Draining continuously matters: a UI that only listened
@@ -128,7 +159,13 @@ func (s *PlayerService) ServiceShutdown() error {
 	default:
 		close(s.closing)
 	}
+	if s.cancel != nil {
+		s.cancel()
+	}
 	s.wg.Wait()
+	if s.preview != nil {
+		s.preview.close()
+	}
 
 	if s.player != nil {
 		return s.player.Close()
@@ -288,10 +325,16 @@ func (s *PlayerService) rebuildRunner() error {
 func (s *PlayerService) Snapshot() Snapshot {
 	snap := s.player.Snapshot()
 	queue := s.player.Queue()
+	s.syncIndex(queue)
 
 	s.mu.Lock()
 	lastErr := s.lastError
 	s.mu.Unlock()
+
+	var preview PreviewState
+	if s.preview != nil {
+		preview = s.preview.state()
+	}
 
 	return Snapshot{
 		State:       stateName(snap.State),
@@ -306,7 +349,7 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Position:    snap.Position.Milliseconds(),
 		Duration:    snap.Duration.Milliseconds(),
 		Volume:      snap.Volume,
-		Queue:       queueRows(queue, snap.QueueIndex),
+		Queue:       s.queueRows(queue, snap.QueueIndex),
 		QueueIdx:    snap.QueueIndex,
 		Decoder:     snap.Decoder,
 		DecoderPref: s.player.Settings().Decoder,
@@ -314,7 +357,41 @@ func (s *PlayerService) Snapshot() Snapshot {
 		SampleRate:  snap.Format.Rate,
 		Channels:    snap.Format.Ch,
 		Error:       lastErr,
+		Preview:     preview,
 	}
+}
+
+// syncIndex reconciles the tag index with the queue, but only when the queue
+// actually changed. Snapshot is polled at 4 Hz, and re-walking an unchanged
+// queue on every tick would be pure waste.
+func (s *PlayerService) syncIndex(queue []string) {
+	s.mu.Lock()
+	same := equalPaths(s.indexedQueue, queue)
+	if !same {
+		s.indexedQueue = append([]string(nil), queue...)
+	}
+	s.mu.Unlock()
+	if same {
+		return
+	}
+
+	s.indexQueue(queue)
+}
+
+// equalPaths reports whether two queues hold the same paths in the same order.
+// It is the queue's identity for the index: a reorder is a new queue because
+// the rows the palette jumps to are positional.
+func equalPaths(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Cover returns the current track's artwork as an inline data URL, or an empty
@@ -357,6 +434,52 @@ func (s *PlayerService) Cover(id string) string {
 // held for the life of the process, so the oldest entries are evicted once the
 // cap is reached.
 const coverCacheMax = 64
+
+// QueueCover returns the artwork of one queued track as an inline data URL, or
+// an empty string when it has none. The palette asks only for the rows it is
+// about to draw, so a large queue never pays to decode art the user will not
+// see. The cache is keyed by the content id the row carries, so a repeat ask
+// and a track that reappears are both served without re-reading the file.
+func (s *PlayerService) QueueCover(path string) string {
+	tags := s.index.lookup(path)
+	if tags.CoverID == "" {
+		return ""
+	}
+
+	s.coverMu.Lock()
+	if url, ok := s.coverCache[tags.CoverID]; ok {
+		s.coverMu.Unlock()
+
+		return url
+	}
+	s.coverMu.Unlock()
+
+	// Read and encode off the lock: opening the file is the slow part, and
+	// holding coverMu across it would stall the current track's Cover call.
+	m, err := meta.Resolve(s.ctx, path)
+	if err != nil || m == nil {
+		return ""
+	}
+	data := m.Tags.Cover
+	if cover.ID(data) != tags.CoverID {
+		// The file changed under us; the row's id is stale, so answer nothing
+		// rather than art that no longer matches.
+		return ""
+	}
+
+	url, err := cover.DataURL(data)
+	if err != nil {
+		s.log.Warn("cover: skipping undecodable artwork", "path", path, "error", err)
+
+		return ""
+	}
+
+	s.coverMu.Lock()
+	s.storeCover(tags.CoverID, url)
+	s.coverMu.Unlock()
+
+	return url
+}
 
 // storeCover records one decoded data URL, evicting the oldest entry when the
 // cache is full. The caller holds coverMu.
@@ -427,6 +550,52 @@ func (s *PlayerService) ConfigureSpectrum(cfg SpectrumConfig) error {
 // PlayIndex starts queue row index.
 func (s *PlayerService) PlayIndex(index int) error {
 	return s.command(func() error { return s.player.PlayIndex(index) })
+}
+
+// PreviewStart begins previewing the queued track at path, or replaces the
+// current preview. It pauses the main track once for the session and resumes it
+// when the session ends, so arrow navigation never flaps the main track.
+func (s *PlayerService) PreviewStart(path string) error {
+	if s.preview == nil {
+		return fmt.Errorf("preview is not available")
+	}
+	if path == "" {
+		return fmt.Errorf("preview needs a path")
+	}
+	s.preview.play(path)
+
+	return nil
+}
+
+// PreviewStop ends the preview and resumes the main track if the session had
+// paused it. It is safe to call when no preview is running.
+func (s *PlayerService) PreviewStop() error {
+	if s.preview == nil {
+		return nil
+	}
+	s.preview.halt()
+
+	return nil
+}
+
+// PreviewConfig reads the preview window settings in force.
+func (s *PlayerService) PreviewConfig() PreviewConfig {
+	if s.preview == nil {
+		return normalizePreviewConfig(PreviewConfig{})
+	}
+
+	return s.preview.config()
+}
+
+// SetPreviewConfig replaces the preview window settings. The values are
+// normalized, so a UI can send what it has without clamping first.
+func (s *PlayerService) SetPreviewConfig(cfg PreviewConfig) error {
+	if s.preview == nil {
+		return fmt.Errorf("preview is not available")
+	}
+	s.preview.configure(cfg)
+
+	return nil
 }
 
 // LoadPaths replaces the queue with the chosen files and folders and starts it.
@@ -564,12 +733,21 @@ func (s *PlayerService) SetBackend(name string) error {
 	})
 }
 
-// QueueRow is one entry in the bound queue view.
+// QueueRow is one entry in the bound queue view. Title, Artist and Album are
+// the tags the tag index resolved for the track; they are empty until the
+// resolver lands, and the palette falls back to Name when they are. They are
+// on the row rather than behind a second call so the search reads one payload.
+// CoverID identifies the track's embedded art; the palette fetches the bytes
+// through QueueCover only for the rows on screen.
 type QueueRow struct {
-	Index  int    `json:"index"`
-	Path   string `json:"path"`
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
+	Index   int    `json:"index"`
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	Artist  string `json:"artist"`
+	Album   string `json:"album"`
+	CoverID string `json:"coverId"`
+	Active  bool   `json:"active"`
 }
 
 // Snapshot is the whole visible player state in one value, so the frontend has
@@ -604,6 +782,9 @@ type Snapshot struct {
 	SampleRate  int    `json:"sampleRate"`
 	Channels    int    `json:"channels"`
 	Error       string `json:"error"`
+	// Preview is the palette's audition state, so the palette can draw the
+	// previewing row and its progress from the same payload as everything else.
+	Preview PreviewState `json:"preview"`
 }
 
 // Options is the static chooser data.
@@ -722,11 +903,22 @@ func stateName(st player.State) string {
 	}
 }
 
-// queueRows builds the bound queue view, marking the current row.
-func queueRows(paths []string, active int) []QueueRow {
+// queueRows builds the bound queue view, marking the current row and attaching
+// the tags the index has resolved so far.
+func (s *PlayerService) queueRows(paths []string, active int) []QueueRow {
 	rows := make([]QueueRow, len(paths))
 	for i, p := range paths {
-		rows[i] = QueueRow{Index: i, Path: p, Name: filepath.Base(p), Active: i == active}
+		tags := s.index.lookup(p)
+		rows[i] = QueueRow{
+			Index:   i,
+			Path:    p,
+			Name:    filepath.Base(p),
+			Title:   tags.Title,
+			Artist:  tags.Artist,
+			Album:   tags.Album,
+			CoverID: tags.CoverID,
+			Active:  i == active,
+		}
 	}
 
 	return rows

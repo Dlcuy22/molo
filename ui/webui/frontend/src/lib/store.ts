@@ -10,6 +10,7 @@ import { Events } from "@wailsio/runtime";
 import { PlayerService } from "../../bindings/github.com/dlcuy22/player/ui/webui";
 import type {
   Options,
+  PreviewConfig,
   Snapshot,
   SpectrumConfig,
 } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
@@ -43,6 +44,7 @@ export const EMPTY: Snapshot = {
   sampleRate: 48000,
   channels: 2,
   error: "",
+  preview: { active: false, path: "", position: 0, duration: 0, loop: false },
 };
 
 export const player = writable<Snapshot>(EMPTY);
@@ -50,10 +52,51 @@ export const options = writable<Options>({ codecs: [], backends: [], effects: []
 export const spectrumConfig = writable<SpectrumConfig>({ bars: 150, minHz: 20, maxHz: 20000 });
 export const spectrumSchema = writable<Param[]>([]);
 
+/** previewConfig is the preview window the Go side holds. The UI edits it
+ *  through SetPreviewConfig and mirrors the accepted value here. */
+export const previewConfig = writable<PreviewConfig>({
+  startMs: 0,
+  lengthMs: 30000,
+  fadeMs: 300,
+  loop: true,
+  volume: 1,
+});
+
 /** cover is the current artwork as an inline data URL, or "" when the track has
  *  none. The snapshot carries only the artwork id, so the 4 Hz payload stays
  *  small and the bytes cross the bridge once, when the id changes. */
 export const cover = writable<string>("");
+
+/** queueCoverCache memoises the palette's per-track artwork by cover id, so a
+ *  row scrolled back into view, or a shared album cover, is not re-fetched.
+ *  The value is a promise so concurrent asks for the same id share one call.
+ *  It is capped because a long session can scroll a large queue; the oldest
+ *  entry is dropped first, matching the backend's own cover cache. */
+const queueCoverCache = new Map<string, Promise<string>>();
+const queueCoverCacheMax = 64;
+
+/** queueCover fetches a queued track's artwork once per cover id. An empty id
+ *  means the track has no art, which resolves to "" without a call. */
+export function queueCover(id: string, path: string): Promise<string> {
+  if (id === "") {
+    return Promise.resolve("");
+  }
+  const hit = queueCoverCache.get(id);
+  if (hit) {
+    return hit;
+  }
+
+  const p = commands.queueCover(path).catch(() => "");
+  if (queueCoverCache.size >= queueCoverCacheMax) {
+    const oldest = queueCoverCache.keys().next().value;
+    if (oldest !== undefined) {
+      queueCoverCache.delete(oldest);
+    }
+  }
+  queueCoverCache.set(id, p);
+
+  return p;
+}
 
 /** coverId tracks which artwork the current cover value belongs to, so a late
  *  reply for a track that already changed is dropped instead of shown. */
@@ -115,6 +158,7 @@ export function connect(): () => void {
   PlayerService.Options().then(options.set);
   PlayerService.SpectrumConfig().then(spectrumConfig.set);
   PlayerService.SpectrumSchema().then(spectrumSchema.set);
+  PlayerService.PreviewConfig().then(previewConfig.set);
 
   return () => {
     offSnapshot();
@@ -153,6 +197,18 @@ export const commands = {
   // walk a folder tree, so they also drive the busy flag.
   openFiles: () => run(() => PlayerService.OpenFiles()),
   openFolder: () => run(() => PlayerService.OpenFolder()),
+  // queueCover is the palette's lazy artwork fetch. It is a plain read, not an
+  // invoke: a failure means "no art", which is not an error worth surfacing.
+  queueCover: (path: string) => PlayerService.QueueCover(path),
+  // The preview calls are plain too: a preview is an audition, so a rejected
+  // one should quietly do nothing rather than take over the error line. The
+  // config setter mirrors the value locally so a slider stays responsive.
+  previewStart: (path: string) => PlayerService.PreviewStart(path).catch(() => {}),
+  previewStop: () => PlayerService.PreviewStop().catch(() => {}),
+  setPreviewConfig: (cfg: PreviewConfig) => {
+    previewConfig.set(cfg);
+    PlayerService.SetPreviewConfig(cfg).catch(() => {});
+  },
 };
 
 /** invoke awaits one engine call and folds a rejection into the error line. */

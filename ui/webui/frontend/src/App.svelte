@@ -1,20 +1,77 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Warning } from "phosphor-svelte";
-  import { connect, player, ready } from "./lib/store";
+  import { Warning, MagnifyingGlass } from "phosphor-svelte";
+  import { connect, commands, player, ready } from "./lib/store";
   import { displayTitle } from "./lib/format";
   import Transport from "./lib/components/Transport.svelte";
   import TrackInfo from "./lib/components/TrackInfo.svelte";
   import Queue from "./lib/components/Queue.svelte";
   import Spectrum from "./lib/components/Spectrum.svelte";
   import Controls from "./lib/components/Controls.svelte";
+  import CommandPalette from "./lib/components/CommandPalette.svelte";
 
   // The one subscription to the Go push stream. connect returns its own
   // teardown, so a hot reload does not leave a second listener behind.
   onMount(connect);
 
   const snap = $derived($player);
-  const hasQueue = $derived(snap.queue.length > 0);
+  // The generated binding types the queue as nullable; the store's EMPTY is
+  // never null, but narrowing once here keeps every consumer non-null.
+  const queue = $derived(snap.queue ?? []);
+  const hasQueue = $derived(queue.length > 0);
+
+  // Ctrl+P (Cmd+P on macOS) opens the queue search, the way it opens a file
+  // switcher in an editor. The browser's own Ctrl+P prints, so the default is
+  // suppressed while the app has focus. Ctrl+Alt+P opens it straight into
+  // preview mode, which is the one audition shortcut worth having outside the
+  // palette.
+  let paletteOpen = $state(false);
+  let previewOnOpen = $state(false);
+  const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
+  const shortcutLabel = isMac ? "⌘P" : "Ctrl P";
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && e.altKey && key === "p") {
+        e.preventDefault();
+        if (paletteOpen) {
+          // Already open: the palette owns this chord and toggles its own
+          // preview mode, so the app must not double-handle it.
+          return;
+        }
+        previewOnOpen = true;
+        paletteOpen = true;
+
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "p") {
+        e.preventDefault();
+        if (paletteOpen) {
+          closePalette();
+
+          return;
+        }
+        previewOnOpen = false;
+        paletteOpen = true;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  function openPalette(withPreview: boolean) {
+    previewOnOpen = withPreview;
+    paletteOpen = true;
+  }
+
+  function closePalette() {
+    paletteOpen = false;
+    previewOnOpen = false;
+    // Closing the palette ends any audition, so the main track resumes and the
+    // next open starts fresh.
+    commands.previewStop();
+  }
 </script>
 
 <!--
@@ -33,16 +90,28 @@
          the page. -->
     <div class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
       <section class="flex min-h-0 flex-1 flex-col rounded-[6px] border border-line bg-surface">
-        <div class="flex items-center justify-between px-3 pb-1 pt-3">
+        <div class="flex items-center justify-between gap-2 px-3 pb-1 pt-3">
           <h2 class="text-xs font-medium text-muted">Queue</h2>
-          {#if hasQueue}
-            <span class="text-[11px] tabular-nums text-muted">
-              {snap.queueIdx + 1} / {snap.queue.length}
-            </span>
-          {/if}
+          <div class="flex items-center gap-2">
+            {#if hasQueue}
+              <span class="text-[11px] tabular-nums text-muted">
+                {snap.queueIdx + 1} / {queue.length}
+              </span>
+            {/if}
+            <!-- The shortcut is the fast path; this button is the discoverable
+                 one, so the search is reachable without knowing the key. -->
+            <button
+              class="flex items-center gap-1.5 rounded-[4px] border border-line bg-surface px-2 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg"
+              onclick={() => openPalette(false)}
+            >
+              <MagnifyingGlass size="12" aria-hidden="true" />
+              Search
+              <kbd class="font-sans text-fg">{shortcutLabel}</kbd>
+            </button>
+          </div>
         </div>
         <div class="min-h-0 flex-1">
-          <Queue queue={snap.queue} queueIdx={snap.queueIdx} />
+          <Queue {queue} queueIdx={snap.queueIdx} />
         </div>
       </section>
 
@@ -84,4 +153,12 @@
 
     <Transport {snap} />
   </footer>
+
+  <CommandPalette
+    open={paletteOpen}
+    {queue}
+    preview={snap.preview}
+    startPreview={previewOnOpen}
+    onclose={closePalette}
+  />
 </div>
