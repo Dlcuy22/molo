@@ -39,6 +39,20 @@ export interface Snapshot {
     "title": string;
     "artist": string;
     "album": string;
+
+    /**
+     * CoverID identifies the current artwork; the UI fetches the bytes through
+     * Cover(id). It is empty when the track has no art, which is the signal to
+     * fall back to the placeholder.
+     */
+    "coverId": string;
+
+    /**
+     * CoverMime is the artwork type the source declared. The shipped UI reads
+     * the type from the data URL instead; this is here for a UI that wants the
+     * source format, or that renders the bytes itself.
+     */
+    "coverMime": string;
     "codec": string;
     "container": string;
 

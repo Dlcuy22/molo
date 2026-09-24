@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/player/ui/webui/internal/cover"
 )
 
 // TestExpandSkipsUnplayableFiles is the queue-building contract: a folder yields
@@ -131,6 +133,77 @@ func TestClamp01(t *testing.T) {
 func TestPositionIntervalIsFourHz(t *testing.T) {
 	if positionInterval != 250*time.Millisecond {
 		t.Fatalf("positionInterval = %v, want 250ms (4 Hz)", positionInterval)
+	}
+}
+
+// TestCoverIsEmptyWithoutArtwork covers the two no-art answers: an empty id, and
+// an id the snapshot does not carry. Both must return "" rather than fall
+// through to the wrong track's bytes.
+func TestCoverIsEmptyWithoutArtwork(t *testing.T) {
+	svc := newPlayerService()
+	p, err := player.New()
+	if err != nil {
+		t.Fatalf("player.New: %v", err)
+	}
+	defer p.Close()
+	svc.player = p
+
+	if got := svc.Cover(""); got != "" {
+		t.Errorf("Cover(\"\") = %q, want empty", got)
+	}
+	if got := svc.Cover("deadbeef"); got != "" {
+		t.Errorf("Cover with an id the snapshot does not carry = %q, want empty", got)
+	}
+}
+
+// TestCoverCachesByIdentity checks the memoisation contract: the same bytes are
+// decoded once and served from the cache afterwards, which is what keeps a
+// repeated snapshot from re-encoding art.
+func TestCoverCachesByIdentity(t *testing.T) {
+	svc := newPlayerService()
+
+	art := []byte("not really a png, but the cache does not care")
+	id := cover.ID(art)
+	if id == "" {
+		t.Fatal("cover.ID returned empty for non-empty bytes")
+	}
+
+	// Seed the cache directly: Cover's own decode path is covered by the cover
+	// package, and this test is about the service's memoisation.
+	svc.coverCache[id] = "data:image/jpeg;base64,cached"
+
+	if got := svc.Cover(id); got != "data:image/jpeg;base64,cached" {
+		t.Fatalf("Cover(%q) = %q, want the cached value", id, got)
+	}
+}
+
+// TestCoverCacheEvictsOldest pins the bound: a session that plays more tracks
+// than the cap must not grow the cache without limit, and the most recent
+// entries must survive.
+func TestCoverCacheEvictsOldest(t *testing.T) {
+	svc := newPlayerService()
+	for i := 0; i < coverCacheMax+10; i++ {
+		svc.storeCover(fmt.Sprintf("id-%d", i), fmt.Sprintf("url-%d", i))
+	}
+
+	if len(svc.coverCache) != coverCacheMax {
+		t.Fatalf("cache holds %d entries, want the cap %d", len(svc.coverCache), coverCacheMax)
+	}
+	if _, ok := svc.coverCache["id-0"]; ok {
+		t.Error("oldest entry was not evicted")
+	}
+	last := fmt.Sprintf("id-%d", coverCacheMax+9)
+	if _, ok := svc.coverCache[last]; !ok {
+		t.Errorf("newest entry %q was evicted", last)
+	}
+
+	// Re-storing an existing id must not duplicate it in the order list.
+	svc.storeCover(last, "updated")
+	if len(svc.coverOrder) != coverCacheMax {
+		t.Fatalf("order list grew to %d after a re-store, want %d", len(svc.coverOrder), coverCacheMax)
+	}
+	if svc.coverCache[last] != "updated" {
+		t.Errorf("re-store did not update the value: %q", svc.coverCache[last])
 	}
 }
 

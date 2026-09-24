@@ -1,5 +1,6 @@
 <script lang="ts">
   import { MusicNotes } from "phosphor-svelte";
+  import { cover } from "../store";
   import { displayTitle, subtitle } from "../format";
   import type { Snapshot } from "../../../bindings/github.com/dlcuy22/player/ui/webui/models";
 
@@ -24,15 +25,23 @@
 <!--
   Now playing: the current track's identity. The focal point is the title;
   everything else recedes to the muted token so the hierarchy survives a long
-  filename.
+  filename. Artwork, when the file carries it, is the one colour in this row.
 -->
 <div class="flex min-w-0 items-center gap-3">
-  <div
-    class="grid size-12 shrink-0 place-items-center rounded-[6px] border border-line bg-surface"
-    aria-hidden="true"
-  >
-    <MusicNotes size="22" class="text-muted" />
-  </div>
+  {#if $cover}
+    <img
+      src={$cover}
+      alt={title === "" ? "Album artwork" : `Artwork for ${title}`}
+      class="size-16 shrink-0 rounded-[6px] border border-line object-cover"
+    />
+  {:else}
+    <div
+      class="grid size-16 shrink-0 place-items-center rounded-[6px] border border-line bg-surface"
+      aria-hidden="true"
+    >
+      <MusicNotes size="28" class="text-muted" />
+    </div>
+  {/if}
 
   <div class="min-w-0 flex-1">
     {#if title === ""}

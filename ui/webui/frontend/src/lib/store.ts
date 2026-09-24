@@ -28,6 +28,8 @@ export const EMPTY: Snapshot = {
   title: "",
   artist: "",
   album: "",
+  coverId: "",
+  coverMime: "",
   codec: "",
   container: "",
   position: 0,
@@ -48,6 +50,42 @@ export const options = writable<Options>({ codecs: [], backends: [], effects: []
 export const spectrumConfig = writable<SpectrumConfig>({ bars: 150, minHz: 20, maxHz: 20000 });
 export const spectrumSchema = writable<Param[]>([]);
 
+/** cover is the current artwork as an inline data URL, or "" when the track has
+ *  none. The snapshot carries only the artwork id, so the 4 Hz payload stays
+ *  small and the bytes cross the bridge once, when the id changes. */
+export const cover = writable<string>("");
+
+/** coverId tracks which artwork the current cover value belongs to, so a late
+ *  reply for a track that already changed is dropped instead of shown. */
+let coverId = "";
+
+/** syncCover fetches the artwork for an id at most once. A repeat id (a
+ *  redraw, or returning to a track) keeps the value already on screen. */
+function syncCover(id: string): void {
+  if (id === coverId) {
+    return;
+  }
+  coverId = id;
+  if (id === "") {
+    cover.set("");
+
+    return;
+  }
+
+  PlayerService.Cover(id).then(
+    (url) => {
+      if (coverId === id) {
+        cover.set(url);
+      }
+    },
+    () => {
+      if (coverId === id) {
+        cover.set("");
+      }
+    },
+  );
+}
+
 /** busy is true while a file or folder is being resolved, which is the one slow
  *  command: opening a dialog and walking a directory tree. */
 export const busy = writable(false);
@@ -61,17 +99,19 @@ export const ready = writable(false);
  * called once from the root component's onMount and returns the teardown.
  */
 export function connect(): () => void {
-  const offSnapshot = Events.On(EVENT_SNAPSHOT, (ev) => {
-    player.set(ev.data as Snapshot);
+  const apply = (snap: Snapshot) => {
+    player.set(snap);
+    syncCover(snap.coverId);
     ready.set(true);
+  };
+
+  const offSnapshot = Events.On(EVENT_SNAPSHOT, (ev) => {
+    apply(ev.data as Snapshot);
   });
 
   // The first read catches up on anything the engine did before the listener
   // was attached.
-  PlayerService.Snapshot().then((snap) => {
-    player.set(snap);
-    ready.set(true);
-  });
+  PlayerService.Snapshot().then(apply);
   PlayerService.Options().then(options.set);
   PlayerService.SpectrumConfig().then(spectrumConfig.set);
   PlayerService.SpectrumSchema().then(spectrumSchema.set);

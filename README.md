@@ -85,7 +85,8 @@ codec implementation is genuinely needed, the project reaches it through
 - DSP with a post-ring gain stage, a bs2b crossfeed, an effect registry, and a
   parameter schema a UI can render controls from.
 - Metadata from embedded container tags first, filename fallback last, so a UI
-  never shows an empty row.
+  never shows an empty row. Embedded cover art rides along as raw bytes and a
+  MIME type; a UI decodes and scales it.
 - Visualization through a non-blocking `Tap` that reads post-gain, pre-device
   samples, plus offline waveform analysis with a disk cache.
 - Events for discrete transitions and a polled snapshot for the continuous
@@ -162,7 +163,8 @@ queue.
 
 `ui/webui` is a desktop app: a Wails v3 Go backend with a Svelte 5 frontend.
 It has transport controls, a clickable queue, decoder and backend selection,
-and a bar visualizer driven by the engine's `Tap`.
+album artwork in the now-playing row, and a bar visualizer driven by the
+engine's `Tap`. It is the one front end that renders cover art today.
 
 The TUI and the desktop app keep their own `go.mod`, joined to the engine by a
 `go.work` at the root, so the engine stays free of UI dependencies.

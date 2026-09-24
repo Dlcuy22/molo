@@ -31,6 +31,17 @@ export function ConfigureSpectrum(cfg: $models.SpectrumConfig): $CancellableProm
 }
 
 /**
+ * Cover returns the current track's artwork as an inline data URL, or an empty
+ * string when the track has none. The snapshot carries only the id, so the
+ * payload a UI redraws at 4 Hz stays small; the bytes cross the bridge once,
+ * when the id changes. The cache is keyed by that id, so revisiting a track
+ * does not re-decode its art.
+ */
+export function Cover(id: string): $CancellablePromise<string> {
+    return $Call.ByID(1183065355, id);
+}
+
+/**
  * LoadPaths replaces the queue with the chosen files and folders and starts it.
  * A folder is expanded to its playable files, recursively and sorted, the same
  * way the TUI reads a folder argument.

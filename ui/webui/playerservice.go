@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/player/ui/webui/internal/cover"
 	"github.com/dlcuy22/player/ui/webui/internal/spectrum"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -64,6 +65,13 @@ type PlayerService struct {
 	closing chan struct{}
 	wg      sync.WaitGroup
 
+	// coverMu guards the decoded-artwork cache. Art arrives with the resolved
+	// tags, so it is decoded on the first request and kept under the id the
+	// snapshot advertises; a track change reuses the entry if the art repeats.
+	coverMu    sync.Mutex
+	coverCache map[string]string
+	coverOrder []string
+
 	// spectrumMu guards the runner, which the tick goroutine reads and
 	// ConfigureSpectrum replaces. It also guards the last emitted frame, so
 	// the pump can suppress repeats without a second lock.
@@ -83,6 +91,7 @@ func newPlayerService() *PlayerService {
 	return &PlayerService{
 		closing:     make(chan struct{}),
 		spectrumCfg: spectrum.DefaultConfig(),
+		coverCache:  make(map[string]string),
 		log:         slog.Default(),
 	}
 }
@@ -290,6 +299,8 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Title:       snap.Meta.Tags.Title,
 		Artist:      snap.Meta.Tags.Artist,
 		Album:       snap.Meta.Tags.Album,
+		CoverID:     cover.ID(snap.Meta.Tags.Cover),
+		CoverMime:   snap.Meta.Tags.CoverMIME,
 		Codec:       snap.Meta.Codec,
 		Container:   snap.Meta.Container,
 		Position:    snap.Position.Milliseconds(),
@@ -304,6 +315,61 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Channels:    snap.Format.Ch,
 		Error:       lastErr,
 	}
+}
+
+// Cover returns the current track's artwork as an inline data URL, or an empty
+// string when the track has none. The snapshot carries only the id, so the
+// payload a UI redraws at 4 Hz stays small; the bytes cross the bridge once,
+// when the id changes. The cache is keyed by that id, so revisiting a track
+// does not re-decode its art.
+func (s *PlayerService) Cover(id string) string {
+	if id == "" {
+		return ""
+	}
+
+	s.coverMu.Lock()
+	defer s.coverMu.Unlock()
+
+	if url, ok := s.coverCache[id]; ok {
+		return url
+	}
+
+	data := s.player.Snapshot().Meta.Tags.Cover
+	if cover.ID(data) != id {
+		// The track moved on between the request and this read; answer with
+		// nothing rather than the wrong art.
+		return ""
+	}
+
+	url, err := cover.DataURL(data)
+	if err != nil {
+		s.log.Warn("cover: skipping undecodable artwork", "error", err)
+
+		return ""
+	}
+	s.storeCover(id, url)
+
+	return url
+}
+
+// coverCacheMax bounds the decoded-artwork cache. A long listening session can
+// touch hundreds of tracks, and each entry is a few tens of kilobytes of base64
+// held for the life of the process, so the oldest entries are evicted once the
+// cap is reached.
+const coverCacheMax = 64
+
+// storeCover records one decoded data URL, evicting the oldest entry when the
+// cache is full. The caller holds coverMu.
+func (s *PlayerService) storeCover(id, url string) {
+	if _, ok := s.coverCache[id]; !ok {
+		if len(s.coverOrder) >= coverCacheMax {
+			oldest := s.coverOrder[0]
+			s.coverOrder = s.coverOrder[1:]
+			delete(s.coverCache, oldest)
+		}
+		s.coverOrder = append(s.coverOrder, id)
+	}
+	s.coverCache[id] = url
 }
 
 // Options is the static chooser data the UI reads once, because neither list
@@ -509,11 +575,19 @@ type QueueRow struct {
 // Snapshot is the whole visible player state in one value, so the frontend has
 // a single subscription and a single source of truth.
 type Snapshot struct {
-	State     string     `json:"state"`
-	Path      string     `json:"path"`
-	Title     string     `json:"title"`
-	Artist    string     `json:"artist"`
-	Album     string     `json:"album"`
+	State  string `json:"state"`
+	Path   string `json:"path"`
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+	Album  string `json:"album"`
+	// CoverID identifies the current artwork; the UI fetches the bytes through
+	// Cover(id). It is empty when the track has no art, which is the signal to
+	// fall back to the placeholder.
+	CoverID string `json:"coverId"`
+	// CoverMime is the artwork type the source declared. The shipped UI reads
+	// the type from the data URL instead; this is here for a UI that wants the
+	// source format, or that renders the bytes itself.
+	CoverMime string     `json:"coverMime"`
 	Codec     string     `json:"codec"`
 	Container string     `json:"container"`
 	Position  int64      `json:"position"` // milliseconds
