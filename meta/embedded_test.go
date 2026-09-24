@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/dhowden/tag"
 )
 
 func TestEmbeddedMatchesBySupportedExtension(t *testing.T) {
@@ -120,4 +122,26 @@ func TestEmbeddedPriorityBeatsFilename(t *testing.T) {
 
 func TestEmbeddedSatisfiesResolver(t *testing.T) {
 	var _ Resolver = (*EmbeddedTags)(nil)
+}
+
+// TestContainerNameFallsBackToExtension guards the MP4 gap: dhowden/tag never
+// sets a file type for MP4, so a tagged M4A would report an empty container
+// while the filename resolver reports "mp4" for the same file without tags.
+func TestContainerNameFallsBackToExtension(t *testing.T) {
+	cases := []struct {
+		fileType tag.FileType
+		path     string
+		want     string
+	}{
+		{tag.UnknownFileType, "song.m4a", "mp4"},
+		{tag.UnknownFileType, "song.mp4", "mp4"},
+		{tag.FLAC, "song.flac", "flac"},
+		{tag.OGG, "song.opus", "ogg"},
+		{tag.MP3, "song.mp3", "mp3"},
+	}
+	for _, c := range cases {
+		if got := containerName(c.fileType, c.path); got != c.want {
+			t.Errorf("containerName(%q, %q) = %q, want %q", c.fileType, c.path, got, c.want)
+		}
+	}
 }

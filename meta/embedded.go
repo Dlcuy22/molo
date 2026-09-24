@@ -90,11 +90,23 @@ func (e *EmbeddedTags) Resolve(ctx context.Context, path string) (*Meta, error) 
 
 	return &Meta{
 		Path:      path,
-		Container: strings.ToLower(string(m.FileType())),
+		Container: containerName(m.FileType(), path),
 		Codec:     codecForExt(filepath.Ext(path)),
 		Source:    e.Name(),
 		Tags:      tags,
 	}, nil
+}
+
+// containerName is the file type the library reported, or the extension's name
+// when it reported none. dhowden/tag leaves the MP4 file type unset, so without
+// the fallback a tagged M4A would report an empty container while the same file
+// without tags reports "mp4" through the filename resolver.
+func containerName(ft tag.FileType, path string) string {
+	if ft != tag.UnknownFileType {
+		return strings.ToLower(string(ft))
+	}
+
+	return containerForExt(filepath.Ext(path))
 }
 
 // hasTagContent reports whether anything a UI could display was found. A

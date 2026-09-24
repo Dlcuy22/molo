@@ -53,7 +53,7 @@ func containerForExt(ext string) string {
 		return "flac"
 	case ".mp3":
 		return "mp3"
-	case ".m4a", ".m4b", ".m4p":
+	case ".m4a", ".m4b", ".m4p", ".mp4":
 		return "mp4"
 	case ".dsf":
 		return "dsf"
