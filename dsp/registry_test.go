@@ -198,6 +198,90 @@ func TestRegistrySchemaComesFromWinner(t *testing.T) {
 	}
 }
 
+// TestRegistrySchemaForPicksOneImpl pins the per-implementation lookup a chain
+// editor needs: a stage names a specific impl, so the schema must come from
+// that factory rather than the highest-weight one.
+func TestRegistrySchemaForPicksOneImpl(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&schemaFactory{kind: "eq", impl: "eq-plain", weight: 10, key: "plain-only"})
+	r.Register(&schemaFactory{kind: "eq", impl: "eq-fancy", weight: 90, key: "fancy-only"})
+
+	// An empty impl is the winner, identical to Schema.
+	auto, err := r.SchemaFor("eq", "")
+	if err != nil {
+		t.Fatalf("SchemaFor(auto): %v", err)
+	}
+	if !hasParamKey(auto, "fancy-only") {
+		t.Fatalf("SchemaFor(auto) = %+v, want the winner's fancy-only", auto)
+	}
+
+	// A named impl gets that one, even when a higher-weight sibling exists.
+	named, err := r.SchemaFor("eq", "eq-plain")
+	if err != nil {
+		t.Fatalf("SchemaFor(eq-plain): %v", err)
+	}
+	if !hasParamKey(named, "plain-only") {
+		t.Fatalf("SchemaFor(eq-plain) = %+v, want plain-only", named)
+	}
+	if hasParamKey(named, "fancy-only") {
+		t.Fatalf("SchemaFor(eq-plain) leaked the winner's schema: %+v", named)
+	}
+}
+
+// TestRegistrySchemaForUnknownImpl proves a named pair that does not exist is
+// an error, never a fallback to the winner: a stage that names an impl must get
+// that one or be refused.
+func TestRegistrySchemaForUnknownImpl(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&fakeFactory{kind: "eq", impl: "eq-plain", weight: 10})
+
+	if _, err := r.SchemaFor("eq", "no-such-impl"); !errors.Is(err, ErrUnknownImpl) {
+		t.Fatalf("SchemaFor(unknown impl) = %v, want ErrUnknownImpl", err)
+	}
+	if _, err := r.SchemaFor("no-such-kind", "eq-plain"); !errors.Is(err, ErrUnknownKind) {
+		t.Fatalf("SchemaFor(unknown kind, named impl) = %v, want ErrUnknownKind", err)
+	}
+	// An empty impl for an unknown kind is the automatic path, so it reports
+	// the kind error instead.
+	if _, err := r.SchemaFor("no-such-kind", ""); !errors.Is(err, ErrUnknownKind) {
+		t.Fatalf("SchemaFor(unknown kind, auto) = %v, want ErrUnknownKind", err)
+	}
+}
+
+// schemaFactory is a factory whose schema carries one distinguishing key, so a
+// test can tell which implementation answered.
+type schemaFactory struct {
+	kind   string
+	impl   string
+	weight int
+	key    string
+}
+
+func (f *schemaFactory) Kind() string         { return f.kind }
+func (f *schemaFactory) Impl() string         { return f.impl }
+func (f *schemaFactory) FriendlyName() string { return f.impl }
+func (f *schemaFactory) Weight() int          { return f.weight }
+func (f *schemaFactory) Placement() Placement { return Post }
+
+func (f *schemaFactory) Schema() []Param {
+	return append(StandardParams(), Param{Key: f.key, Kind: Bool, Default: false})
+}
+
+func (f *schemaFactory) New(Values) (Effect, error) {
+	return &fakeEffect{name: f.impl}, nil
+}
+
+// hasParamKey reports whether a schema carries key.
+func hasParamKey(schema []Param, key string) bool {
+	for _, p := range schema {
+		if p.Key == key {
+			return true
+		}
+	}
+
+	return false
+}
+
 func TestChainRunsEffectsInOrder(t *testing.T) {
 	var order []string
 	c := NewChain()

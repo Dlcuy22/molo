@@ -130,9 +130,16 @@ type Crossfeed struct {
 	loL, loR     float64
 	hiL, hiR     float64
 	asisL, asisR float64
+
+	// in measures the buffer at Process entry, out at exit. A bypassed effect
+	// still measures: it is passing audio, and a fixed UI meter that vanished
+	// on bypass would be worse than one that keeps showing the level.
+	in  Meter
+	out Meter
 }
 
 var _ Effect = (*Crossfeed)(nil)
+var _ Metered = (*Crossfeed)(nil)
 
 func (c *Crossfeed) Name() string { return "crossfeed" }
 
@@ -184,13 +191,22 @@ func (c *Crossfeed) Configure(in core.FrameFormat) (core.FrameFormat, error) {
 // gains wrap the effect's own work.
 func (c *Crossfeed) Process(buf []float32, frames int) error {
 	st := c.state.Load()
-	if st == nil || st.bypassed {
+	if st == nil {
+		return nil
+	}
+	// The buffer is measured at entry and exit whether or not the effect does
+	// anything: the meters report what the stage carried, not what it changed.
+	c.in.Push(buf, frames, c.meterCh(st))
+	if st.bypassed {
+		c.out.Push(buf, frames, c.meterCh(st))
+
 		return nil
 	}
 	// Stereo is the format the design is defined for. Mono has nothing to
 	// cross, so it passes through with only the standard gains applied.
 	if st.ch < 2 {
 		applyGains(buf, frames, st.ch, st.gains, func() {})
+		c.out.Push(buf, frames, c.meterCh(st))
 
 		return nil
 	}
@@ -219,8 +235,22 @@ func (c *Crossfeed) Process(buf []float32, frames int) error {
 			buf[i+1] = float32((c.hiR + c.loL) * st.gain)
 		}
 	})
+	c.out.Push(buf, frames, c.meterCh(st))
 
 	return nil
+}
+
+// meterCh is the channel count Push should read. The published state always
+// carries a positive width: Process returns early when st is nil, and st is only
+// published after Configure has validated ch >= 1, so the fallback is never
+// reached. It is kept so a future call site that measures before Configure does
+// not read as mono.
+func (c *Crossfeed) meterCh(st *crossfeedState) int {
+	if st.ch > 0 {
+		return st.ch
+	}
+
+	return defaultChannels
 }
 
 // Reset clears the filter state so a seek cannot carry the previous position's
@@ -229,8 +259,16 @@ func (c *Crossfeed) Reset() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clearStateLocked()
+	c.in.Reset()
+	c.out.Reset()
 
 	return nil
+}
+
+// Meters reports the last input and output levels in dBFS. It is read from a
+// control goroutine, which is why building the map here is harmless.
+func (c *Crossfeed) Meters() map[string]float32 {
+	return meterValues(c.in.Read(), c.out.Read())
 }
 
 // Bypassed reports the standard bypass parameter. It reads the published state

@@ -56,6 +56,15 @@ type Registry interface {
 	// impl would select, so a UI can render before building.
 	Schema(kind string) ([]Param, error)
 
+	// SchemaFor returns the parameter schema of one (kind, impl) pair. An
+	// empty impl means the highest-weight implementation, identical to Schema.
+	SchemaFor(kind, impl string) ([]Param, error)
+
+	// Impls lists every registered factory in registration order, so a chooser
+	// can offer each (kind, impl) pair. It is the effect-side analogue of
+	// decode's Codecs.
+	Impls() []Factory
+
 	// Winner reports the implementation automatic selection would use.
 	Winner(kind string) (Factory, error)
 
@@ -150,9 +159,41 @@ func (r *registry) Winner(kind string) (Factory, error) {
 }
 
 func (r *registry) Schema(kind string) ([]Param, error) {
-	f, err := r.Winner(kind)
-	if err != nil {
-		return nil, err
+	return r.SchemaFor(kind, "")
+}
+
+// Impls lists every registered factory, in registration order, so a chooser can
+// offer each (kind, impl) pair. The returned slice is a copy: mutating it cannot
+// reach the registry.
+func (r *registry) Impls() []Factory {
+	return append([]Factory(nil), r.factories...)
+}
+
+// SchemaFor resolves one (kind, impl) pair and returns its schema. An empty
+// impl is the automatic choice, so this is the one lookup both Schema and the
+// chain editor use. A named impl that does not exist is ErrUnknownImpl rather
+// than a silent fallback to the winner, because a chain stage that names an
+// implementation must get that one or be rejected.
+//
+// An unknown kind is reported as ErrUnknownKind even when an impl is named: the
+// kind is the outer failure and is the more useful one to a caller, which is why
+// the kind is checked before the impl.
+func (r *registry) SchemaFor(kind, impl string) ([]Param, error) {
+	if impl == "" {
+		winner, err := r.Winner(kind)
+		if err != nil {
+			return nil, err
+		}
+
+		return cloneParams(winner.Schema()), nil
+	}
+
+	if r.best(kind) == nil {
+		return nil, fmt.Errorf("%w: %q (available: %s)", ErrUnknownKind, kind, strings.Join(r.Kinds(), ", "))
+	}
+	f := r.byImpl(kind, impl)
+	if f == nil {
+		return nil, fmt.Errorf("%w: %q for kind %q", ErrUnknownImpl, impl, kind)
 	}
 
 	return cloneParams(f.Schema()), nil

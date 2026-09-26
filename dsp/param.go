@@ -23,6 +23,28 @@ const (
 	Enum
 )
 
+// Widget names the control a UI should draw for a parameter. It is a display
+// hint only: the value's Kind is what decides how it is validated and stored,
+// so a UI that ignores Widget entirely still renders every parameter.
+//
+// Auto is the zero value and means "pick from Kind", which is what an effect
+// that has no opinion should use.
+type Widget string
+
+const (
+	// WidgetAuto lets the UI choose a control from the parameter's Kind.
+	WidgetAuto Widget = ""
+	// WidgetSlider is a horizontal range, the default for Float and Int.
+	WidgetSlider Widget = "slider"
+	// WidgetKnob is a rotary control, for a parameter a UI wants to group
+	// tightly, such as one EQ band.
+	WidgetKnob Widget = "knob"
+	// WidgetSwitch is a two-state control for Bool.
+	WidgetSwitch Widget = "switch"
+	// WidgetSelect is a dropdown or segmented control for Enum.
+	WidgetSelect Widget = "select"
+)
+
 // Param describes one editable setting.
 //
 // Min and Max bound Float and Int; an out-of-range number is clamped rather
@@ -30,6 +52,11 @@ const (
 // when the value is not one of Options, because there is no nearest neighbour
 // to clamp to. Step, Unit and Options the rest of the way are display
 // metadata.
+//
+// Label, Group and Widget are the UI layer. A UI groups parameters by Group in
+// the order they first appear, shows Label instead of the raw Key, and picks a
+// control from Widget. All three are optional: an effect that sets none of
+// them still renders, because the UI falls back to the Key and the Kind.
 type Param struct {
 	Key     string
 	Kind    Kind
@@ -39,6 +66,15 @@ type Param struct {
 	Unit    string
 	Options []string
 	Default any
+
+	// Label is the human name a UI shows. Empty means the UI derives one from
+	// Key.
+	Label string
+	// Group is the section a UI files the control under. Empty means the
+	// effect's own unnamed section.
+	Group string
+	// Widget is the control to draw. WidgetAuto means pick from Kind.
+	Widget Widget
 }
 
 // Values is a parameter set at the API edge. It is the shape a preset and a UI
@@ -58,22 +94,71 @@ const (
 	ParamOutputGain = "output-gain"
 )
 
+// GroupGain is the section the standard gains live in. A UI pins this group so
+// the input and output trim always sit together, above whatever sections the
+// effect itself declares.
+const GroupGain = "Gain"
+
 func bypassParam() Param {
-	return Param{Key: ParamBypass, Kind: Bool, Default: false}
+	return Param{Key: ParamBypass, Kind: Bool, Default: false, Label: "Bypass", Widget: WidgetSwitch}
 }
 
-func gainParam(key string) Param {
-	return Param{Key: key, Kind: Float, Min: -36, Max: 36, Step: 0.1, Unit: "dB", Default: 0.0}
+func gainParam(key, label string) Param {
+	return Param{
+		Key: key, Kind: Float, Min: -36, Max: 36, Step: 0.1, Unit: "dB", Default: 0.0,
+		Label: label, Group: GroupGain, Widget: WidgetSlider,
+	}
 }
+
+// CommonParam reports whether key is one of the standard parameters every
+// effect carries: bypass, input gain and output gain. A UI renders these as
+// its fixed base controls rather than as effect-specific ones, so an effect
+// cannot present them as optional or hide them.
+func CommonParam(key string) bool {
+	switch key {
+	case ParamBypass, ParamInputGain, ParamOutputGain:
+		return true
+	default:
+		return false
+	}
+}
+
+// StandardParamKeys lists the standard parameter keys in display order. It is
+// the single source a caller iterates to pin the base controls, so it cannot
+// drift from StandardParams.
+func StandardParamKeys() []string {
+	return []string{ParamBypass, ParamInputGain, ParamOutputGain}
+}
+
+// Standard meter keys. An effect that implements Metered reports levels under
+// these names, so a UI can draw a fixed input/output pair without knowing which
+// effect it is looking at. A missing key means "this effect does not measure
+// it", never "zero".
+const (
+	MeterIn  = "in"
+	MeterOut = "out"
+)
 
 // withCommon returns a schema with the standard parameters in front: bypass,
 // input gain and output gain. Every effect factory uses it, so the three are
 // present and identical everywhere a UI or a preset looks.
 func withCommon(schema []Param) []Param {
 	out := make([]Param, 0, len(schema)+3)
-	out = append(out, bypassParam(), gainParam(ParamInputGain), gainParam(ParamOutputGain))
+	out = append(out, StandardParams()...)
 
 	return append(out, schema...)
+}
+
+// StandardParams returns the three parameters every effect carries, in the
+// order a UI shows them: bypass, input gain, output gain. It is exported
+// because an effect built outside this package, such as a scripted one, has to
+// prepend the same three and must not invent its own copy of them.
+func StandardParams() []Param {
+	return []Param{
+		bypassParam(),
+		gainParam(ParamInputGain, "Input Gain"),
+		gainParam(ParamOutputGain, "Output Gain"),
+	}
 }
 
 // cloneParams copies a schema so a caller cannot mutate the one an effect

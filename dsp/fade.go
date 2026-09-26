@@ -100,9 +100,16 @@ type Fade struct {
 	// pos counts samples since the ramp was armed. Only Process writes it and
 	// only Reset zeroes it.
 	pos int
+
+	// in measures the buffer at Process entry, out at exit. A bypassed effect
+	// still measures, matching crossfeed: it is passing audio, and a fixed UI
+	// meter should not vanish on bypass.
+	in  Meter
+	out Meter
 }
 
 var _ Effect = (*Fade)(nil)
+var _ Metered = (*Fade)(nil)
 
 func (f *Fade) Name() string { return "fade" }
 
@@ -146,7 +153,15 @@ func (f *Fade) Configure(in core.FrameFormat) (core.FrameFormat, error) {
 // ramp is done the gain holds at its target (1 for in, 0 for out).
 func (f *Fade) Process(buf []float32, frames int) error {
 	st := f.state.Load()
-	if st == nil || st.bypassed {
+	if st == nil {
+		return nil
+	}
+	// Measure at entry and exit whether or not the ramp runs, so the meters
+	// report what the stage carried rather than what it changed.
+	f.in.Push(buf, frames, f.meterCh(st))
+	if st.bypassed {
+		f.out.Push(buf, frames, f.meterCh(st))
+
 		return nil
 	}
 
@@ -168,8 +183,22 @@ func (f *Fade) Process(buf []float32, frames int) error {
 			}
 		}
 	})
+	f.out.Push(buf, frames, f.meterCh(st))
 
 	return nil
+}
+
+// meterCh is the channel count Push should read. The published state always
+// carries a positive width: Process returns early when st is nil, and st is only
+// published after Configure has validated ch >= 1, so the fallback is never
+// reached. It is kept so a future call site that measures before Configure does
+// not read as mono.
+func (f *Fade) meterCh(st *fadeState) int {
+	if st.ch > 0 {
+		return st.ch
+	}
+
+	return defaultChannels
 }
 
 // fadeGain is the ramp value at sample pos: 0 to 1 for a fade in, 1 to 0 for a
@@ -196,8 +225,16 @@ func (f *Fade) Reset() error {
 	defer f.mu.Unlock()
 
 	f.pos = 0
+	f.in.Reset()
+	f.out.Reset()
 
 	return nil
+}
+
+// Meters reports the last input and output levels in dBFS. It is read from a
+// control goroutine, which is why building the map here is harmless.
+func (f *Fade) Meters() map[string]float32 {
+	return meterValues(f.in.Read(), f.out.Read())
 }
 
 // Bypassed reports the standard bypass parameter from the published state, so
