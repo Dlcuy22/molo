@@ -21,14 +21,23 @@
     meters?: Record<string, number> | null;
   } = $props();
 
+  // The plot's coordinate system is a fixed box, not a unit square. It used to
+  // be a unit square stretched with preserveAspectRatio="none" and every stroke
+  // carried vector-effect="non-scaling-stroke"; WebKitGTK does not apply that
+  // attribute, so a stroke-width of 2 in a 1-unit box blew up to fill the whole
+  // plot as a solid rectangle. A fixed box with the CSS aspect-ratio below
+  // scales x and y equally, so strokes keep their width with no vector-effect at
+  // all. The box is 25:6, which is the old full-width h-36 shape at the effect
+  // window's width.
+  const VB_W = 1000;
+  const VB_H = 240;
+  const PAD = 18;
+
   // How many segments the path is sampled at. A curve is smooth, so a fixed
   // count that reads clean at panel width is enough; sampling more would only
   // cost path length without a visible difference.
   const STEPS = 64;
 
-  // The plot's internal coordinate system. The SVG scales to the container, so
-  // these are a convenient 0..1 range rather than pixels, and the component
-  // reflows because the viewBox does the work.
   const params = $derived(resolveParams(values, visual.params));
 
   // The curve is static: it is a function of the params, not the signal. It is
@@ -50,15 +59,15 @@
   const xUsable = $derived(Number.isFinite(spanX) && spanX !== 0);
   const yUsable = $derived(Number.isFinite(spanY) && spanY !== 0);
 
-  // dB to viewBox coordinates. The y axis is inverted because a louder level
-  // is higher on the plot but a larger dBFS sits lower on screen. A zero or
-  // non-finite span has no defined direction, so it falls back to 0 rather than
-  // emitting NaN or an infinity into the path.
+  // dB to viewBox coordinates. The y axis is inverted because a louder level is
+  // higher on the plot but a larger dBFS sits lower on screen. A zero or
+  // non-finite span has no defined direction, so it falls back to the padding
+  // rather than emitting NaN or an infinity into the path.
   function px(x: number): number {
-    return xUsable ? (x - visual.xMin) / spanX : 0;
+    return xUsable ? PAD + ((x - visual.xMin) / spanX) * (VB_W - 2 * PAD) : PAD;
   }
   function py(y: number): number {
-    return yUsable ? 1 - (y - visual.yMin) / spanY : 0;
+    return yUsable ? PAD + (1 - (y - visual.yMin) / spanY) * (VB_H - 2 * PAD) : PAD;
   }
 
   // A bad range draws nothing at all: an empty path is honest about having no
@@ -67,7 +76,7 @@
     !rangeOK || !xUsable || !yUsable
       ? ""
       : points
-          .map((p, i) => `${i === 0 ? "M" : "L"}${px(p.x).toFixed(4)} ${py(p.y).toFixed(4)}`)
+          .map((p, i) => `${i === 0 ? "M" : "L"}${px(p.x).toFixed(2)} ${py(p.y).toFixed(2)}`)
           .join(" "),
   );
 
@@ -107,17 +116,17 @@
 -->
 <figure class="flex flex-col gap-1.5">
   <svg
-    class="h-36 w-full rounded-[4px] border border-line bg-bg/40"
-    viewBox="-0.06 -0.06 1.12 1.12"
-    preserveAspectRatio="none"
+    class="block w-full rounded-[4px] border border-line bg-bg/40"
+    style="aspect-ratio: {VB_W} / {VB_H}"
+    viewBox="0 0 {VB_W} {VB_H}"
     role="img"
     aria-label={label}
   >
     <!-- The axes are the scale, not decoration: without them the curve has no
          readable level. They are muted so the curve stays the one accent. -->
-    <g class="text-muted" stroke="currentColor" stroke-width="1" opacity="0.5">
-      <line x1="0" y1="0" x2="0" y2="1" vector-effect="non-scaling-stroke" />
-      <line x1="0" y1="1" x2="1" y2="1" vector-effect="non-scaling-stroke" />
+    <g class="text-muted" stroke="currentColor" stroke-width="2" opacity="0.5">
+      <line x1={PAD} y1={PAD} x2={PAD} y2={VB_H - PAD} />
+      <line x1={PAD} y1={VB_H - PAD} x2={VB_W - PAD} y2={VB_H - PAD} />
     </g>
 
     {#if rangeOK && xUsable && yUsable}
@@ -130,9 +139,8 @@
         y2={py(visual.xMax)}
         class="text-line"
         stroke="currentColor"
-        stroke-width="1"
-        stroke-dasharray="4 4"
-        vector-effect="non-scaling-stroke"
+        stroke-width="2"
+        stroke-dasharray="8 8"
       />
     {/if}
 
@@ -141,10 +149,9 @@
       fill="none"
       class="text-accent"
       stroke="currentColor"
-      stroke-width="2"
+      stroke-width="3"
       stroke-linejoin="round"
       stroke-linecap="round"
-      vector-effect="non-scaling-stroke"
     />
 
     {#if rangeOK && xUsable && yUsable && liveIn !== null && liveOut !== null}
@@ -152,14 +159,13 @@
            the current signal is seeing. -->
       <line
         x1={px(liveIn)}
-        y1="1"
+        y1={VB_H - PAD}
         x2={px(liveIn)}
         y2={py(liveOut)}
         class="text-accent"
         stroke="currentColor"
-        stroke-width="1"
+        stroke-width="2"
         opacity="0.5"
-        vector-effect="non-scaling-stroke"
       />
       {#if grValue !== null && grValue < 0}
         <!-- The reduction marker: the vertical gap between the dot and the
@@ -172,25 +178,13 @@
           y2={py(liveIn)}
           class="text-danger"
           stroke="currentColor"
-          stroke-width="3"
+          stroke-width="5"
           opacity="0.7"
-          vector-effect="non-scaling-stroke"
         />
       {/if}
-      <!-- Drawn as a zero-length round-capped stroke rather than a circle: the
-           plot scales x and y independently, so a circle radius would render
-           as an ellipse. A round cap under non-scaling-stroke stays round. -->
-      <line
-        x1={px(liveIn)}
-        y1={py(liveOut)}
-        x2={px(liveIn)}
-        y2={py(liveOut)}
-        class="text-accent"
-        stroke="currentColor"
-        stroke-width="7"
-        stroke-linecap="round"
-        vector-effect="non-scaling-stroke"
-      />
+      <!-- A real circle, not a zero-length stroke: with a fixed box the scale is
+           uniform, so a circle stays round and needs no vector-effect. -->
+      <circle cx={px(liveIn)} cy={py(liveOut)} r="7" class="text-accent" fill="currentColor" />
     {/if}
   </svg>
 

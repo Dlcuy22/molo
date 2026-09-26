@@ -82,6 +82,37 @@ describe("TransferCurve bad range", () => {
   });
 });
 
+describe("TransferCurve scales uniformly", () => {
+  // The regression: the plot used a 1-unit viewBox stretched with
+  // preserveAspectRatio="none" and relied on vector-effect="non-scaling-stroke"
+  // to keep strokes thin. WebKitGTK (the desktop webview) does not apply that
+  // attribute, so stroke-width 2 became ~1560px and the whole plot rendered as
+  // a solid rectangle. The fix is a fixed viewBox scaled uniformly by
+  // aspect-ratio, so no stroke depends on vector-effect.
+  it("does not rely on vector-effect to keep strokes from exploding", () => {
+    const body = renderCurve({ meters: { in: -12, gr: -3 } });
+    expect(body).not.toContain("non-scaling-stroke");
+    expect(body).not.toContain("vector-effect");
+  });
+
+  it("does not stretch the coordinate system with preserveAspectRatio", () => {
+    const body = renderCurve({});
+    expect(body).not.toContain("preserveAspectRatio");
+  });
+
+  it("keeps every stroke width small in a pixel-sized viewBox", () => {
+    // With a ~1000-unit box a sane stroke is a handful of units; the old 1-unit
+    // box is what made a width of 2 fill the plot. A width past a few percent of
+    // the box means the unit-square bug has returned.
+    const body = renderCurve({});
+    const widths = [...body.matchAll(/stroke-width="([0-9.]+)"/g)].map((m) => Number(m[1]));
+    expect(widths.length).toBeGreaterThan(0);
+    for (const w of widths) {
+      expect(w).toBeLessThanOrEqual(8);
+    }
+  });
+});
+
 describe("TransferCurve reads only the declared params", () => {
   it("does not apply a knee for a visual whose params omit it", () => {
     // The effect carries a knee key in values, but the visual did not declare
