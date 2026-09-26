@@ -34,6 +34,9 @@ const (
 	eventSnapshot = "player:snapshot"
 	// eventFrame carries one spectrum frame from the visualizer goroutine.
 	eventFrame = "player:spectrum"
+	// eventEffectMeters carries the lean effect meters on their own faster tick,
+	// so a gain-reduction needle moves without the full chain snapshot.
+	eventEffectMeters = "player:effect-meters"
 )
 
 // spectrumInterval is the visualizer analysis period: ~60 Hz, matching
@@ -49,6 +52,13 @@ const spectrumInterval = 16 * time.Millisecond
 // progress bar moving. 4 Hz matches the TUI: smooth for a whole-second clock
 // and negligible next to the decoder.
 const positionInterval = 250 * time.Millisecond
+
+// effectMeterInterval is the fast effect-meter tick. The snapshot's 4 Hz is
+// fine for a static curve but visibly stepped for a moving gain-reduction
+// needle, so the meters ride their own tick between snapshots. 30 Hz reads as
+// continuous and stays far cheaper than the spectrum's 60 Hz, because the
+// payload is a few floats per metered stage and no schema or values.
+const effectMeterInterval = 33 * time.Millisecond
 
 // PlayerService owns the engine and the bridge to the frontend.
 //
@@ -149,9 +159,10 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// The engine's event channel is drained on its own goroutine and fanned out
 	// to Wails events. Draining continuously matters: a UI that only listened
 	// when it felt like it would let the engine's buffer fill and drop.
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.pumpEvents()
 	go s.pumpSpectrum()
+	go s.pumpEffectMeters()
 
 	return nil
 }
@@ -211,6 +222,45 @@ func (s *PlayerService) pumpEvents() {
 			s.emit(eventSnapshot, s.Snapshot())
 		}
 	}
+}
+
+// pumpEffectMeters publishes the lean effect meters on their own faster tick.
+// It is separate from pumpEvents because the 4 Hz snapshot would make a moving
+// needle step, and separate from pumpSpectrum because the payload and the rate
+// are different: a few floats per metered stage at 30 Hz, not 150 bands at 60.
+func (s *PlayerService) pumpEffectMeters() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(effectMeterInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.closing:
+			return
+		case <-ticker.C:
+			s.publishEffectMeters()
+		}
+	}
+}
+
+// publishEffectMeters emits one lean meter payload. A chain with no metered
+// stage, or an engine that is not built yet, emits nothing rather than an empty
+// event, so an idle player does not push a payload at 30 Hz forever.
+func (s *PlayerService) publishEffectMeters() {
+	fx, err := s.effects()
+	if err != nil {
+		return
+	}
+	meters := fx.EffectMeters()
+	if len(meters) == 0 {
+		return
+	}
+	out := make([]EffectMetersInfo, 0, len(meters))
+	for _, m := range meters {
+		out = append(out, EffectMetersInfo{ID: m.ID, Meters: m.Meters})
+	}
+	s.emit(eventEffectMeters, out)
 }
 
 // pumpSpectrum reads the tap on its own clock and publishes a frame. Running

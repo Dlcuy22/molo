@@ -27,6 +27,7 @@ import { toEffectKind, toEffectStage } from "./effect-adapter";
 // calls; the payload types below are the compile-time check that they match.
 const EVENT_SNAPSHOT = "player:snapshot";
 const EVENT_FRAME = "player:spectrum";
+const EVENT_EFFECT_METERS = "player:effect-meters";
 
 /** Empty is the honest initial state: nothing is playing and nothing is queued. */
 export const EMPTY: Snapshot = {
@@ -167,6 +168,32 @@ export const busy = writable(false);
  *  loaded" apart from "nothing playing" (R-27). */
 export const ready = writable(false);
 
+/** EffectMetersInfo is the lean fast-tick payload: one stage's live meters. */
+interface EffectMetersInfo {
+  id: string;
+  meters: Record<string, number> | null;
+}
+
+/**
+ * applyEffectMeters merges a fast-tick meter payload into the chain store
+ * without touching schema or values. It only updates stages the payload names,
+ * so a stage added between ticks keeps the meters it already had until the next
+ * full snapshot. The panel's curve and readings read from here, which is what
+ * lets the gain-reduction needle move at ~30 Hz instead of the 4 Hz snapshot.
+ */
+function applyEffectMeters(rows: EffectMetersInfo[]): void {
+  if (rows.length === 0) {
+    return;
+  }
+  const byId = new Map(rows.map((r) => [r.id, r.meters]));
+  effectChain.update((stages) =>
+    stages.map((s) => {
+      const meters = byId.get(s.id);
+      return meters === undefined ? s : { ...s, meters };
+    }),
+  );
+}
+
 /**
  * connect subscribes to the Go push stream and loads the static data. It is
  * called once from the root component's onMount and returns the teardown.
@@ -187,6 +214,13 @@ export function connect(): () => void {
     apply(ev.data as Snapshot);
   });
 
+  // The fast meter tick is a lean payload, so it only touches the chain store.
+  // It is registered regardless of window and filters itself: a non-effect
+  // window has an empty chain, so the merge is a no-op.
+  const offMeters = Events.On(EVENT_EFFECT_METERS, (ev) => {
+    applyEffectMeters(ev.data as EffectMetersInfo[]);
+  });
+
   // The first read catches up on anything the engine did before the listener
   // was attached.
   PlayerService.Snapshot().then(apply);
@@ -203,6 +237,7 @@ export function connect(): () => void {
 
   return () => {
     offSnapshot();
+    offMeters();
   };
 }
 

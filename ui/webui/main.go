@@ -34,6 +34,7 @@ func main() {
 	// envelope; an unregistered name still travels, but untyped.
 	application.RegisterEvent[Snapshot](eventSnapshot)
 	application.RegisterEvent[[]float64](eventFrame)
+	application.RegisterEvent[[]EffectMetersInfo](eventEffectMeters)
 
 	service := newPlayerService()
 

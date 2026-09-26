@@ -83,6 +83,14 @@ type EffectChainInfo struct {
 	Stages []EffectStageInfo `json:"stages"`
 }
 
+// EffectMetersInfo is one stage's live meters with no schema or values. It is
+// the payload of the fast meter tick, kept lean so a ~30 Hz read never re-walks
+// the parameters the 4 Hz snapshot already carries.
+type EffectMetersInfo struct {
+	ID     string             `json:"id"`
+	Meters map[string]float32 `json:"meters"`
+}
+
 // effects returns the editor surface, or an error when the engine was not built
 // yet. It mirrors the nil checks the other bound methods use.
 func (s *PlayerService) effects() (player.Effects, error) {
@@ -133,6 +141,24 @@ func (s *PlayerService) EffectChain() (EffectChainInfo, error) {
 	out := EffectChainInfo{Stages: make([]EffectStageInfo, 0, len(chain.Stages))}
 	for _, st := range chain.Stages {
 		out.Stages = append(out.Stages, effectStageInfo(st))
+	}
+
+	return out, nil
+}
+
+// EffectMeters returns only the live meters of every stage that meters. It is
+// the fast tick's read: no schema, no values, so a moving gain-reduction needle
+// can update at ~30 Hz without the cost of the full chain snapshot.
+func (s *PlayerService) EffectMeters() ([]EffectMetersInfo, error) {
+	fx, err := s.effects()
+	if err != nil {
+		return nil, err
+	}
+
+	meters := fx.EffectMeters()
+	out := make([]EffectMetersInfo, 0, len(meters))
+	for _, m := range meters {
+		out = append(out, EffectMetersInfo{ID: m.ID, Meters: m.Meters})
 	}
 
 	return out, nil

@@ -240,6 +240,40 @@ func TestEffectVisualInfoUnknownKindPassesThrough(t *testing.T) {
 	}
 }
 
+// The fast meter payload is a lean shape the frontend reads by name: an id and
+// a meters map, nothing else. It must not carry schema or values, which is the
+// whole point of a separate tick.
+func TestEffectMetersInfoWireShape(t *testing.T) {
+	raw, err := json.Marshal(EffectMetersInfo{
+		ID:     "compressor-1",
+		Meters: map[string]float32{"in": -12, "gr": -6},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["id"] != "compressor-1" {
+		t.Errorf("id = %v, want compressor-1", got["id"])
+	}
+	meters, ok := got["meters"].(map[string]any)
+	if !ok {
+		t.Fatalf("meters = %v, want object", got["meters"])
+	}
+	if meters["gr"] != float64(-6) {
+		t.Errorf("meters[gr] = %v, want -6", meters["gr"])
+	}
+	if _, present := got["schema"]; present {
+		t.Error("the fast meter payload carries a schema, want none")
+	}
+	if _, present := got["values"]; present {
+		t.Error("the fast meter payload carries values, want none")
+	}
+}
+
 // stageFixture builds a minimal engine stage for the mapping tests. It is not a
 // session, so the mapping is tested without a player or an audio device.
 func stageFixture(meters map[string]float32) EffectStageInfo {

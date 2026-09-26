@@ -67,6 +67,15 @@ export function EffectKinds(): $CancellablePromise<$models.EffectKindInfo[] | nu
 }
 
 /**
+ * EffectMeters returns only the live meters of every stage that meters. It is
+ * the fast tick's read: no schema, no values, so a moving gain-reduction needle
+ * can update at ~30 Hz without the cost of the full chain snapshot.
+ */
+export function EffectMeters(): $CancellablePromise<$models.EffectMetersInfo[] | null> {
+    return $Call.ByID(2722747439);
+}
+
+/**
  * EffectWindowOpen reports whether the effect window exists, so the main window
  * can label its button.
  */

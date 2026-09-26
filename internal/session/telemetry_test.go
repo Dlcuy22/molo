@@ -272,3 +272,40 @@ func TestEffectStageVisualCopiesSlices(t *testing.T) {
 		t.Fatalf("Visual.Overlays[0] = %q after the effect mutated its slice, want the snapshot to keep %q", got, "in")
 	}
 }
+
+// TestEffectMetersReadsOnlyLiveMeters proves the fast path: it reports a
+// metered stage's meters by ID and omits a stage that has no live effect yet,
+// without reading schema or values.
+func TestEffectMetersReadsOnlyLiveMeters(t *testing.T) {
+	registerTelemetryFactories()
+
+	s := effectsSession(t, dsp.Pipeline{})
+	id, err := s.AddEffect(testDescribedKind, "")
+	if err != nil {
+		t.Fatalf("AddEffect: %v", err)
+	}
+	waitInstalled(t, s, 1)
+
+	meters := s.EffectMeters()
+	if len(meters) != 1 {
+		t.Fatalf("EffectMeters() = %+v, want one entry", meters)
+	}
+	if meters[0].ID != id {
+		t.Fatalf("EffectMeters()[0].ID = %q, want %q", meters[0].ID, id)
+	}
+	if meters[0].Meters["gr"] != -6 {
+		t.Fatalf("EffectMeters()[0].Meters = %+v, want the live gr reading", meters[0].Meters)
+	}
+}
+
+// TestEffectMetersOmitsUnmeteredStages proves a stage whose effect does not
+// implement dsp.Metered is left out rather than reported with empty meters, so
+// the fast payload never carries a stage the UI cannot draw.
+func TestEffectMetersOmitsUnmeteredStages(t *testing.T) {
+	// An empty chain reports nothing rather than an empty slice with a stage.
+	s := effectsSession(t, dsp.Pipeline{})
+
+	if got := s.EffectMeters(); len(got) != 0 {
+		t.Fatalf("EffectMeters() on an empty chain = %+v, want none", got)
+	}
+}

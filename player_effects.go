@@ -34,6 +34,10 @@ type EffectChain struct {
 	Stages []EffectStage
 }
 
+// EffectMeters is one stage's live meters with no schema or values attached,
+// for a UI that wants to drive a meter faster than the full snapshot.
+type EffectMeters = session.EffectMeters
+
 // Effects is the effect-chain editor surface. It is separate from Player so a
 // fake that only exercises transport need not implement an editor it never
 // uses, matching the engine's other capability interfaces (decode.Seeker,
@@ -52,6 +56,11 @@ type Effects interface {
 
 	// EffectChain returns the chain in force, in processing order.
 	EffectChain() EffectChain
+
+	// EffectMeters returns only the live meters of every stage that meters, for
+	// a UI that drives a needle faster than the full snapshot. It reads no
+	// schema and no values, so it is cheap enough for a high tick rate.
+	EffectMeters() []EffectMeters
 
 	// AddEffect appends a stage and returns its generated ID. The stage is
 	// built on the caller's goroutine; the control loop installs the rebuild.
@@ -86,6 +95,9 @@ func (p *player) EffectKindList() []EffectKind { return p.session.EffectKinds() 
 func (p *player) EffectChain() EffectChain {
 	return EffectChain{Stages: p.session.EffectStages()}
 }
+
+// EffectMeters returns only the live meters of every stage that meters.
+func (p *player) EffectMeters() []EffectMeters { return p.session.EffectMeters() }
 
 // AddEffect appends a stage to the chain and returns its generated ID.
 func (p *player) AddEffect(kind, impl string) (string, error) {

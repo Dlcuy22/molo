@@ -10,6 +10,7 @@ export type {
     CodecOption,
     EffectChainInfo,
     EffectKindInfo,
+    EffectMetersInfo,
     EffectParamInfo,
     EffectReadingInfo,
     EffectStageInfo,

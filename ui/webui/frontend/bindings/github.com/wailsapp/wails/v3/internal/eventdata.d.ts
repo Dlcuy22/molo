@@ -12,6 +12,7 @@ import type * as main$0 from "../../../../dlcuy22/player/ui/webui/models.js";
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
+            "player:effect-meters": main$0.EffectMetersInfo[] | null;
             "player:snapshot": main$0.Snapshot;
             "player:spectrum": number[] | null;
         }

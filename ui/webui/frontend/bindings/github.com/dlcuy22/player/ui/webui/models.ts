@@ -29,6 +29,16 @@ export interface EffectKindInfo {
 }
 
 /**
+ * EffectMetersInfo is one stage's live meters with no schema or values. It is
+ * the payload of the fast meter tick, kept lean so a ~30 Hz read never re-walks
+ * the parameters the 4 Hz snapshot already carries.
+ */
+export interface EffectMetersInfo {
+    "id": string;
+    "meters": { [_ in string]?: number } | null;
+}
+
+/**
  * EffectParamInfo is one parameter description for a control to render.
  */
 export interface EffectParamInfo {

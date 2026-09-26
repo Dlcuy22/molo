@@ -52,6 +52,48 @@ type EffectStage struct {
 	Visual   *dsp.Visual
 }
 
+// EffectMeters is one stage's live meters with no schema or values attached. It
+// is the lean shape a fast meter tick reads: the full EffectStage re-reads every
+// parameter through Get, which is fine at the snapshot's 4 Hz and wasteful at
+// the meter tick's ~30 Hz. Pairing is by ID, the same rule EffectStages uses.
+type EffectMeters struct {
+	ID     string
+	Meters map[string]float32
+}
+
+// EffectMeters returns the live meters of every stage that meters, in
+// processing order. It resolves the live chain by ID exactly as EffectStages
+// does, but reads only the meters, so a UI can drive a moving needle at a
+// higher rate than the full snapshot without re-walking schemas and values. A
+// stage with no live effect yet, or an effect that does not implement
+// dsp.Metered, is omitted rather than reported with empty meters.
+func (s *Session) EffectMeters() []EffectMeters {
+	pipeline, _ := s.runtime.pipelineSnapshot()
+	specs := pipeline.Post
+	inst := s.installed.Load()
+	if inst == nil {
+		inst = s.runtime.pendingSnapshot()
+	}
+	if inst == nil {
+		return nil
+	}
+
+	out := make([]EffectMeters, 0, len(specs))
+	for _, spec := range specs {
+		e, ok := inst.effect(spec)
+		if !ok {
+			continue
+		}
+		m, ok := e.(dsp.Metered)
+		if !ok {
+			continue
+		}
+		out = append(out, EffectMeters{ID: spec.ID, Meters: m.Meters()})
+	}
+
+	return out
+}
+
 // EffectKinds lists every registered implementation, one entry per (kind, impl)
 // pair, so a chooser can offer crossfeed-bs2b and a scripted effect side by
 // side. It reads the process-wide registry, which never changes after init.
