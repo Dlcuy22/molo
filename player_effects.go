@@ -24,7 +24,7 @@ var (
 type EffectKind = session.EffectKindInfo
 
 // EffectStage is one stage of the chain in force, with its schema, current
-// values and live meters.
+// values, live meters and described readings and visual.
 type EffectStage = session.EffectStage
 
 // EffectChain is the chain in force in processing order. It is a value, not a

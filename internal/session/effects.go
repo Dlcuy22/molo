@@ -34,9 +34,11 @@ type EffectKindInfo struct {
 }
 
 // EffectStage is one stage of the chain in force: its identity, its schema, its
-// current parameter values and its live meters. Schema and Values are snapshots
-// taken when the stage is read, so a UI can render it without holding an
-// effect. Meters is nil for an effect that does not implement dsp.Metered.
+// current parameter values, its live meters and its described readings and
+// visual. Schema and Values are snapshots taken when the stage is read, so a UI
+// can render it without holding an effect. Meters is nil for an effect that does
+// not implement dsp.Metered. Readings is empty and Visual is nil for an effect
+// that does not implement dsp.Described or dsp.Visualized.
 type EffectStage struct {
 	ID       string
 	Kind     string
@@ -46,6 +48,8 @@ type EffectStage struct {
 	Schema   []dsp.Param
 	Values   dsp.Values
 	Meters   map[string]float32
+	Readings []dsp.Reading
+	Visual   *dsp.Visual
 }
 
 // EffectKinds lists every registered implementation, one entry per (kind, impl)
@@ -148,6 +152,19 @@ func stageFromEffect(spec dsp.Spec, e dsp.Effect) EffectStage {
 	}
 	if m, ok := e.(dsp.Metered); ok {
 		stage.Meters = m.Meters()
+	}
+	if d, ok := e.(dsp.Described); ok {
+		stage.Readings = d.Readings()
+	}
+	if v, ok := e.(dsp.Visualized); ok {
+		// The Visual struct is copied into local storage, but its slices would
+		// still alias whatever the effect returned. A Visualized that reuses
+		// or mutates its backing slices would then corrupt a snapshot a UI is
+		// already reading, so both are deep-copied before being stored.
+		visual := v.Visual()
+		visual.Params = append([]string(nil), visual.Params...)
+		visual.Overlays = append([]string(nil), visual.Overlays...)
+		stage.Visual = &visual
 	}
 
 	return stage
