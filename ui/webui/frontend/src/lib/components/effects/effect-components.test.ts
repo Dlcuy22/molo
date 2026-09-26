@@ -96,6 +96,8 @@ function stage(over: Partial<EffectStage>): EffectStage {
     schema: luaSchema,
     values: {},
     meters: null,
+    readings: [],
+    visual: null,
     ...over,
   };
 }

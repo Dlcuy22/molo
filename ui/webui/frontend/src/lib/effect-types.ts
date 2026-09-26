@@ -45,6 +45,42 @@ export interface EffectKind {
   scripted: boolean;
 }
 
+/** ReadingKind mirrors dsp.ReadingKind: how a reading is drawn. A string type
+ *  for the same reason Widget is, because the value crosses the JSON bridge. */
+export type ReadingKind = "level" | "gain-reduction" | "scalar";
+
+/** Reading mirrors dsp.Reading: one Meters key explained, so a UI can draw it
+ *  without knowing which effect it is looking at. The number stays the
+ *  effect's to publish; this only says how to render it. */
+export interface Reading {
+  /** Matches a Meters key, e.g. "gr". */
+  key: string;
+  label: string;
+  /** "dB", "%", "Hz". */
+  unit: string;
+  /** The drawn range. */
+  min: number;
+  max: number;
+  kind: ReadingKind;
+}
+
+/** VisualKind mirrors dsp.VisualKind: a plot the UI knows how to draw. The
+ *  effect names the kind; the UI owns the renderer. */
+export type VisualKind = "transfer" | "gain-reduction";
+
+/** Visual mirrors dsp.Visual: a plot declaration. Params are schema keys the
+ *  curve is derived from, so a static curve is recomputed from Values rather
+ *  than carried on the meter path. Overlays are reading keys drawn live. */
+export interface Visual {
+  kind: VisualKind;
+  params: string[];
+  overlays: string[];
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+}
+
 /** EffectStage is one instance in the chain. */
 export interface EffectStage {
   id: string;
@@ -57,6 +93,11 @@ export interface EffectStage {
   values: Record<string, unknown>;
   /** dsp.MeterIn / dsp.MeterOut in dBFS. Null when the effect does not meter. */
   meters: Record<string, number> | null;
+  /** dsp.Described. Empty when the effect implements only Metered; use
+   *  effectiveReadings to get the drawable set either way. */
+  readings: Reading[];
+  /** dsp.Visualized. Null when the effect wants no plot. */
+  visual: Visual | null;
 }
 
 /** EffectChain is the whole post-ring chain, in processing order. */
@@ -86,6 +127,36 @@ export function meterDB(
   const v = stage.meters?.[key];
 
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * effectiveReadings resolves the readings a UI should draw by augmenting the
+ * standard pair with the effect's declared ones. The standard In/Out level
+ * readings are synthesised from the meters when the effect meters at all, and
+ * the stage's declared readings follow. A declared reading that already names
+ * a standard key wins over the synthesised one, so no key is drawn twice. An
+ * effect that predates telemetry implements only Metered and declares nothing,
+ * so it still gets the pair; one that declares only e.g. "gr" keeps the pair
+ * it would otherwise have lost. When the effect does not meter, only the
+ * declared readings are returned. This is the one place that rule lives, so a
+ * component and a test agree.
+ */
+export function effectiveReadings(stage: EffectStage): Reading[] {
+  const declared = stage.readings;
+  if (stage.meters === null) {
+    return declared;
+  }
+
+  const declaredKeys = new Set(declared.map((r) => r.key));
+  const pair: Reading[] = [];
+  if (!declaredKeys.has(METER_IN)) {
+    pair.push({ key: METER_IN, label: "In", unit: "dBFS", min: -60, max: 0, kind: "level" });
+  }
+  if (!declaredKeys.has(METER_OUT)) {
+    pair.push({ key: METER_OUT, label: "Out", unit: "dBFS", min: -60, max: 0, kind: "level" });
+  }
+
+  return [...pair, ...declared];
 }
 
 /**

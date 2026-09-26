@@ -14,10 +14,47 @@ import type {
   EffectKind,
   EffectParam,
   EffectStage,
+  Reading,
+  ReadingKind,
+  Visual,
+  VisualKind,
   Widget,
 } from "./effect-types";
 
 const WIDGETS: readonly Widget[] = ["", "slider", "knob", "switch", "select"];
+
+const READING_KINDS: readonly ReadingKind[] = ["level", "gain-reduction", "scalar"];
+const VISUAL_KINDS: readonly VisualKind[] = ["transfer", "gain-reduction"];
+
+// The generated binding is a W4 concern; until it carries these fields they
+// are declared here as optional, so this stays correct when the bindings are
+// regenerated with the real fields. Omit first: intersecting an optional
+// field over a declared one would collapse to never.
+type WireStageBase = Omit<WireStage, "readings" | "visual">;
+
+interface WireReading {
+  key: string;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  kind: string;
+}
+
+interface WireVisual {
+  kind: string;
+  params: string[] | null;
+  overlays: string[] | null;
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+}
+
+type WireStageWithTelemetry = WireStageBase & {
+  readings?: WireReading[] | null;
+  visual?: WireVisual | null;
+};
 
 /** toWidget narrows the wire string to a known hint, else "". A hint the UI
  *  does not know must fall back to the Kind default, not crash. */
@@ -43,8 +80,41 @@ export function toEffectParam(p: WireParam): EffectParam {
   };
 }
 
+/** toReading maps one wire reading to the frozen shape. An unknown kind falls
+ *  back to "level", which every renderer can draw, rather than reaching a
+ *  component as a string it does not know. */
+export function toReading(r: WireReading): Reading {
+  return {
+    key: r.key,
+    label: r.label,
+    unit: r.unit,
+    min: r.min,
+    max: r.max,
+    kind: (READING_KINDS as readonly string[]).includes(r.kind)
+      ? (r.kind as ReadingKind)
+      : "level",
+  };
+}
+
+/** toVisual maps one wire plot to the frozen shape. An unknown kind is dropped
+ *  whole: a plot the UI cannot draw is better absent than blank. */
+export function toVisual(v: WireVisual): Visual | null {
+  if (!(VISUAL_KINDS as readonly string[]).includes(v.kind)) {
+    return null;
+  }
+  return {
+    kind: v.kind as VisualKind,
+    params: v.params ?? [],
+    overlays: v.overlays ?? [],
+    xMin: v.xMin,
+    xMax: v.xMax,
+    yMin: v.yMin,
+    yMax: v.yMax,
+  };
+}
+
 /** toEffectStage maps one wire stage to the frozen shape. */
-export function toEffectStage(s: WireStage): EffectStage {
+export function toEffectStage(s: WireStageWithTelemetry): EffectStage {
   const meters: Record<string, number> | null = s.meters
     ? Object.fromEntries(
         Object.entries(s.meters).filter(
@@ -62,6 +132,8 @@ export function toEffectStage(s: WireStage): EffectStage {
     schema: (s.schema ?? []).map(toEffectParam),
     values: s.values ?? {},
     meters,
+    readings: (s.readings ?? []).map(toReading),
+    visual: s.visual ? toVisual(s.visual) : null,
   };
 }
 

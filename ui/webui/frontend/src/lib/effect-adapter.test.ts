@@ -58,7 +58,29 @@ describe("toEffectParam", () => {
 });
 
 describe("toEffectStage", () => {
-  function wireStage(over: Partial<WireStage>): WireStage {
+  // The generated binding carries no telemetry fields until W4 regenerates it;
+  // the adapter reads them as optional, so the fixture declares them too.
+  type WireStageT = WireStage & {
+    readings?: {
+      key: string;
+      label: string;
+      unit: string;
+      min: number;
+      max: number;
+      kind: string;
+    }[] | null;
+    visual?: {
+      kind: string;
+      params: string[] | null;
+      overlays: string[] | null;
+      xMin: number;
+      xMax: number;
+      yMin: number;
+      yMax: number;
+    } | null;
+  };
+
+  function wireStage(over: Partial<WireStageT>): WireStageT {
     return {
       id: "s1",
       kind: "crossfeed",
@@ -89,6 +111,96 @@ describe("toEffectStage", () => {
   it("maps each schema entry", () => {
     const s = toEffectStage(wireStage({ schema: [wireParam({ key: "cutoff" })] }));
     expect(s.schema.map((p) => p.key)).toEqual(["cutoff"]);
+  });
+
+  it("defaults readings to empty and visual to null when absent", () => {
+    const s = toEffectStage(wireStage({}));
+    expect(s.readings).toEqual([]);
+    expect(s.visual).toBeNull();
+  });
+
+  it("falls back to level for an unknown reading kind", () => {
+    const s = toEffectStage(
+      wireStage({
+        readings: [
+          { key: "gr", label: "Gain Reduction", unit: "dB", min: -30, max: 0, kind: "vu" },
+        ],
+      }),
+    );
+    expect(s.readings[0].kind).toBe("level");
+  });
+
+  it("drops a visual whose kind the UI cannot draw", () => {
+    const s = toEffectStage(
+      wireStage({
+        visual: {
+          kind: "spectrum",
+          params: [],
+          overlays: [],
+          xMin: 0,
+          xMax: 1,
+          yMin: 0,
+          yMax: 1,
+        },
+      }),
+    );
+    expect(s.visual).toBeNull();
+  });
+
+  it("normalises absent params and overlays to empty lists", () => {
+    const s = toEffectStage(
+      wireStage({
+        visual: {
+          kind: "transfer",
+          params: null,
+          overlays: null,
+          xMin: -60,
+          xMax: 0,
+          yMin: -60,
+          yMax: 0,
+        },
+      }),
+    );
+    expect(s.visual).toEqual({
+      kind: "transfer",
+      params: [],
+      overlays: [],
+      xMin: -60,
+      xMax: 0,
+      yMin: -60,
+      yMax: 0,
+    });
+  });
+
+  it("normalises a telemetry payload", () => {
+    const s = toEffectStage(
+      wireStage({
+        readings: [
+          { key: "gr", label: "Gain Reduction", unit: "dB", min: -30, max: 0, kind: "gain-reduction" },
+        ],
+        visual: {
+          kind: "transfer",
+          params: ["threshold", "ratio"],
+          overlays: ["in", "gr"],
+          xMin: -60,
+          xMax: 0,
+          yMin: -60,
+          yMax: 0,
+        },
+      }),
+    );
+    expect(s.readings).toEqual([
+      { key: "gr", label: "Gain Reduction", unit: "dB", min: -30, max: 0, kind: "gain-reduction" },
+    ]);
+    expect(s.visual).toEqual({
+      kind: "transfer",
+      params: ["threshold", "ratio"],
+      overlays: ["in", "gr"],
+      xMin: -60,
+      xMax: 0,
+      yMin: -60,
+      yMax: 0,
+    });
   });
 });
 

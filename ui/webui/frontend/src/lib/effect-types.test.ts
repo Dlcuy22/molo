@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  METER_IN,
+  METER_OUT,
   ParamKind,
+  effectiveReadings,
   effectiveWidget,
   groupParams,
   isCommonParam,
@@ -8,6 +11,7 @@ import {
   paramLabel,
   type EffectParam,
   type EffectStage,
+  type Reading,
 } from "./effect-types";
 
 function param(over: Partial<EffectParam>): EffectParam {
@@ -99,6 +103,8 @@ function stage(over: Partial<EffectStage>): EffectStage {
     schema: [],
     values: {},
     meters: null,
+    readings: [],
+    visual: null,
     ...over,
   };
 }
@@ -116,5 +122,59 @@ describe("meterDB", () => {
   it("rejects a non-finite reading instead of drawing it", () => {
     expect(meterDB(stage({ meters: { in: Number.NaN } }), "in")).toBeNull();
     expect(meterDB(stage({ meters: { in: Number.POSITIVE_INFINITY } }), "in")).toBeNull();
+  });
+});
+
+describe("effectiveReadings", () => {
+  const gr: Reading = {
+    key: "gr",
+    label: "Gain Reduction",
+    unit: "dB",
+    min: -30,
+    max: 0,
+    kind: "gain-reduction",
+  };
+
+  it("returns only the declared readings when the effect does not meter", () => {
+    const s = stage({ readings: [gr], meters: null });
+    expect(effectiveReadings(s)).toEqual([gr]);
+  });
+
+  it("returns only the synthesised pair when nothing is declared", () => {
+    const s = stage({ readings: [], meters: { in: -6, out: -7 } });
+    const r = effectiveReadings(s);
+    expect(r.map((x) => x.key)).toEqual([METER_IN, METER_OUT]);
+    expect(r.map((x) => x.kind)).toEqual(["level", "level"]);
+    expect(r.map((x) => x.unit)).toEqual(["dBFS", "dBFS"]);
+  });
+
+  it("augments the pair with the declared readings, pair first", () => {
+    const s = stage({ readings: [gr], meters: { in: -6, out: -7 } });
+    expect(effectiveReadings(s)).toEqual([
+      { key: METER_IN, label: "In", unit: "dBFS", min: -60, max: 0, kind: "level" },
+      { key: METER_OUT, label: "Out", unit: "dBFS", min: -60, max: 0, kind: "level" },
+      gr,
+    ]);
+  });
+
+  it("lets a declared standard key win over the synthesised one", () => {
+    const inReading: Reading = {
+      key: METER_IN,
+      label: "Input",
+      unit: "dBFS",
+      min: -48,
+      max: 6,
+      kind: "level",
+    };
+    const s = stage({ readings: [inReading, gr], meters: { in: -6, out: -7 } });
+    expect(effectiveReadings(s)).toEqual([
+      { key: METER_OUT, label: "Out", unit: "dBFS", min: -60, max: 0, kind: "level" },
+      inReading,
+      gr,
+    ]);
+  });
+
+  it("returns an empty list when there are neither readings nor meters", () => {
+    expect(effectiveReadings(stage({ readings: [], meters: null }))).toEqual([]);
   });
 });
