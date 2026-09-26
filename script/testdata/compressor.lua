@@ -1,7 +1,8 @@
 -- A feed-forward compressor: a detector tracks the signal's level, everything
 -- above the threshold is reduced by the ratio, and the effect reports the gain
--- reduction and the transfer curve it applies. The knee is declared for the UI
--- but the law here is hard-knee, so it does not enter the reduction.
+-- reduction and the transfer curve it applies. The law is hard-knee: the node
+-- vocabulary has no conditional or power, so a soft knee cannot be expressed
+-- here, and a Knee knob that changed nothing would be a lie.
 return effect {
   name = "Compressor",
   params = {
@@ -9,7 +10,6 @@ return effect {
     ratio     = { float, min = 1, max = 20, default = 4, label = "Ratio", group = "Compressor" },
     attack    = { float, min = 0.0005, max = 0.5, default = 0.01, unit = "s", label = "Attack", group = "Compressor" },
     release   = { float, min = 0.01, max = 2, default = 0.1, unit = "s", label = "Release", group = "Compressor" },
-    knee      = { float, min = 0, max = 24, default = 6, unit = "dB", label = "Knee", group = "Compressor" },
     makeup    = { float, min = 0, max = 24, default = 0, unit = "dB", label = "Makeup", group = "Compressor" },
     mix       = { float, min = 0, max = 1, default = 1, label = "Mix", group = "Compressor" },
   },

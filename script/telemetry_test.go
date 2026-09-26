@@ -28,7 +28,7 @@ func TestCompressorDeclaresReadingAndVisual(t *testing.T) {
 	for _, p := range f.Schema() {
 		keys[p.Key] = p
 	}
-	for _, want := range []string{"threshold", "ratio", "attack", "release", "knee", "makeup", "mix"} {
+	for _, want := range []string{"threshold", "ratio", "attack", "release", "makeup", "mix"} {
 		if _, ok := keys[want]; !ok {
 			t.Fatalf("compressor schema is missing %q; has %v", want, schemaKeys(f.Schema()))
 		}
