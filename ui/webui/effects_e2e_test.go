@@ -218,3 +218,121 @@ func hasParamKey(schema []dsp.Param, key string) bool {
 
 	return false
 }
+
+// TestScriptedCompressorPublishesTelemetry is the no-audio end-to-end for the
+// telemetry feature: the bundled Compressor is added through the editor, audio
+// is played through it on the fake backend, and the stage must report both the
+// gain-reduction reading it declared and the transfer curve it declared. It
+// crosses the whole path: the Lua graph, the engine snapshot, and the webui
+// bridge that the effect window reads.
+func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
+	loadScripts()
+
+	p, err := player.New(player.WithBackend("fake"))
+	if err != nil {
+		t.Fatalf("build player: %v", err)
+	}
+	defer p.Close()
+
+	fx, ok := p.(player.Effects)
+	if !ok {
+		t.Fatal("player has no effect editor")
+	}
+
+	// The bundled Compressor must be offered by the chooser, which is what
+	// proves the embedded effects/compressor.lua was picked up.
+	var found bool
+	for _, k := range fx.EffectKindList() {
+		if k.Kind == "script" && k.Impl == "Compressor" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Compressor not offered; kinds = %+v", fx.EffectKindList())
+	}
+
+	id, err := fx.AddEffect("script", "Compressor")
+	if err != nil {
+		t.Fatalf("AddEffect: %v", err)
+	}
+	// A low threshold and a hard ratio, so the fixture's level is well over it
+	// and the reduction the meter reports is unambiguous.
+	for key, v := range map[string]float64{"threshold": -36, "ratio": 10, "attack": 0.001, "release": 0.05, "makeup": 0, "mix": 1} {
+		if err := fx.SetEffectParam(id, key, v); err != nil {
+			t.Fatalf("SetEffectParam(%s): %v", key, err)
+		}
+	}
+
+	if err := p.PlayQueue([]string{"../../decode/testdata/mono_1s.opus"}); err != nil {
+		t.Fatalf("PlayQueue: %v", err)
+	}
+
+	// Sample the live gr while audio runs: the reduction returns toward zero as
+	// the fixture decays, so reading once at the end can catch the tail. The
+	// whole run is bounded so a player that never reports still fails.
+	svc := &PlayerService{player: p}
+	var grLive float32
+	var sawGR bool
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && p.Snapshot().State != player.Stopped {
+		if chain, err := svc.EffectChain(); err == nil && len(chain.Stages) == 1 {
+			if v, ok := chain.Stages[0].Meters["gr"]; ok && v < 0 {
+				grLive, sawGR = v, true
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	// Read through the same bridge the effect window calls, so this asserts the
+	// wire shape and not only the engine's own view.
+	chain, err := svc.EffectChain()
+	if err != nil {
+		t.Fatalf("EffectChain: %v", err)
+	}
+	if len(chain.Stages) != 1 {
+		t.Fatalf("chain has %d stages, want 1", len(chain.Stages))
+	}
+	st := chain.Stages[0]
+	t.Logf("compressor stage %s: %d readings, visual=%+v, meters=%v", st.ID, len(st.Readings), st.Visual, st.Meters)
+
+	// The declared reading: key "gr", the words "Gain Reduction", and the
+	// gain-reduction kind, so the panel can draw it as a reduction rather than a
+	// fixed level.
+	var gr *EffectReadingInfo
+	for i := range st.Readings {
+		if st.Readings[i].Key == "gr" {
+			gr = &st.Readings[i]
+		}
+	}
+	if gr == nil {
+		t.Fatalf("stage reports no gr reading: %+v", st.Readings)
+	}
+	if gr.Label != "Gain Reduction" || gr.Unit != "dB" || gr.Kind != string(dsp.ReadingGainReduction) {
+		t.Fatalf("gr reading metadata lost over the bridge: %+v", gr)
+	}
+	if gr.Min != -30 || gr.Max != 0 {
+		t.Fatalf("gr range = [%v, %v], want [-30, 0]", gr.Min, gr.Max)
+	}
+
+	// The declared visual: a transfer curve derived from the compressor params.
+	if st.Visual == nil {
+		t.Fatal("stage reports no visual")
+	}
+	if st.Visual.Kind != string(dsp.VisualTransfer) {
+		t.Fatalf("visual kind = %q, want %q", st.Visual.Kind, dsp.VisualTransfer)
+	}
+	if got := strings.Join(st.Visual.Params, ","); got != "threshold,ratio,makeup" {
+		t.Fatalf("visual params = %q, want threshold,ratio,makeup", got)
+	}
+	if got := strings.Join(st.Visual.Overlays, ","); got != "in,gr" {
+		t.Fatalf("visual overlays = %q, want in,gr", got)
+	}
+
+	// The reading must carry a live number, not just metadata: the fixture is
+	// loud enough to trigger the compressor, so a negative gr must be observed
+	// at some point during playback.
+	t.Logf("compressor gr reading during playback = %v dB", grLive)
+	if !sawGR {
+		t.Fatal("never observed a negative gr reading while the compressor ran")
+	}
+}

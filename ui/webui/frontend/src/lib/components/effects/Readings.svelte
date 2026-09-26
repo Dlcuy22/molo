@@ -29,7 +29,7 @@
   <ul class="flex flex-col gap-2" aria-label="Readings">
     {#each readings as r (r.key)}
       <li>
-        <LevelMeter db={barValue(r)} label={r.label} min={r.min} max={r.max} />
+        <LevelMeter db={barValue(r)} label={r.label} min={r.min} max={r.max} unit={r.unit} />
       </li>
     {/each}
   </ul>

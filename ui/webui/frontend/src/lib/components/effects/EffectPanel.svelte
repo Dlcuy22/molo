@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { fillFrac } from "../../format";
-  import { METER_IN, METER_OUT, meterDB, type EffectStage } from "../../effect-types";
+  import { effectiveReadings, type EffectStage } from "../../effect-types";
   import { commonParam, effectGroups, isKnobBank, numericValue, paramValue } from "./effects-helpers";
   import ParamControl from "./ParamControl.svelte";
-  import LevelMeter from "./LevelMeter.svelte";
+  import Readings from "./Readings.svelte";
+  import TransferCurve from "./TransferCurve.svelte";
 
   // The control surface for one stage. It is presentational: bypass toggles and
   // param edits go out as callbacks, and the base controls are pinned in the
@@ -46,8 +46,10 @@
   // property the grid's template reads is never stale.
   const bankStyle = $derived(`--knob-cols: ${knobsPerRow}`);
 
-  const inDB = $derived(meterDB(stage, METER_IN));
-  const outDB = $derived(meterDB(stage, METER_OUT));
+  // The drawable readings: the effect's own declared ones, plus the standard
+  // In/Out pair when it only meters. This is what replaces the hardcoded two
+  // bars, so an effect with no readings still shows the legacy pair.
+  const readings = $derived(effectiveReadings(stage));
 
   // The checkbox shows the user's bypass parameter, so it never flips on its
   // own. The dimming follows the effective flag, which an effect may set for a
@@ -84,8 +86,7 @@
     </div>
 
     <div class="flex flex-col gap-2 rounded-[4px] bg-bg/40 p-2">
-      <LevelMeter db={inDB} label="In" />
-      <LevelMeter db={outDB} label="Out" />
+      <Readings {readings} meters={stage.meters} />
     </div>
 
     <div class="grid grid-cols-2 gap-x-3 gap-y-2">
@@ -114,6 +115,16 @@
       </p>
     {:else if effective}
       <p class="text-[11px] text-muted" role="status">Bypassed. Controls still apply.</p>
+    {/if}
+
+    <!--
+      The plot sits with the controls it explains, above the groups, so the
+      curve and the threshold, ratio and knee that shape it read together. It
+      dims with the controls while bypassed because the live overlays freeze at
+      the last value the effect published.
+    -->
+    {#if stage.visual}
+      <TransferCurve visual={stage.visual} values={stage.values} meters={stage.meters} />
     {/if}
 
     {#each groups as group (group.name)}

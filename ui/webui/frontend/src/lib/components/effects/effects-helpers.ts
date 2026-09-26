@@ -210,15 +210,18 @@ export function meterFraction(
   return clamp((db - min) / (max - min), 0, 1);
 }
 
-/** meterText renders a dBFS reading, or "--" when the effect does not meter at
- *  all. The placeholder matches formatTime's unknown-value convention rather
- *  than a dash glyph, which would read as a real (tiny) level. */
-export function meterText(db: number | null): string {
+/** meterText renders a reading with its unit, or "--" when the effect does not
+ *  meter at all. The unit defaults to dB for the legacy level meters, and a
+ *  reading that carries its own unit passes it so a gain reduction, a percent
+ *  or a frequency is never mislabelled. The placeholder matches formatTime's
+ *  unknown-value convention rather than a dash glyph, which would read as a
+ *  real (tiny) value. */
+export function meterText(db: number | null, unit = "dB"): string {
   if (db === null || !Number.isFinite(db)) {
     return "--";
   }
 
-  return `${db.toFixed(1)} dB`;
+  return unit === "" ? db.toFixed(1) : `${db.toFixed(1)} ${unit}`;
 }
 
 /**

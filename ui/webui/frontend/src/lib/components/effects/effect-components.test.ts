@@ -329,6 +329,22 @@ describe("meterText", () => {
     expect(meterText(null)).toBe("--");
     expect(meterText(Number.NaN)).toBe("--");
   });
+
+  it("prints the unit the reading carries, not a fixed dB", () => {
+    // A gain reduction is dB, but a scalar is not; the reading's unit travels
+    // with the number so a frequency is not mislabelled as a level.
+    expect(meterText(-13.5, "dB")).toBe("-13.5 dB");
+    expect(meterText(440, "Hz")).toBe("440.0 Hz");
+    expect(meterText(50, "%")).toBe("50.0 %");
+  });
+
+  it("leaves a unitless reading as a bare number", () => {
+    expect(meterText(0.5, "")).toBe("0.5");
+  });
+
+  it("keeps the placeholder whatever the unit", () => {
+    expect(meterText(null, "Hz")).toBe("--");
+  });
 });
 
 describe("isFiniteNumber", () => {
