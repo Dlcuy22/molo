@@ -46,6 +46,19 @@ export interface EffectParamInfo {
 }
 
 /**
+ * EffectReadingInfo describes one key that Meters reports, so a reading can be
+ * drawn without the frontend knowing which effect produced it.
+ */
+export interface EffectReadingInfo {
+    "key": string;
+    "label": string;
+    "unit": string;
+    "min": number;
+    "max": number;
+    "kind": string;
+}
+
+/**
  * EffectStageInfo is one stage in the chain.
  */
 export interface EffectStageInfo {
@@ -57,6 +70,22 @@ export interface EffectStageInfo {
     "schema": EffectParamInfo[] | null;
     "values": { [_ in string]?: any } | null;
     "meters": { [_ in string]?: number } | null;
+    "readings": EffectReadingInfo[] | null;
+    "visual": EffectVisualInfo | null;
+}
+
+/**
+ * EffectVisualInfo declares a plot. Params are schema keys the curve is derived
+ * from; Overlays are reading keys drawn live on top.
+ */
+export interface EffectVisualInfo {
+    "kind": string;
+    "params": string[] | null;
+    "overlays": string[] | null;
+    "xMin": number;
+    "xMax": number;
+    "yMin": number;
+    "yMax": number;
 }
 
 /**
