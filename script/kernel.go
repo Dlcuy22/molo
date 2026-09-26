@@ -32,6 +32,9 @@ type plan struct {
 	// can find its node without a map on the audio thread. Entries for constants
 	// are nil.
 	ctrl []*node
+	// meters is every meter node, so one block's sample is published once per
+	// block instead of once per frame.
+	meters []*node
 	// tail is the node ctx.out named. Its output is what leaves the effect.
 	tail *node
 }
@@ -57,6 +60,14 @@ func (p *plan) process(buf []float32, frames int) {
 		}
 		for c := 0; c < p.ch; c++ {
 			buf[base+c] = float32(p.tail.output(c))
+		}
+	}
+	// Publish each reading from the block's last frame, which is the value at
+	// the block boundary. It is one store per meter per block, so it neither
+	// allocates nor takes a lock.
+	for _, n := range p.meters {
+		if n.meter != nil {
+			n.meter.store(n.out[0])
 		}
 	}
 }
@@ -128,6 +139,10 @@ func runNode(n *node, scratch, frame, staging []float64, ch int) {
 		for c := 0; c < ch; c++ {
 			scratch[c] *= k
 		}
+
+	case kindMeter:
+		// Pass-through: the meter only observes the signal fed to it.
+		readInto(scratch, src(n, "in"), ch)
 
 	default:
 		fill(scratch, ch, 0)

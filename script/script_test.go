@@ -125,7 +125,7 @@ func runBlocks(t *testing.T, e *Effect, frames, blockFrames int) [][]float32 {
 }
 
 func TestLoadExampleScripts(t *testing.T) {
-	for _, name := range []string{"tremolo.lua", "delay.lua", "lowpass.lua"} {
+	for _, name := range []string{"tremolo.lua", "delay.lua", "lowpass.lua", "compressor.lua"} {
 		f, err := Load(filepath.Join("testdata", name))
 		if err != nil {
 			t.Fatalf("Load(%s): %v", name, err)
@@ -439,7 +439,7 @@ func TestLowpassBlockTrace(t *testing.T) {
 }
 
 func TestProcessAllocatesNothing(t *testing.T) {
-	for _, name := range []string{"tremolo.lua", "delay.lua", "lowpass.lua"} {
+	for _, name := range []string{"tremolo.lua", "delay.lua", "lowpass.lua", "compressor.lua"} {
 		e := loadEffect(t, name, nil)
 		buf := sine(960, 1000, 0.5)
 		n := testing.AllocsPerRun(1000, func() {

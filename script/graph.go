@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/dlcuy22/player/dsp"
 )
 
 // Resource limits. A script is untrusted input, so the compiler bounds what it
@@ -64,6 +66,7 @@ const (
 	kindScale   nodeKind = "scale"
 	kindMin     nodeKind = "min"
 	kindMax     nodeKind = "max"
+	kindMeter   nodeKind = "meter"
 )
 
 // inputSpec describes one input port: a name, and whether a script may leave it
@@ -102,6 +105,7 @@ var specs = []nodeSpec{
 	{kind: kindScale, fields: []string{"factor"}, inputs: []inputSpec{{name: "in"}}},
 	{kind: kindMin, inputs: []inputSpec{{name: "a"}, {name: "b"}}},
 	{kind: kindMax, inputs: []inputSpec{{name: "a"}, {name: "b"}}},
+	{kind: kindMeter, fields: []string{"key"}, inputs: []inputSpec{{name: "in"}}},
 }
 
 func specFor(kind nodeKind) *nodeSpec {
@@ -160,6 +164,10 @@ type node struct {
 	// the node is cloned into a plan, so two effects built from one script do
 	// not share control state.
 	sink *controlBridge
+	// meter is the published reading a meter node samples into. It is nil for
+	// every other kind, and it is allocated on the plan's own clone so two
+	// effects built from one script never share a reading.
+	meter *meterValue
 }
 
 // nodeValues is the resolved scalar set one node runs on. Not every kind uses
@@ -192,10 +200,19 @@ type graph struct {
 	// paramRefs records every key build read through ctx.param, so the binder
 	// can reject a reference to a parameter that was never declared.
 	paramRefs []string
+	// visualRefs records every key a ctx.visual named in its params list, so a
+	// missing key is reported against the visual rather than as a bare build
+	// reference.
+	visualRefs []string
 	// control is the Tier 2 callback, when the script registered one.
 	control any
 	// tail is the node ctx.out named: the value Process writes back.
 	tail *node
+	// readings is every meter declaration, in declaration order. It is static
+	// metadata; the numbers live in the meter nodes' published values.
+	readings []readingDecl
+	// visual is the plot the script declared, nil when it declared none.
+	visual *dsp.Visual
 }
 
 // newGraph returns an empty graph.

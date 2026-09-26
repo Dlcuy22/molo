@@ -3,8 +3,11 @@ package script
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/dlcuy22/player/dsp"
 )
 
 // The builder is the Lua-visible half of the front end. Every ctx call appends
@@ -61,6 +64,8 @@ func (b *builder) newContext() *lua.LTable {
 	ctx.RawSetString("control", b.L.NewFunction(b.fnControl))
 	ctx.RawSetString("db", b.L.NewFunction(b.fnUnaryShape("db")))
 	ctx.RawSetString("db2lin", b.L.NewFunction(b.fnUnaryShape("lin")))
+	ctx.RawSetString("meter", b.L.NewFunction(b.fnMeter))
+	ctx.RawSetString("visual", b.L.NewFunction(b.fnVisual))
 
 	return ctx
 }
@@ -340,6 +345,18 @@ func fieldName(n *node, name string) bool {
 	return false
 }
 
+// meterMetaField reports whether name is a metadata key a meter table may
+// carry. A key outside this set is a typo such as `maxx`, and dropping it would
+// silently loosen the range the UI draws.
+func meterMetaField(name string) bool {
+	switch name {
+	case "label", "unit", "min", "max", "kind":
+		return true
+	default:
+		return false
+	}
+}
+
 // connectValue wires an input port from a Lua handle.
 func (b *builder) connectValue(dst *node, input string, value lua.LValue) error {
 	if input == "input" {
@@ -460,6 +477,174 @@ func (b *builder) fnOut(L *lua.LState) int {
 	}
 	b.g.tail = h.node
 	b.outSet = true
+
+	return 0
+}
+
+// fnMeter declares one named reading. The first argument is the key, the second
+// a table of rendering metadata. The returned handle is callable like any
+// single-input node: calling it feeds the signal whose value the reading
+// publishes.
+func (b *builder) fnMeter(L *lua.LState) int {
+	key := strings.TrimSpace(L.CheckString(1))
+	if key == "" {
+		L.RaiseError("meter needs a non-empty key")
+
+		return 0
+	}
+	// The standard pair is published under these keys by Meters, so a meter
+	// that reused one would overwrite the level the UI draws and Readings would
+	// then describe the standard key with the script's metadata.
+	if key == dsp.MeterIn || key == dsp.MeterOut {
+		L.RaiseError("meter %q is a reserved key", key)
+
+		return 0
+	}
+	for _, r := range b.g.readings {
+		if r.Key == key {
+			L.RaiseError("meter %q is declared twice", key)
+
+			return 0
+		}
+	}
+	meta, ok := L.Get(2).(*lua.LTable)
+	if !ok {
+		L.RaiseError("meter %q needs a table of metadata", key)
+
+		return 0
+	}
+	var metaErr error
+	meta.ForEach(func(k, _ lua.LValue) {
+		if metaErr != nil {
+			return
+		}
+		name, ok := k.(lua.LString)
+		if !ok {
+			return
+		}
+		if !meterMetaField(string(name)) {
+			metaErr = fmt.Errorf("meter %q has no metadata field %q", key, name)
+		}
+	})
+	if metaErr != nil {
+		L.RaiseError("%v", metaErr)
+
+		return 0
+	}
+	decl := readingDecl{Key: key, Label: key}
+	if v := meta.RawGetString("label"); v != lua.LNil {
+		decl.Label = lua.LVAsString(v)
+	}
+	decl.Unit = lua.LVAsString(meta.RawGetString("unit"))
+	if v, ok := meta.RawGetString("min").(lua.LNumber); ok {
+		decl.Min = float64(v)
+	}
+	if v, ok := meta.RawGetString("max").(lua.LNumber); ok {
+		decl.Max = float64(v)
+	}
+	if !finite(decl.Min) || !finite(decl.Max) {
+		L.RaiseError("meter %q has a non-finite range", key)
+
+		return 0
+	}
+	kindName := lua.LVAsString(meta.RawGetString("kind"))
+	kind, ok := parseReadingKind(kindName)
+	if !ok {
+		L.RaiseError("meter %q has unknown kind %q", key, kindName)
+
+		return 0
+	}
+	decl.Kind = kind
+
+	n, ok := b.mustNode(L, kindMeter)
+	if !ok {
+		return 0
+	}
+	n.fields["key"] = key
+	b.g.readings = append(b.g.readings, decl)
+	L.Push(b.handle(n))
+
+	return 1
+}
+
+// fnVisual records the plot the effect wants drawn. It is not a node: it names
+// a kind the UI knows and the schema keys the curve is derived from, so the UI
+// can recompute it from values it already has.
+func (b *builder) fnVisual(L *lua.LState) int {
+	tbl, ok := L.Get(1).(*lua.LTable)
+	if !ok {
+		L.RaiseError("visual expects a table")
+
+		return 0
+	}
+	if b.g.visual != nil {
+		L.RaiseError("visual is declared more than once")
+
+		return 0
+	}
+	kindName := lua.LVAsString(tbl.RawGetString("kind"))
+	kind, ok := parseVisualKind(kindName)
+	if !ok {
+		L.RaiseError("visual has unknown kind %q", kindName)
+
+		return 0
+	}
+	params, err := stringList(tbl.RawGetString("params"), "params")
+	if err != nil {
+		L.RaiseError("%v", err)
+
+		return 0
+	}
+	overlays, err := stringList(tbl.RawGetString("overlays"), "overlays")
+	if err != nil {
+		L.RaiseError("%v", err)
+
+		return 0
+	}
+	// A param is a schema key the curve derives from. It is recorded as a
+	// visual reference rather than a ctx.param one, so a missing key is reported
+	// against the visual instead of as a bare build reference.
+	for _, p := range params {
+		b.g.visualRefs = append(b.g.visualRefs, p)
+	}
+	if params == nil {
+		params = []string{}
+	}
+	if overlays == nil {
+		overlays = []string{}
+	}
+	v := &dsp.Visual{
+		Kind:     kind,
+		Params:   params,
+		Overlays: overlays,
+	}
+	ranges := []struct {
+		name  string
+		field *float64
+	}{
+		{"xMin", &v.XMin},
+		{"xMax", &v.XMax},
+		{"yMin", &v.YMin},
+		{"yMax", &v.YMax},
+	}
+	for _, r := range ranges {
+		*r.field = optNumber(tbl, r.name)
+		if !finite(*r.field) {
+			L.RaiseError("visual %s must be finite", r.name)
+
+			return 0
+		}
+	}
+	b.g.visual = v
+
+	return 0
+}
+
+// optNumber reads an optional numeric field from a table.
+func optNumber(tbl *lua.LTable, name string) float64 {
+	if v, ok := tbl.RawGetString(name).(lua.LNumber); ok {
+		return float64(v)
+	}
 
 	return 0
 }

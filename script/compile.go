@@ -20,9 +20,12 @@ import (
 // another's.
 func cloneGraph(g *graph) *graph {
 	out := &graph{
-		nodes:     make([]*node, len(g.nodes)),
-		params:    g.params,
-		paramRefs: g.paramRefs,
+		nodes:      make([]*node, len(g.nodes)),
+		params:     g.params,
+		paramRefs:  g.paramRefs,
+		visualRefs: g.visualRefs,
+		readings:   g.readings,
+		visual:     g.visual,
 	}
 	// A first pass copies nodes and their scalar fields, the second pass
 	// rewires edges to the clones.
@@ -110,6 +113,9 @@ func compile(g *graph, rate, ch int) (*plan, error) {
 			return nil, err
 		}
 		p.ctrl[n.position] = n
+		if n.kind == kindMeter {
+			p.meters = append(p.meters, n)
+		}
 	}
 	if cg.tail == nil {
 		return nil, fmt.Errorf("script: graph has no output node")
@@ -448,6 +454,9 @@ func buildState(n *node, rate, ch int) error {
 			release: smoothCoeff(n.vals.release, rate),
 			mode:    mode,
 		}
+	case kindMeter:
+		// The reading is one published float, not a per-frame buffer.
+		n.meter = &meterValue{}
 	}
 
 	return nil

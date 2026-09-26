@@ -3,6 +3,7 @@ package script
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -88,6 +89,8 @@ var (
 	_ dsp.Effect     = (*Effect)(nil)
 	_ dsp.Bypassable = (*Effect)(nil)
 	_ dsp.Metered    = (*Effect)(nil)
+	_ dsp.Described  = (*Effect)(nil)
+	_ dsp.Visualized = (*Effect)(nil)
 )
 
 // Name identifies the instance in a chain.
@@ -157,6 +160,18 @@ func (e *Effect) Process(buf []float32, frames int) error {
 
 	if st.bypassed || st.watchdogFailed {
 		e.meterOut.Push(buf, frames, e.ch)
+		// The plan does not run while bypassed, so nothing would republish a
+		// reading: it would stay frozen at its last pre-bypass value and report
+		// a reduction the effect is no longer applying. Zeroing every reading
+		// says "no reduction" instead of a stale one. The in/out pair still
+		// measures the audio this pass-through carries, so it is left alone.
+		if st.plan != nil {
+			for _, n := range st.plan.meters {
+				if n.meter != nil {
+					n.meter.store(0)
+				}
+			}
+		}
 
 		return nil
 	}
@@ -196,12 +211,69 @@ func (e *Effect) Bypassed() bool {
 	return st != nil && (st.bypassed || st.watchdogFailed)
 }
 
-// Meters reports the input and output peaks in dBFS under the standard keys.
+// Meters reports the input and output peaks in dBFS under the standard keys,
+// plus one entry per meter node the script declared. The meter values are
+// block samples the audio thread published; this only reads atomics, so it is
+// safe from the control goroutine.
 func (e *Effect) Meters() map[string]float32 {
 	inPeak, _ := e.meterIn.Read().DB()
 	outPeak, _ := e.meterOut.Read().DB()
+	m := map[string]float32{dsp.MeterIn: inPeak, dsp.MeterOut: outPeak}
+	if st := e.state.Load(); st != nil && st.plan != nil {
+		for _, n := range st.plan.meters {
+			if n.meter == nil {
+				continue
+			}
+			key, _ := stringField(n, "key")
+			if key == "" {
+				continue
+			}
+			m[key] = float32(n.meter.load())
+		}
+	}
 
-	return map[string]float32{dsp.MeterIn: inPeak, dsp.MeterOut: outPeak}
+	return m
+}
+
+// Readings describes every meter node's key, so a UI knows how to draw it. It
+// is a copy: the effect's declaration is not the caller's to mutate. An effect
+// with no meter nodes returns an empty slice, never nil, so it always marshals
+// as [] rather than null.
+func (e *Effect) Readings() []dsp.Reading {
+	out := make([]dsp.Reading, 0)
+	if e.graph == nil {
+		return out
+	}
+	for _, r := range e.graph.readings {
+		out = append(out, r.reading())
+	}
+
+	return out
+}
+
+// Visual returns the plot the script declared, or a zero Visual when it
+// declared none. The slices are copied so a caller cannot reach into the
+// effect's declaration, and they are always non-nil so an empty list marshals
+// as [] rather than null.
+func (e *Effect) Visual() dsp.Visual {
+	v := dsp.Visual{
+		Params:   []string{},
+		Overlays: []string{},
+	}
+	if e.graph == nil || e.graph.visual == nil {
+		return v
+	}
+	v = *e.graph.visual
+	if v.Params == nil {
+		v.Params = []string{}
+	}
+	if v.Overlays == nil {
+		v.Overlays = []string{}
+	}
+	v.Params = slices.Clone(v.Params)
+	v.Overlays = slices.Clone(v.Overlays)
+
+	return v
 }
 
 // Watchdog returns the fault reason, empty when the callback is healthy. It

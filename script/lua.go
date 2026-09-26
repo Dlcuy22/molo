@@ -399,6 +399,13 @@ func (d *scriptDef) buildGraph(L *lua.LState, ctx context.Context) error {
 	if !b.outSet {
 		return fmt.Errorf("script: build did not call ctx.out")
 	}
+	// The overlay check runs here, once, after build(ctx) has returned: only
+	// now is the whole graph known, so an overlay that names a reading declared
+	// later in the build is not a false rejection. An overlay that still names
+	// no reading is a mistake, not an empty plot.
+	if err := checkOverlays(d.graph); err != nil {
+		return err
+	}
 	// A required input that build never connected is a script mistake, and a
 	// load error is the right place to report it: doing it here also spares the
 	// author a Configure failure that only shows the declaration index.
@@ -428,6 +435,11 @@ func checkParamRefs(d *scriptDef, schema []dsp.Param) error {
 	for _, key := range d.graph.paramRefs {
 		if _, ok := index[key]; !ok {
 			return fmt.Errorf("script: build references parameter %q, which is not declared", key)
+		}
+	}
+	for _, key := range d.graph.visualRefs {
+		if _, ok := index[key]; !ok {
+			return fmt.Errorf("script: visual names parameter %q, which is not declared", key)
 		}
 	}
 
