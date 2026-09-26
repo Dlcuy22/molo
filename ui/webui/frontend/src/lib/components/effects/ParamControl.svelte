@@ -130,7 +130,6 @@
         aria-hidden="true"
         style="transform: translate(-50%, -100%) rotate(var(--knob-angle))"
       ></span>
-      <span class="pointer-events-none text-[10px] tabular-nums text-fg">{text}</span>
       <input
         class="absolute inset-0 cursor-pointer opacity-0"
         type="range"
@@ -144,7 +143,10 @@
         onkeydown={onKnobKey}
       />
     </span>
-    <span class="truncate text-[11px]">{label}</span>
+    <!-- The value sits under the dial, not inside it: the needle sweeps the
+         centre, so text there collides with it at most positions. -->
+    <span class="tabular-nums text-[11px] text-fg">{text}</span>
+    <span class="w-full truncate text-center text-[11px]">{label}</span>
   </label>
 {:else}
   <label class="flex flex-col gap-1 text-xs text-muted">
