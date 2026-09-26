@@ -28,5 +28,6 @@ require (
 	github.com/tphakala/go-mp3 v0.1.0 // indirect
 	github.com/tphakala/go-wav v1.1.0 // indirect
 	github.com/tphakala/simd v1.9.0 // indirect
+	github.com/yuin/gopher-lua v1.1.2 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )

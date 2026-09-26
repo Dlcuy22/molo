@@ -120,6 +120,11 @@ func newPlayerService() *PlayerService {
 // ServiceStartup builds the engine and starts the two background pumps. It is
 // the v3 lifecycle hook; there is no OnStartup option in this framework.
 func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	// Register the Lua effects before the player is built, so the chooser and
+	// the effect window see them from the first snapshot. A script failure is
+	// logged and skipped, never fatal: a bad user script must not stop playback.
+	loadScripts()
+
 	p, err := player.New()
 	if err != nil {
 		return fmt.Errorf("build player: %w", err)
@@ -827,6 +832,22 @@ func (s *PlayerService) command(fn func() error) error {
 	return nil
 }
 
+// commandID is command for an editor call that returns a new stage ID. It
+// reports the error the same way, then returns the ID on success.
+func (s *PlayerService) commandID(fn func() (string, error)) (string, error) {
+	id, err := fn()
+	if err != nil {
+		s.setError(err.Error())
+		s.emit(eventSnapshot, s.Snapshot())
+
+		return "", err
+	}
+	s.clearError()
+	s.emit(eventSnapshot, s.Snapshot())
+
+	return id, nil
+}
+
 // expand resolves files and folders to a queue of playable paths, deduplicated
 // with folders expanded recursively. It mirrors the TUI's argument handling so
 // both front ends accept the same input.
@@ -938,9 +959,11 @@ func codecOptions() []CodecOption {
 	return out
 }
 
-// backendOptions lists the playback backends with Auto first.
+// backendOptions lists the playback backends with Auto first. It uses the
+// user-facing list, so a dev-only sink such as "fake" never appears in the
+// Output dropdown even though the engine can still open it by name.
 func backendOptions() []string {
-	return append([]string{""}, player.Backends()...)
+	return append([]string{""}, player.UserBackends()...)
 }
 
 // collectDir walks root for playable files, sorted so the queue is

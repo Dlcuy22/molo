@@ -20,6 +20,13 @@ const (
 	appDescription = "A desktop audio player for the files on this machine"
 )
 
+// Window names, so the service can find a window it did not create and the
+// frontend can tell the main window from the effect window.
+const (
+	mainWindowName   = "main"
+	effectWindowName = "effects"
+)
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
@@ -48,7 +55,13 @@ func main() {
 		},
 	})
 
+	// The effect window is created on demand from the main window (see
+	// PlayerService.OpenEffectWindow). It is not created hidden here: a closed
+	// window leaves a stale handle, so the service looks it up by name and
+	// rebuilds it if it is gone.
+
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             mainWindowName,
 		Title:            appName,
 		Width:            1180,
 		Height:           720,
@@ -79,4 +92,34 @@ func main() {
 		slog.Error("application exited", "error", err)
 		os.Exit(1)
 	}
+}
+
+// openEffectWindow shows the effect window, creating it the first time and
+// rebuilding it if it was closed. It is idempotent: a window already open is
+// focused rather than duplicated, which is what makes the header's "open in new
+// window" safe to click twice.
+func (s *PlayerService) openEffectWindow() {
+	app := application.Get()
+	if app == nil {
+		return
+	}
+	if w, ok := app.Window.GetByName(effectWindowName); ok {
+		w.Show()
+		w.Focus()
+
+		return
+	}
+
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             effectWindowName,
+		Title:            "Effects",
+		Width:            880,
+		Height:           620,
+		MinWidth:         640,
+		MinHeight:        420,
+		BackgroundColour: application.NewRGB(0x1d, 0x1d, 0x20),
+		URL:              "/?window=effects",
+	})
+	w.Show()
+	w.Focus()
 }
