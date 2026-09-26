@@ -41,16 +41,41 @@ type EffectKindInfo struct {
 	Scripted bool   `json:"scripted"`
 }
 
+// EffectReadingInfo describes one key that Meters reports, so a reading can be
+// drawn without the frontend knowing which effect produced it.
+type EffectReadingInfo struct {
+	Key   string  `json:"key"`
+	Label string  `json:"label"`
+	Unit  string  `json:"unit"`
+	Min   float64 `json:"min"`
+	Max   float64 `json:"max"`
+	Kind  string  `json:"kind"`
+}
+
+// EffectVisualInfo declares a plot. Params are schema keys the curve is derived
+// from; Overlays are reading keys drawn live on top.
+type EffectVisualInfo struct {
+	Kind     string   `json:"kind"`
+	Params   []string `json:"params"`
+	Overlays []string `json:"overlays"`
+	XMin     float64  `json:"xMin"`
+	XMax     float64  `json:"xMax"`
+	YMin     float64  `json:"yMin"`
+	YMax     float64  `json:"yMax"`
+}
+
 // EffectStageInfo is one stage in the chain.
 type EffectStageInfo struct {
-	ID       string             `json:"id"`
-	Kind     string             `json:"kind"`
-	Impl     string             `json:"impl"`
-	Label    string             `json:"label"`
-	Bypassed bool               `json:"bypassed"`
-	Schema   []EffectParamInfo  `json:"schema"`
-	Values   map[string]any     `json:"values"`
-	Meters   map[string]float32 `json:"meters"`
+	ID       string              `json:"id"`
+	Kind     string              `json:"kind"`
+	Impl     string              `json:"impl"`
+	Label    string              `json:"label"`
+	Bypassed bool                `json:"bypassed"`
+	Schema   []EffectParamInfo   `json:"schema"`
+	Values   map[string]any      `json:"values"`
+	Meters   map[string]float32  `json:"meters"`
+	Readings []EffectReadingInfo `json:"readings"`
+	Visual   *EffectVisualInfo   `json:"visual"`
 }
 
 // EffectChainInfo is the whole chain in processing order.
@@ -194,6 +219,11 @@ func effectStageInfo(st player.EffectStage) EffectStageInfo {
 		schema = append(schema, effectParamInfo(p))
 	}
 
+	readings := make([]EffectReadingInfo, 0, len(st.Readings))
+	for _, r := range st.Readings {
+		readings = append(readings, effectReadingInfo(r))
+	}
+
 	return EffectStageInfo{
 		ID:       st.ID,
 		Kind:     st.Kind,
@@ -203,6 +233,49 @@ func effectStageInfo(st player.EffectStage) EffectStageInfo {
 		Schema:   schema,
 		Values:   st.Values,
 		Meters:   st.Meters,
+		Readings: readings,
+		Visual:   effectVisualInfo(st.Visual),
+	}
+}
+
+// effectReadingInfo maps one engine reading. Kind is kept as the dsp constant's
+// string value rather than its iota order, matching how Widget crosses the wire.
+func effectReadingInfo(r dsp.Reading) EffectReadingInfo {
+	return EffectReadingInfo{
+		Key:   r.Key,
+		Label: r.Label,
+		Unit:  r.Unit,
+		Min:   r.Min,
+		Max:   r.Max,
+		Kind:  string(r.Kind),
+	}
+}
+
+// effectVisualInfo maps one engine visual, or returns nil when the effect does
+// not implement Visualized. Params and Overlays are normalized to empty slices
+// rather than nil so the frontend always sees arrays.
+func effectVisualInfo(v *dsp.Visual) *EffectVisualInfo {
+	if v == nil {
+		return nil
+	}
+
+	params := v.Params
+	if params == nil {
+		params = []string{}
+	}
+	overlays := v.Overlays
+	if overlays == nil {
+		overlays = []string{}
+	}
+
+	return &EffectVisualInfo{
+		Kind:     string(v.Kind),
+		Params:   params,
+		Overlays: overlays,
+		XMin:     v.XMin,
+		XMax:     v.XMax,
+		YMin:     v.YMin,
+		YMax:     v.YMax,
 	}
 }
 
