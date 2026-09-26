@@ -86,22 +86,41 @@ type Device interface {
 type Registry interface {
 	Register(name string, factory func() Device)
 
+	// RegisterDev adds a backend that exists for development and testing only.
+	// It is openable by name and accepted by validation, so a test can select
+	// it, but it is left out of UserNames so a UI never offers it as a real
+	// output device.
+	RegisterDev(name string, factory func() Device)
+
 	// Open resolves a name and constructs a fresh, unopened Device.
 	Open(name string) (Device, error)
 
-	// Names lists the registered backends, sorted, for a UI or a CLI flag.
+	// Names lists every registered backend, sorted. It is the engine's view: a
+	// name here can be opened and passes validation.
 	Names() []string
+
+	// UserNames lists the backends a UI should offer, sorted. It is Names
+	// minus the dev-only entries, so a null or fake sink never reaches a
+	// dropdown a listener sees.
+	UserNames() []string
 }
 
 type registry struct {
 	mu       sync.Mutex
 	backends map[string]func() Device
+	// dev marks the backends registered through RegisterDev. It is separate
+	// from backends so the two views stay consistent without a second copy of
+	// the factories.
+	dev map[string]bool
 }
 
 // NewRegistry returns an empty registry. The package-level Default is what
 // backends register into; this exists for tests and isolated embedders.
 func NewRegistry() Registry {
-	return &registry{backends: make(map[string]func() Device)}
+	return &registry{
+		backends: make(map[string]func() Device),
+		dev:      make(map[string]bool),
+	}
 }
 
 // Default is the registry populated by the init functions in this package.
@@ -114,7 +133,21 @@ func Register(name string, factory func() Device) {
 	Default.Register(name, factory)
 }
 
+// RegisterDev adds a development-only backend to the process-wide registry.
+// See Registry.RegisterDev for what that hides.
+func RegisterDev(name string, factory func() Device) {
+	Default.RegisterDev(name, factory)
+}
+
 func (r *registry) Register(name string, factory func() Device) {
+	r.register(name, factory, false)
+}
+
+func (r *registry) RegisterDev(name string, factory func() Device) {
+	r.register(name, factory, true)
+}
+
+func (r *registry) register(name string, factory func() Device, dev bool) {
 	if name == "" {
 		panic("playback: Register requires a backend name")
 	}
@@ -128,6 +161,9 @@ func (r *registry) Register(name string, factory func() Device) {
 		panic("playback: backend " + name + " is already registered")
 	}
 	r.backends[name] = factory
+	if dev {
+		r.dev[name] = true
+	}
 }
 
 // Open resolves a backend by name. The returned Device is constructed but not
@@ -154,13 +190,33 @@ func (r *registry) Open(name string) (Device, error) {
 
 // Names lets a caller enumerate backends without constructing or opening any
 // of them, which matters once a backend like malgo can be compiled in but
-// refuse at runtime.
+// refuse at runtime. It includes dev-only backends, so it is the list a CLI
+// flag or a validation check should use.
 func Names() []string { return Default.Names() }
 
 func (r *registry) Names() []string {
 	r.mu.Lock()
 	names := make([]string, 0, len(r.backends))
 	for name := range r.backends {
+		names = append(names, name)
+	}
+	r.mu.Unlock()
+	slices.Sort(names)
+
+	return names
+}
+
+// UserNames lists the backends a UI should offer. It is Names without the
+// dev-only entries, so a fake or null sink cannot appear as a real output.
+func UserNames() []string { return Default.UserNames() }
+
+func (r *registry) UserNames() []string {
+	r.mu.Lock()
+	names := make([]string, 0, len(r.backends))
+	for name := range r.backends {
+		if r.dev[name] {
+			continue
+		}
 		names = append(names, name)
 	}
 	r.mu.Unlock()
