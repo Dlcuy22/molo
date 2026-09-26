@@ -12,6 +12,7 @@ require (
 	github.com/tphakala/go-m4a v0.5.0
 	github.com/tphakala/go-mp3 v0.1.0
 	github.com/tphakala/go-wav v1.1.0
+	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/term v0.44.0
 )
 
