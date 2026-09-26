@@ -8,6 +8,10 @@ export {
 
 export type {
     CodecOption,
+    EffectChainInfo,
+    EffectKindInfo,
+    EffectParamInfo,
+    EffectStageInfo,
     Options,
     PreviewConfig,
     PreviewState,

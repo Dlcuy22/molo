@@ -23,6 +23,14 @@ import * as spectrum$0 from "./internal/spectrum/models.js";
 import * as $models from "./models.js";
 
 /**
+ * AddEffect appends a stage and returns its ID. The stage is live when this
+ * returns, so the caller can set a parameter on it immediately.
+ */
+export function AddEffect(kind: string, impl: string): $CancellablePromise<string> {
+    return $Call.ByID(2932875270, kind, impl);
+}
+
+/**
  * ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
  * range and the points both take effect on the next tick.
  */
@@ -42,6 +50,31 @@ export function Cover(id: string): $CancellablePromise<string> {
 }
 
 /**
+ * EffectChain returns the chain in force with each stage's schema, values and
+ * live meters. It is read on the snapshot tick, so the panel and its meters
+ * update without a second subscription.
+ */
+export function EffectChain(): $CancellablePromise<$models.EffectChainInfo> {
+    return $Call.ByID(1535342562);
+}
+
+/**
+ * EffectKinds lists every registered effect implementation, so the registry tab
+ * can offer each (kind, impl) pair with its label and script flag.
+ */
+export function EffectKinds(): $CancellablePromise<$models.EffectKindInfo[] | null> {
+    return $Call.ByID(693267092);
+}
+
+/**
+ * EffectWindowOpen reports whether the effect window exists, so the main window
+ * can label its button.
+ */
+export function EffectWindowOpen(): $CancellablePromise<boolean> {
+    return $Call.ByID(3136939069);
+}
+
+/**
  * LoadPaths replaces the queue with the chosen files and folders and starts it.
  * A folder is expanded to its playable files, recursively and sorted, the same
  * way the TUI reads a folder argument.
@@ -50,8 +83,25 @@ export function LoadPaths(paths: string[] | null): $CancellablePromise<void> {
     return $Call.ByID(1185588344, paths);
 }
 
+/**
+ * MoveEffect moves the stage with id to index to in processing order. The index
+ * is a final index in the resulting list, matching the engine.
+ */
+export function MoveEffect(id: string, to: number): $CancellablePromise<void> {
+    return $Call.ByID(1294347996, id, to);
+}
+
 export function Next(): $CancellablePromise<void> {
     return $Call.ByID(1009561457);
+}
+
+/**
+ * OpenEffectWindow shows the effect window from the main window. The window is
+ * a second view over this same service, so the chain and its meters are one
+ * state seen twice rather than two engines.
+ */
+export function OpenEffectWindow(): $CancellablePromise<void> {
+    return $Call.ByID(2421518153);
 }
 
 /**
@@ -125,6 +175,13 @@ export function QueueCover(path: string): $CancellablePromise<string> {
 }
 
 /**
+ * RemoveEffect drops the stage with id.
+ */
+export function RemoveEffect(id: string): $CancellablePromise<void> {
+    return $Call.ByID(3726857945, id);
+}
+
+/**
  * SeekTo repositions the current track. Milliseconds keep the bound signature
  * plain; the facade takes a time.Duration. It is named SeekTo rather than Seek
  * because Seek(int64) error is the io.Seeker shape by signature but not in
@@ -149,6 +206,21 @@ export function SetBackend(name: string): $CancellablePromise<void> {
  */
 export function SetCodec(name: string): $CancellablePromise<void> {
     return $Call.ByID(3320687474, name);
+}
+
+/**
+ * SetEffectBypass toggles the standard bypass parameter of the live effect.
+ */
+export function SetEffectBypass(id: string, bypassed: boolean): $CancellablePromise<void> {
+    return $Call.ByID(4041722937, id, bypassed);
+}
+
+/**
+ * SetEffectParam applies one parameter to the live effect. It does not rebuild
+ * the chain, so the effect's state survives the change.
+ */
+export function SetEffectParam(id: string, key: string, value: any): $CancellablePromise<void> {
+    return $Call.ByID(1973958366, id, key, value);
 }
 
 /**

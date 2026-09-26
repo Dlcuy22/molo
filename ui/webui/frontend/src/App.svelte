@@ -119,6 +119,22 @@
         <div class="rounded-[6px] border border-line bg-surface p-3">
           <Controls decoderPref={snap.decoderPref} backend={snap.backend} />
         </div>
+        <div class="rounded-[6px] border border-line bg-surface p-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <h2 class="text-xs font-medium text-muted">Effects</h2>
+              <p class="truncate text-[11px] text-muted">
+                Build a chain of effects in its own window.
+              </p>
+            </div>
+            <button
+              class="shrink-0 rounded-[4px] border border-line bg-surface px-2.5 py-1 text-xs text-fg transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              onclick={() => commands.openEffectWindow()}
+            >
+              Open
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   </main>

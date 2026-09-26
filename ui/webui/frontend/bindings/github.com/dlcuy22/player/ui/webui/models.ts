@@ -11,6 +11,55 @@ export interface CodecOption {
 }
 
 /**
+ * EffectChainInfo is the whole chain in processing order.
+ */
+export interface EffectChainInfo {
+    "stages": EffectStageInfo[] | null;
+}
+
+/**
+ * EffectKindInfo is one effect a chooser can offer.
+ */
+export interface EffectKindInfo {
+    "kind": string;
+    "impl": string;
+    "label": string;
+    "weight": number;
+    "scripted": boolean;
+}
+
+/**
+ * EffectParamInfo is one parameter description for a control to render.
+ */
+export interface EffectParamInfo {
+    "key": string;
+    "kind": number;
+    "min": number;
+    "max": number;
+    "step": number;
+    "unit": string;
+    "options": string[] | null;
+    "default": any;
+    "label": string;
+    "group": string;
+    "widget": string;
+}
+
+/**
+ * EffectStageInfo is one stage in the chain.
+ */
+export interface EffectStageInfo {
+    "id": string;
+    "kind": string;
+    "impl": string;
+    "label": string;
+    "bypassed": boolean;
+    "schema": EffectParamInfo[] | null;
+    "values": { [_ in string]?: any } | null;
+    "meters": { [_ in string]?: number } | null;
+}
+
+/**
  * Options is the static chooser data.
  */
 export interface Options {

@@ -9,12 +9,18 @@ import { get, writable } from "svelte/store";
 import { Events } from "@wailsio/runtime";
 import { PlayerService } from "../../bindings/github.com/dlcuy22/player/ui/webui";
 import type {
+  EffectChainInfo,
+  EffectKindInfo,
+  EffectParamInfo,
+  EffectStageInfo,
   Options,
   PreviewConfig,
   Snapshot,
   SpectrumConfig,
 } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
 import type { Param } from "../../bindings/github.com/dlcuy22/player/ui/webui/internal/spectrum/models";
+import type { EffectKind, EffectStage } from "./effect-types";
+import { toEffectKind, toEffectStage } from "./effect-adapter";
 
 // The event names mirror the Go constants. They are repeated here rather than
 // imported because the generator does not emit string constants for register
@@ -74,6 +80,30 @@ export const cover = writable<string>("");
  *  entry is dropped first, matching the backend's own cover cache. */
 const queueCoverCache = new Map<string, Promise<string>>();
 const queueCoverCacheMax = 64;
+
+// The effect window is the same bundle as the main window, so it is told apart
+// by the route rather than a second build.
+export const isEffectWindow =
+  new URLSearchParams(window.location.search).get("window") === "effects";
+
+/** effectChain is the chain the effect window renders. It is refreshed on the
+ *  snapshot tick and after every editor command, so the panel and its meters
+ *  track the engine without a second subscription. */
+export const effectChain = writable<EffectStage[]>([]);
+
+/** effectKinds is the catalogue the registry tab offers. It is static once
+ *  loaded, so it is fetched once on connect. */
+export const effectKinds = writable<EffectKind[]>([]);
+
+/** syncEffectChain reads the chain once and maps it into the frozen shape. */
+async function syncEffectChain(): Promise<void> {
+  try {
+    const chain = await PlayerService.EffectChain();
+    effectChain.set((chain.stages ?? []).map(toEffectStage));
+  } catch {
+    // A read failure is not worth the error line; the next tick retries.
+  }
+}
 
 /** queueCover fetches a queued track's artwork once per cover id. An empty id
  *  means the track has no art, which resolves to "" without a call. */
@@ -146,6 +176,11 @@ export function connect(): () => void {
     player.set(snap);
     syncCover(snap.coverId);
     ready.set(true);
+    // The effect window reads the chain on the same tick, so its meters move
+    // without a subscription of its own.
+    if (isEffectWindow) {
+      void syncEffectChain();
+    }
   };
 
   const offSnapshot = Events.On(EVENT_SNAPSHOT, (ev) => {
@@ -159,6 +194,12 @@ export function connect(): () => void {
   PlayerService.SpectrumConfig().then(spectrumConfig.set);
   PlayerService.SpectrumSchema().then(spectrumSchema.set);
   PlayerService.PreviewConfig().then(previewConfig.set);
+  if (isEffectWindow) {
+    void syncEffectChain();
+    PlayerService.EffectKinds().then((kinds) => {
+      effectKinds.set((kinds ?? []).map(toEffectKind));
+    });
+  }
 
   return () => {
     offSnapshot();
@@ -209,6 +250,36 @@ export const commands = {
     previewConfig.set(cfg);
     PlayerService.SetPreviewConfig(cfg).catch(() => {});
   },
+
+  // Effect commands. openEffectWindow is the main window's entry point; the
+  // rest are the effect window's editor calls.
+  openEffectWindow: () => invoke(PlayerService.OpenEffectWindow()),
+  addEffect: (kind: string, impl: string) => editEffect(() => PlayerService.AddEffect(kind, impl)),
+  removeEffect: (id: string) => editEffect(() => PlayerService.RemoveEffect(id)),
+  moveEffect: (id: string, to: number) => editEffect(() => PlayerService.MoveEffect(id, to)),
+  setEffectBypass: (id: string, bypassed: boolean) => {
+    // Optimistic: the checkbox and the panel must react on the click, not on
+    // the next snapshot. The 4 Hz tick reconciles the true value.
+    effectChain.update((stages) =>
+      stages.map((s) =>
+        s.id === id
+          ? { ...s, bypassed, values: { ...s.values, bypass: bypassed } }
+          : s,
+      ),
+    );
+    invoke(PlayerService.SetEffectBypass(id, bypassed));
+  },
+  // setEffectParam is called on every slider input, so it updates the store
+  // first and does not await a chain read. The engine call still lands, and the
+  // snapshot tick reconciles any value the effect clamped differently.
+  setEffectParam: (id: string, key: string, value: unknown) => {
+    effectChain.update((stages) =>
+      stages.map((s) =>
+        s.id === id ? { ...s, values: { ...s.values, [key]: value } } : s,
+      ),
+    );
+    invoke(PlayerService.SetEffectParam(id, key, value));
+  },
 };
 
 /** invoke awaits one engine call and folds a rejection into the error line. */
@@ -218,6 +289,21 @@ async function invoke(p: Promise<unknown>): Promise<void> {
   } catch (err) {
     player.update((s) => ({ ...s, error: errorText(err) }));
   }
+}
+
+/**
+ * editEffect runs an editor command and then re-reads the chain. The engine
+ * rebuilds the chain for add, remove and move, so the store's copy is stale
+ * until the read lands; awaiting it keeps the sidebar in step with what the
+ * engine actually installed.
+ */
+async function editEffect(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    player.update((s) => ({ ...s, error: errorText(err) }));
+  }
+  await syncEffectChain();
 }
 
 /** run is invoke plus the busy flag, for the commands that can take a while. */
