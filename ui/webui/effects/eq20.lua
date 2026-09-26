@@ -27,7 +27,7 @@ for i = 1, BANDS do
     unit = "dB",
     label = string.format("%d Hz", math.floor(freq + 0.5)),
     group = "Bands",
-    widget = "slider",
+    widget = "knob",
   }
 end
 

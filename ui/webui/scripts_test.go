@@ -58,6 +58,35 @@ func TestBundledEffectsParse(t *testing.T) {
 	t.Logf("bundled effects: %v", names)
 }
 
+// The bundled effects are copies of the engine's testdata scripts. They are
+// duplicated because the webui module embeds its own set, so a script edited in
+// one place can silently drift from the other. This pins them byte-for-byte:
+// the two copies must stay identical, which is what keeps the shipped UI's
+// controls (a widget hint, a param range) from disagreeing with the script the
+// engine tests against.
+func TestBundledEffectsMatchEngineTestdata(t *testing.T) {
+	entries, err := fs.ReadDir(bundledEffects, "effects")
+	if err != nil {
+		t.Fatalf("read embedded effects: %v", err)
+	}
+
+	for _, e := range entries {
+		bundled, err := bundledEffects.ReadFile("effects/" + e.Name())
+		if err != nil {
+			t.Fatalf("read bundled %s: %v", e.Name(), err)
+		}
+		source, err := os.ReadFile(filepath.Join("..", "..", "script", "testdata", e.Name()))
+		if err != nil {
+			// A bundled script with no engine counterpart is allowed; only a
+			// drifted copy is a bug.
+			continue
+		}
+		if string(bundled) != string(source) {
+			t.Errorf("%s differs from script/testdata/%s; keep the two copies identical", e.Name(), e.Name())
+		}
+	}
+}
+
 // userEffectsDir must land under the platform config dir so a listener can find
 // it, and must not be empty.
 func TestUserEffectsDirIsAbsolute(t *testing.T) {
