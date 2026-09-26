@@ -375,7 +375,7 @@ func TestEffectSchemaLeadsWithTheStandardParams(t *testing.T) {
 func TestEffectKindsIncludesCrossfeed(t *testing.T) {
 	s := pipelineSession(t, 1, dsp.Pipeline{}, nil)
 
-	kinds := s.EffectKinds()
+	kinds := s.EffectKindNames()
 	if !containsString(kinds, "crossfeed") {
 		t.Fatalf("EffectKinds() = %v, want it to include crossfeed", kinds)
 	}

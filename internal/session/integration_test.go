@@ -3,7 +3,6 @@
 package session
 
 import (
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -11,13 +10,15 @@ import (
 	"github.com/dlcuy22/player/playback"
 )
 
-// TestIntegrationQueuePlaysInOrder drives the real oto backend over two real
-// Opus fixtures. It is the end-to-end proof that the controller, streamer,
-// gain and device fit together, and it is skipped with a reason if this
-// machine has no audio server rather than passing silently.
+// TestIntegrationQueuePlaysInOrder drives the fake backend over two real Opus
+// fixtures. It is the end-to-end proof that the controller, streamer, gain and
+// device fit together, and it is quiet: the fake consumes the same bytes at the
+// same real-time pace as oto but discards them, so the test never opens a sound
+// card and never leaks audio. The backend is still a real Device behind the
+// same registry, so the wiring under test is unchanged.
 func TestIntegrationQueuePlaysInOrder(t *testing.T) {
 	cfg := testConfig()
-	cfg.Backend = "oto"
+	cfg.Backend = "fake"
 	cfg.EventBuffer = 128
 	s := newSession(t, cfg)
 
@@ -28,8 +29,8 @@ func TestIntegrationQueuePlaysInOrder(t *testing.T) {
 
 	start := time.Now()
 
-	// Wait for the queue to reach the second track, or for the audio backend
-	// to report it cannot start.
+	// Wait for the queue to reach the second track. The fake backend never
+	// reports ErrAudioInit, so a Failed event here is a real failure.
 	deadline := time.After(20 * time.Second)
 	advanced := false
 	for !advanced {
@@ -44,9 +45,6 @@ func TestIntegrationQueuePlaysInOrder(t *testing.T) {
 					advanced = true
 				}
 			case Failed:
-				if errors.Is(ev.Err, playback.ErrAudioInit) {
-					t.Skipf("real audio unavailable, skipping: %v", ev.Err)
-				}
 				t.Fatalf("playback failed: %v", ev.Err)
 			}
 		case <-deadline:
@@ -78,12 +76,13 @@ func TestIntegrationQueuePlaysInOrder(t *testing.T) {
 }
 
 // TestIntegrationDeviceIsReusedAcrossRealTracks checks the whole point of the
-// fixed format: the audio server is opened once, not per track. It uses a
-// factory that builds real oto devices and counts them.
+// fixed format: the sink is opened once, not per track. It uses a factory that
+// builds fake devices and counts them, so the proof holds without opening a
+// sound card or playing the fixtures aloud.
 func TestIntegrationDeviceIsReusedAcrossRealTracks(t *testing.T) {
 	count := &countingFactory{}
 	cfg := testConfig()
-	cfg.Backend = "oto"
+	cfg.Backend = "fake"
 	cfg.EventBuffer = 128
 	cfg.newDevice = count.new
 	s := newSession(t, cfg)
@@ -101,9 +100,6 @@ func TestIntegrationDeviceIsReusedAcrossRealTracks(t *testing.T) {
 				t.Fatal("events channel closed early")
 			}
 			if f, ok := ev.(Failed); ok {
-				if errors.Is(f.Err, playback.ErrAudioInit) {
-					t.Skipf("real audio unavailable, skipping: %v", f.Err)
-				}
 				t.Fatalf("playback failed: %v", f.Err)
 			}
 		case <-deadline:
@@ -116,9 +112,11 @@ func TestIntegrationDeviceIsReusedAcrossRealTracks(t *testing.T) {
 	}
 }
 
-// countingFactory records how many real oto devices the session constructed.
-// The control goroutine is the only caller, but the mutex keeps it race-clean
-// under the race detector if that ever changes.
+// countingFactory records how many devices the session constructed. It opens
+// through the same registry the engine uses, so pointing it at the fake backend
+// keeps the count meaningful without touching a sound card. The control
+// goroutine is the only caller, but the mutex keeps it race-clean under the
+// race detector if that ever changes.
 type countingFactory struct {
 	mu   sync.Mutex
 	made []playback.Device

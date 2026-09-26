@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dlcuy22/player/core"
@@ -185,6 +186,13 @@ type runtimeSettings struct {
 	// pipeline change that landed while a track was building would be
 	// overwritten by the older snapshot the build had already started from.
 	pipelineGen uint64
+
+	// pending is the built chain for pipelineGen, stored in the same critical
+	// section that advances the generation. The editor reads it together with
+	// the pipeline so it can resolve a stage the control loop has not published
+	// yet; storing it separately would leave a window where the generation is
+	// new but the effects are not.
+	pending *installedChain
 }
 
 func (r *runtimeSettings) snapshot() (decoder, backend string, mode core.DurationMode) {
@@ -213,6 +221,17 @@ func (r *runtimeSettings) pipelineSnapshot() (dsp.Pipeline, uint64) {
 	return clonePipeline(r.pipeline), r.pipelineGen
 }
 
+// pendingSnapshot returns the built chain for the current generation, or nil
+// when the newest accepted change has already been published and cleared. The
+// pipeline, the generation and this chain are read under one lock, so a caller
+// never sees a new generation with the previous change's effects.
+func (r *runtimeSettings) pendingSnapshot() *installedChain {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.pending
+}
+
 // setPipeline stores the pipeline as the one in force and advances the
 // generation. It is how the initial Config pipeline is adopted, where a change
 // count is meaningless because nothing existed before.
@@ -236,7 +255,7 @@ func (r *runtimeSettings) setPipeline(p dsp.Pipeline) uint64 {
 // exposes, and a Pre change is not this method's business. Normalising with
 // clonePipeline is what makes a Pipeline carrying a Pre half compare equal to
 // the stored one that has none.
-func (r *runtimeSettings) setPipelineIfChanged(p dsp.Pipeline) (bool, uint64) {
+func (r *runtimeSettings) setPipelineIfChanged(p dsp.Pipeline, effects []dsp.Effect, keys []stageKey) (bool, uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if reflect.DeepEqual(r.pipeline, clonePipeline(p)) {
@@ -244,8 +263,23 @@ func (r *runtimeSettings) setPipelineIfChanged(p dsp.Pipeline) (bool, uint64) {
 	}
 	r.pipeline = clonePipeline(p)
 	r.pipelineGen++
+	// The pending chain is stored in the same critical section that advances
+	// the generation, so a reader can never see the new generation without the
+	// effects that belong to it.
+	r.pending = &installedChain{effects: effects, gen: r.pipelineGen, keys: keys}
 
 	return true, r.pipelineGen
+}
+
+// clearPending drops the pending chain once the control loop has published it,
+// so a later read does not treat a live chain as still pending. It is a no-op
+// when a newer change has already replaced it.
+func (r *runtimeSettings) clearPending(gen uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pipelineGen == gen {
+		r.pending = nil
+	}
 }
 
 // pipelineGenNow reports the current generation without copying the pipeline.
@@ -325,6 +359,20 @@ type command struct {
 	// SetSettings accepted. It was built on the caller's goroutine, so the
 	// control loop only has to publish it with an atomic swap.
 	effects []dsp.Effect
+
+	// keys identify the stages effects correspond to, in order.
+	keys []stageKey
+
+	// pipelineGen is the generation the effects belong to. The control loop
+	// records it beside the published list so the effect editor can tell
+	// whether a description and the live chain come from the same change.
+	pipelineGen uint64
+
+	// installed, when non-nil, is closed by the control loop once the chain has
+	// been published. The effect editor waits on it so AddEffect returns with
+	// the stage already live, which is what lets the caller set a parameter on
+	// it immediately. It is nil for the ordinary asynchronous ApplyPipeline.
+	installed chan struct{}
 }
 
 type cmdKind uint8
@@ -356,10 +404,14 @@ type openResult struct {
 	streamer    *stream.Streamer
 	effects     []dsp.Effect
 	pipelineGen uint64
-	info        core.StreamInfo
-	decoder     string
-	parser      string
-	err         error
+	// keys identify the stages the built effects correspond to. They let the
+	// editor resolve a stage by identity rather than by index into a generation,
+	// so a caller that read an older description still finds its effect.
+	keys    []stageKey
+	info    core.StreamInfo
+	decoder string
+	parser  string
+	err     error
 }
 
 type probeResult struct {
@@ -455,6 +507,28 @@ type Session struct {
 	// is read from worker goroutines (build) as well as the control goroutine,
 	// so it is guarded by its own mutex rather than the control loop's state.
 	runtime runtimeSettings
+
+	// effectIDs mints unique stage IDs for the effect editor. It is separate
+	// from the control loop's state because AddEffect mints one on the caller's
+	// goroutine.
+	effectIDs effectIDs
+
+	// editorMu serializes the effect editor's read-modify-write. Add, remove and
+	// move each read the pipeline, edit a copy and hand it back, so without this
+	// two concurrent calls would start from the same list and the later install
+	// would drop the other's stage.
+	editorMu sync.Mutex
+
+	// installed is the chain the audio path is running, published as one unit
+	// with the pipeline generation it belongs to. The editor pairs a description
+	// with the live effects only while the generations agree, and it reads the
+	// pair together: two separate atomics could be caught between the two stores
+	// and pair one generation's identity with another generation's meters.
+	//
+	// The effects a change has accepted but not yet published live in
+	// runtimeSettings.pendingEffects, beside the generation, so the editor can
+	// resolve a stage in that window too.
+	installed atomic.Pointer[installedChain]
 
 	// workerWG tracks the asynchronous build/probe/meta goroutines so
 	// shutdown can wait for them before draining their result channels.
@@ -591,6 +665,9 @@ func New(cfg Config) (*Session, error) {
 // so the first buffer an effect sees is never stale state from a previous
 // install.
 func buildPost(p dsp.Pipeline) ([]dsp.Effect, error) {
+	if err := validateSpecIDs(p.Post); err != nil {
+		return nil, err
+	}
 	effects, err := dsp.BuildPost(p)
 	if err != nil {
 		return nil, err
@@ -605,6 +682,25 @@ func buildPost(p dsp.Pipeline) ([]dsp.Effect, error) {
 	}
 
 	return effects, nil
+}
+
+// validateSpecIDs rejects a pipeline with two stages sharing a non-empty ID. An
+// empty ID means the stage is not addressable by the editor and is allowed, but
+// a duplicate would make RemoveEffect and liveEffect address different stages:
+// the first would drop both, the second would write the wrong one.
+func validateSpecIDs(specs []dsp.Spec) error {
+	seen := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		if spec.ID == "" {
+			continue
+		}
+		if seen[spec.ID] {
+			return fmt.Errorf("dsp: duplicate effect stage ID %q", spec.ID)
+		}
+		seen[spec.ID] = true
+	}
+
+	return nil
 }
 
 // ValidatePipeline reports whether every post-ring stage can be built. It is
@@ -624,9 +720,11 @@ func (s *Session) EffectSchema(kind string) ([]dsp.Param, error) {
 	return dsp.Default.Schema(kind)
 }
 
-// EffectKinds lists the registered effect kinds, sorted, so a UI can offer the
-// stages this build supports without hard-coding them.
-func (s *Session) EffectKinds() []string {
+// EffectKindNames lists the registered effect kinds, sorted, so a UI can offer
+// the stages this build supports without hard-coding them. It is the plain name
+// list; EffectKinds returns the detailed per-implementation list an editor
+// needs.
+func (s *Session) EffectKindNames() []string {
 	return dsp.Default.Kinds()
 }
 
@@ -669,7 +767,7 @@ func (s *Session) ApplyPipeline(p dsp.Pipeline) error {
 	if err != nil {
 		return err
 	}
-	s.installPipeline(effects, p)
+	s.installPipeline(effects, p, nil)
 
 	return nil
 }
@@ -715,9 +813,21 @@ func (s *Session) SetSettings(next Settings) error {
 	// read when a device is built.
 	s.gain.SetVolume(next.Volume)
 	s.runtime.set(next.Decoder, next.Backend, next.ProbeMode)
-	s.installPipeline(effects, next.Pipeline)
+	s.installPipeline(effects, next.Pipeline, nil)
 
 	return nil
+}
+
+// stageKeys names the stages a pipeline describes, in order. They are stored
+// beside a built chain so the editor can resolve a stage by identity rather
+// than by index into a generation.
+func stageKeys(p dsp.Pipeline) []stageKey {
+	keys := make([]stageKey, 0, len(p.Post))
+	for _, spec := range p.Post {
+		keys = append(keys, stageKey{id: spec.ID, kind: spec.Kind, impl: spec.Impl})
+	}
+
+	return keys
 }
 
 // installPipeline records a validated pipeline and, when it actually changed,
@@ -726,12 +836,40 @@ func (s *Session) SetSettings(next Settings) error {
 // performs an atomic chain swap and never blocks on effect construction. An
 // identical pipeline is a no-op: the effects are discarded and nothing is
 // emitted, so a settings edit that leaves the chain alone cannot reset it.
-func (s *Session) installPipeline(effects []dsp.Effect, p dsp.Pipeline) {
-	changed, _ := s.runtime.setPipelineIfChanged(p)
+func (s *Session) installPipeline(effects []dsp.Effect, p dsp.Pipeline, installed chan struct{}) {
+	keys := stageKeys(p)
+	changed, gen := s.runtime.setPipelineIfChanged(p, effects, keys)
 	if !changed {
+		// Nothing to publish, so a waiting caller must still be released.
+		s.signalInstalled(installed)
+
 		return
 	}
-	s.enqueue(command{kind: cmdApplyPipeline, effects: effects})
+	if !s.enqueue(command{kind: cmdApplyPipeline, effects: effects, keys: keys, pipelineGen: gen, installed: installed}) {
+		// The session closed before the command could run; release the waiter
+		// rather than leave it blocked.
+		s.signalInstalled(installed)
+	}
+}
+
+// applyPipelineWait is ApplyPipeline plus a wait for the control loop to publish
+// the chain. The effect editor uses it so a stage it just added is already live
+// when the call returns, which is what lets the caller set a parameter on it
+// immediately instead of polling. The wait is bounded by the control loop, which
+// only does bounded work, and by Close, so it cannot block a shutdown.
+func (s *Session) applyPipelineWait(p dsp.Pipeline) error {
+	effects, err := buildPost(p)
+	if err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	s.installPipeline(effects, p, done)
+	select {
+	case <-done:
+	case <-s.closing:
+	}
+
+	return nil
 }
 
 // Settings is the mutable half of a Session's configuration: the values a
@@ -980,12 +1118,16 @@ func (s *Session) Close() error {
 // enqueue appends a command and wakes the control loop. The wake is a
 // non-blocking signal: a pending wake is as good as a new one because the loop
 // drains the whole inbox.
-func (s *Session) enqueue(c command) {
+//
+// It reports whether the command was accepted. A closed session drops it, and a
+// caller that would wait for the command to run needs to know so it does not
+// wait forever.
+func (s *Session) enqueue(c command) bool {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 
-		return
+		return false
 	}
 	s.inbox = append(s.inbox, c)
 	s.mu.Unlock()
@@ -993,6 +1135,16 @@ func (s *Session) enqueue(c command) {
 	select {
 	case s.wake <- struct{}{}:
 	default:
+	}
+
+	return true
+}
+
+// signalInstalled closes a command's installed channel, if it has one, to tell
+// a waiting editor caller that the chain is live.
+func (s *Session) signalInstalled(ch chan struct{}) {
+	if ch != nil {
+		close(ch)
 	}
 }
 
@@ -1092,16 +1244,62 @@ func (s *Session) apply(c command) {
 	case cmdSwapBackend:
 		s.requestSwapBackend(c.name)
 	case cmdApplyPipeline:
-		s.setChain(c.effects)
+		s.installChain(c.effects, c.pipelineGen, c.keys)
+		s.signalInstalled(c.installed)
 	}
 }
 
-// setChain publishes a built effect list to the audio path. It is the control
-// loop's whole share of a pipeline change: Chain.Set is an atomic pointer store,
-// so installing a chain never builds anything here and never blocks. The audio
-// thread picks the new list up on its next buffer.
-func (s *Session) setChain(effects []dsp.Effect) {
+// stageKey identifies a stage by what it is, not by where it sits. Two accepted
+// changes can leave a description and a live chain from different generations,
+// and an index would then pair one stage's identity with another's effect. The
+// key is matched instead, and the kind and impl are part of it so a caller that
+// reuses an ID for a different effect cannot be mis-paired either.
+type stageKey struct {
+	id   string
+	kind string
+	impl string
+}
+
+// installedChain is the live effect list and the pipeline generation it was
+// built for, published as one atomic unit. Keeping the two together is what
+// makes the editor's pairing sound: reading a generation and a list separately
+// could catch the moment between the two stores.
+type installedChain struct {
+	effects []dsp.Effect
+	gen     uint64
+	keys    []stageKey
+}
+
+// effect returns the live effect for a stage, if this chain holds it.
+func (c *installedChain) effect(spec dsp.Spec) (dsp.Effect, bool) {
+	for i, k := range c.keys {
+		if k.id == spec.ID && k.kind == spec.Kind && k.impl == spec.Impl && i < len(c.effects) {
+			return c.effects[i], true
+		}
+	}
+
+	return nil, false
+}
+
+// publishChain swaps the live effect list and its generation as one unit. It is
+// the whole audio-path share of a pipeline change: Chain.Set is an atomic
+// pointer store, so installing never builds anything here and never blocks. The
+// audio thread picks the new list up on its next buffer.
+//
+// The pair is stored as one pointer so a concurrent reader sees the list and
+// its generation together, never one change's list with another's generation.
+func (s *Session) publishChain(effects []dsp.Effect, gen uint64, keys []stageKey) {
 	s.chain.Set(effects)
+	s.installed.Store(&installedChain{effects: effects, gen: gen, keys: keys})
+}
+
+// installChain publishes a built effect list and announces it. It is the
+// control loop's answer to an ApplyPipeline command.
+func (s *Session) installChain(effects []dsp.Effect, gen uint64, keys []stageKey) {
+	s.publishChain(effects, gen, keys)
+	// The effects are live now, so they are no longer pending. Clearing under
+	// the same lock that guards the generation keeps the two views consistent.
+	s.runtime.clearPending(gen)
 	s.emit(PipelineChanged{Stages: len(effects)})
 }
 
@@ -1262,6 +1460,11 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 	if err != nil {
 		return openResult{seq: seq, index: index, path: path, err: err}
 	}
+	// Record the stage IDs the built effects correspond to. The chain the
+	// editor resolves against is identified by these IDs, not by the generation
+	// alone: a generation can be read from a stale snapshot while the chain is
+	// already current, so the IDs are what actually say which stages are live.
+	keys := stageKeys(pipeline)
 
 	var info core.StreamInfo
 	var decoderName, parserName string
@@ -1297,7 +1500,7 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 
 	return openResult{
 		seq: seq, index: index, path: path,
-		streamer: st, effects: effects, pipelineGen: gen,
+		streamer: st, effects: effects, pipelineGen: gen, keys: keys,
 		info: info, decoder: decoderName, parser: parserName,
 	}
 }
@@ -1356,7 +1559,7 @@ func (s *Session) activate(res openResult) {
 	// generation is newer and its chain is already in force; installing this
 	// older list would silently undo the change, so it is dropped.
 	if res.pipelineGen == s.runtime.pipelineGenNow() {
-		s.chain.Set(res.effects)
+		s.publishChain(res.effects, res.pipelineGen, res.keys)
 	}
 	s.provider.setCurrent(res.streamer)
 	s.inFlight = true

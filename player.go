@@ -127,6 +127,12 @@ func Codecs() []Codec { return decode.Default.Codecs() }
 // choice. Empty is always valid and means the default.
 func Backends() []string { return playback.Names() }
 
+// UserBackends lists the playback backends a UI should offer. It is Backends
+// without the dev-only entries, so a fake or null sink never reaches a
+// listener's output dropdown. Validation still accepts the full list, so a
+// test or a CLI flag can select a dev backend by name.
+func UserBackends() []string { return playback.UserNames() }
+
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
 type Player interface {
@@ -320,6 +326,6 @@ func (p *player) EffectSchema(kind string) ([]dsp.Param, error) {
 }
 
 // EffectKinds lists the registered effect kinds, sorted.
-func (p *player) EffectKinds() []string { return p.session.EffectKinds() }
+func (p *player) EffectKinds() []string { return p.session.EffectKindNames() }
 
 func (p *player) Close() error { return p.session.Close() }
