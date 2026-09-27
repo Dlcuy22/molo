@@ -66,6 +66,7 @@ func (b *builder) newContext() *lua.LTable {
 	ctx.RawSetString("db2lin", b.L.NewFunction(b.fnUnaryShape("lin")))
 	ctx.RawSetString("meter", b.L.NewFunction(b.fnMeter))
 	ctx.RawSetString("visual", b.L.NewFunction(b.fnVisual))
+	ctx.RawSetString("latency", b.L.NewFunction(b.fnLatency))
 
 	return ctx
 }
@@ -641,6 +642,49 @@ func optNumber(tbl *lua.LTable, name string) float64 {
 	if v, ok := tbl.RawGetString(name).(lua.LNumber); ok {
 		return float64(v)
 	}
+
+	return 0
+}
+
+// fnLatency declares how far the effect delays its output, so the session can
+// subtract it from the reported play position. The argument is a literal in
+// seconds or a ctx.param handle; a second call is a mistake, since one effect
+// has one latency.
+func (b *builder) fnLatency(L *lua.LState) int {
+	if b.g.latencySet {
+		L.RaiseError("latency is already declared")
+
+		return 0
+	}
+	b.g.latencySet = true
+	v := L.Get(1)
+	if h, ok := refOf(v); ok && h.node.kind == kindParam {
+		key := paramKey(h.node)
+		// A latency is seconds, so a bool or enum param would silently read as
+		// zero. The schema is not built yet, so check the declaration list.
+		if kind, ok := b.g.paramKindOf(key); ok && !numericKind(kind) {
+			L.RaiseError("latency param %q must be a float or int, not %s", key, kind)
+
+			return 0
+		}
+		b.g.paramRefs = append(b.g.paramRefs, key)
+		b.g.latencyParam = key
+
+		return 0
+	}
+	f, ok := v.(lua.LNumber)
+	if !ok {
+		L.RaiseError("latency expects a number of seconds or a param")
+
+		return 0
+	}
+	sec := float64(f)
+	if !finite(sec) || sec < 0 {
+		L.RaiseError("latency must be a finite number of seconds at or above zero")
+
+		return 0
+	}
+	b.g.latencySec = sec
 
 	return 0
 }

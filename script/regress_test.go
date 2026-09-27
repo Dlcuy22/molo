@@ -673,6 +673,38 @@ func TestControlSetWritesEveryField(t *testing.T) {
 	}
 }
 
+// MINOR: `set{}` on a node with parameter-backed fields is refused: the write
+// would replace the resolved set with the literals and drop every parameterised
+// field. The fault stops the effect rather than silently zeroing the params.
+func TestControlSetRefusedOnParamBackedFields(t *testing.T) {
+	e := buildConfigured(t, `return effect {
+  name = "ParamShaper",
+  params = { threshold = { float, min = -60, max = 0, default = -18 } },
+  build = function(ctx)
+    local red = ctx.shaper { shape = "softknee", threshold = ctx.param("threshold"),
+                             ratio = 4, knee = 8 }
+    ctx.control(function(p) red:set { drive = 2 } end)
+    ctx.out(red(ctx.input()))
+  end,
+}`, nil)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if e.Watchdog() != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	reason := e.Watchdog()
+	t.Logf("watchdog: %q", reason)
+	if reason == "" {
+		t.Fatal("a set on a parameter-backed shaper did not fault the control callback")
+	}
+	if !strings.Contains(reason, "parameter-backed") {
+		t.Fatalf("watchdog reason does not explain the refusal: %q", reason)
+	}
+}
+
 // MINOR: one-argument min/max/mul/div is a load error, not a silent zero.
 
 func TestOneArgumentCombinatorsFailLoad(t *testing.T) {

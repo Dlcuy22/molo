@@ -96,7 +96,7 @@ var specs = []nodeSpec{
 	{kind: kindDelay, fields: []string{"time", "max"}, inputs: []inputSpec{{name: "in"}}},
 	{kind: kindBiquad, fields: []string{"type", "freq", "q", "gain"}, inputs: []inputSpec{{name: "in"}}},
 	{kind: kindOnePole, fields: []string{"cutoff"}, inputs: []inputSpec{{name: "in"}}},
-	{kind: kindShaper, fields: []string{"shape", "drive"}, inputs: []inputSpec{{name: "in"}}},
+	{kind: kindShaper, fields: []string{"shape", "drive", "threshold", "ratio", "knee"}, inputs: []inputSpec{{name: "in"}}},
 	{kind: kindEnv, fields: []string{"attack", "release", "mode"}, inputs: []inputSpec{{name: "in"}}},
 	{kind: kindAdd, inputs: []inputSpec{{name: "a"}, {name: "b", optional: true}}},
 	{kind: kindSub, inputs: []inputSpec{{name: "a"}, {name: "b"}}},
@@ -173,17 +173,22 @@ type node struct {
 // nodeValues is the resolved scalar set one node runs on. Not every kind uses
 // every field; the zero value is the same as an unset field.
 type nodeValues struct {
-	rate    float64 // lfo rate, in turns per sample
-	phase   float64 // lfo phase offset, in turns
-	time    float64 // delay length, in frames
-	drive   float64 // shaper drive
-	factor  float64 // scale factor
-	cutoff  float64 // onepole coefficient
-	freq    float64 // biquad centre frequency
-	q       float64 // biquad Q
-	gain    float64 // biquad peaking gain, dB
-	attack  float64
-	release float64
+	rate  float64 // lfo rate, in turns per sample
+	phase float64 // lfo phase offset, in turns
+	time  float64 // delay length, in frames
+	drive float64 // shaper drive
+	// Shaper soft-knee parameters, read only by the softknee shape: a
+	// threshold and a knee width in dB, and a compression ratio.
+	threshold float64
+	ratio     float64
+	knee      float64
+	factor    float64 // scale factor
+	cutoff    float64 // onepole coefficient
+	freq      float64 // biquad centre frequency
+	q         float64 // biquad Q
+	gain      float64 // biquad peaking gain, dB
+	attack    float64
+	release   float64
 }
 
 func (n *node) label() string {
@@ -213,6 +218,15 @@ type graph struct {
 	readings []readingDecl
 	// visuals is every plot the script declared, in declaration order.
 	visuals []*dsp.Visual
+	// latencyParam is the parameter key ctx.latency named, empty when the
+	// script passed a literal.
+	latencyParam string
+	// latencySec is the literal latency in seconds, used when no parameter
+	// was named.
+	latencySec float64
+	// latencySet records that ctx.latency ran, so a second call is rejected
+	// even when the first declared a zero literal.
+	latencySet bool
 }
 
 // newGraph returns an empty graph.
@@ -253,6 +267,18 @@ func (g *graph) addParam(decl paramDecl) error {
 	g.params = append(g.params, decl)
 
 	return nil
+}
+
+// paramKindOf returns the declared kind for a parameter key and whether it was
+// declared. It lets a build-time check read the kind before the schema is built.
+func (g *graph) paramKindOf(key string) (string, bool) {
+	for _, p := range g.params {
+		if p.Key == key {
+			return lowerName(p.Kind), true
+		}
+	}
+
+	return "", false
 }
 
 // connect wires one input port of a node, checking the port exists and never

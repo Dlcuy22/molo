@@ -28,7 +28,7 @@ func TestCompressorDeclaresReadingAndVisual(t *testing.T) {
 	for _, p := range f.Schema() {
 		keys[p.Key] = p
 	}
-	for _, want := range []string{"threshold", "ratio", "attack", "release", "makeup", "mix"} {
+	for _, want := range []string{"threshold", "ratio", "knee", "attack", "release", "makeup", "mix", "lookahead"} {
 		if _, ok := keys[want]; !ok {
 			t.Fatalf("compressor schema is missing %q; has %v", want, schemaKeys(f.Schema()))
 		}
@@ -64,22 +64,39 @@ func TestCompressorDeclaresReadingAndVisual(t *testing.T) {
 	}
 
 	visuals := ef.Visuals()
-	if len(visuals) != 1 {
-		t.Fatalf("Visuals() returned %d visuals, want 1: %+v", len(visuals), visuals)
+	if len(visuals) != 2 {
+		t.Fatalf("Visuals() returned %d visuals, want 2: %+v", len(visuals), visuals)
 	}
 	visual := visuals[0]
-	t.Logf("compressor visual: %+v", visual)
+	t.Logf("compressor transfer visual: %+v", visual)
 	if visual.Kind != dsp.VisualTransfer {
 		t.Fatalf("visual kind = %q, want %q", visual.Kind, dsp.VisualTransfer)
 	}
-	if got := strings.Join(visual.Params, ","); got != "threshold,ratio,makeup" {
-		t.Fatalf("visual params = %q, want threshold,ratio,makeup", got)
+	if got := strings.Join(visual.Params, ","); got != "threshold,ratio,makeup,knee" {
+		t.Fatalf("visual params = %q, want threshold,ratio,makeup,knee", got)
 	}
 	if got := strings.Join(visual.Overlays, ","); got != "in,gr" {
 		t.Fatalf("visual overlays = %q, want in,gr", got)
 	}
 	if visual.XMin != -60 || visual.XMax != 0 || visual.YMin != -60 || visual.YMax != 0 {
 		t.Fatalf("visual range lost: %+v", visual)
+	}
+
+	// The second visual is the scrolling dynamics display over the in/out pair
+	// and the gain-reduction reading.
+	dyn := visuals[1]
+	t.Logf("compressor dynamics visual: %+v", dyn)
+	if dyn.Kind != dsp.VisualDynamics {
+		t.Fatalf("dynamics kind = %q, want %q", dyn.Kind, dsp.VisualDynamics)
+	}
+	if got := strings.Join(dyn.Params, ","); got != "" {
+		t.Fatalf("dynamics params = %q, want empty", got)
+	}
+	if got := strings.Join(dyn.Overlays, ","); got != "in,out,gr" {
+		t.Fatalf("dynamics overlays = %q, want in,out,gr", got)
+	}
+	if dyn.YMin != -60 || dyn.YMax != 0 {
+		t.Fatalf("dynamics range lost: %+v", dyn)
 	}
 }
 

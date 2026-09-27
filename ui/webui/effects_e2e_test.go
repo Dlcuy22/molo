@@ -315,21 +315,31 @@ func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
 	}
 
 	// The declared visuals: a transfer curve derived from the compressor params,
-	// and (from Phase A on) a scrolling dynamics display over the same readings.
+	// and a scrolling dynamics display over the same readings.
 	var transfer *EffectVisualInfo
+	var dynamics *EffectVisualInfo
 	for i := range st.Visuals {
-		if st.Visuals[i].Kind == string(dsp.VisualTransfer) {
+		switch st.Visuals[i].Kind {
+		case string(dsp.VisualTransfer):
 			transfer = &st.Visuals[i]
+		case string(dsp.VisualDynamics):
+			dynamics = &st.Visuals[i]
 		}
 	}
 	if transfer == nil {
 		t.Fatalf("stage reports no transfer visual: %+v", st.Visuals)
 	}
-	if got := strings.Join(transfer.Params, ","); got != "threshold,ratio,makeup" {
-		t.Fatalf("visual params = %q, want threshold,ratio,makeup", got)
+	if got := strings.Join(transfer.Params, ","); got != "threshold,ratio,makeup,knee" {
+		t.Fatalf("visual params = %q, want threshold,ratio,makeup,knee", got)
 	}
 	if got := strings.Join(transfer.Overlays, ","); got != "in,gr" {
 		t.Fatalf("visual overlays = %q, want in,gr", got)
+	}
+	if dynamics == nil {
+		t.Fatalf("stage reports no dynamics visual: %+v", st.Visuals)
+	}
+	if got := strings.Join(dynamics.Overlays, ","); got != "in,out,gr" {
+		t.Fatalf("dynamics overlays = %q, want in,out,gr", got)
 	}
 
 	// The reading must carry a live number, not just metadata: the fixture is

@@ -925,11 +925,9 @@ func (s *Session) Snapshot() Snapshot {
 		stats = live.Stats()
 	}
 	// The chain delays what is heard behind what the streamer has read, so the
-	// reported position is the heard position. Nothing shipped adds latency
-	// today, and Chain.Latency is an atomic load plus a scan of a short list,
-	// so this stays cheap. The clamp is what keeps a chain whose latency
-	// exceeds the position at the start of a track from reporting a negative
-	// time.
+	// reported position is the heard position. Latency is control-side only, so
+	// a scripted effect's store lock is fine; the clamp stops a negative time
+	// when the chain's latency exceeds the position at the start of a track.
 	if latency := s.chain.Latency(); latency > 0 {
 		if pos > latency {
 			pos -= latency

@@ -121,7 +121,7 @@ func runNode(n *node, scratch, frame, staging []float64, ch int) {
 		s := n.state.(*shaperState)
 		readInto(scratch, src(n, "in"), ch)
 		for c := 0; c < ch; c++ {
-			scratch[c] = s.apply(scratch[c], n.vals.drive)
+			scratch[c] = s.apply(scratch[c], n.vals)
 		}
 
 	case kindEnv:
@@ -365,9 +365,8 @@ func newDelayState(frames, ch int) *delayState {
 }
 
 // process writes the incoming frame into the line and reads the delayed frame
-// out of it. The write and the read happen at the same index, so a delay of n
-// frames returns the input from n frames ago and a delay of zero returns the
-// input from the previous sample, not the current one.
+// out of it. A delay of n frames returns the input from n frames ago; a delay
+// of zero is a pass-through.
 func (s *delayState) process(dst, frame []float64, ch int, delay float64) {
 	n := int(delay)
 	if n < 0 {
@@ -377,22 +376,29 @@ func (s *delayState) process(dst, frame []float64, ch int, delay float64) {
 		n = s.frames - 1
 	}
 
-	read := s.write - n
-	if read < 0 {
-		read += s.frames
-	}
-
 	if ch > s.ch {
 		ch = s.ch
 	}
-	rb := read * s.ch
-	for c := 0; c < ch; c++ {
-		dst[c] = clampLine(s.buf[rb+c])
-	}
-
 	wb := s.write * s.ch
-	for c := 0; c < ch; c++ {
-		s.buf[wb+c] = clampLine(frame[c])
+	if n == 0 {
+		// The read index would equal the write index, so reading first would
+		// return the value from a full buffer ago; a zero delay passes through.
+		for c := 0; c < ch; c++ {
+			dst[c] = frame[c]
+			s.buf[wb+c] = clampLine(frame[c])
+		}
+	} else {
+		read := s.write - n
+		if read < 0 {
+			read += s.frames
+		}
+		rb := read * s.ch
+		for c := 0; c < ch; c++ {
+			dst[c] = clampLine(s.buf[rb+c])
+		}
+		for c := 0; c < ch; c++ {
+			s.buf[wb+c] = clampLine(frame[c])
+		}
 	}
 
 	s.write++
@@ -486,11 +492,14 @@ const (
 	shapeHard
 	shapeDb
 	shapeLin
+	shapeSoftKnee
 )
 
-// apply runs the map. drive scales the input before the non-linearity and is
-// read per block, so it can be a parameter.
-func (s *shaperState) apply(x, drive float64) float64 {
+// apply runs the map over the resolved scalar set. drive scales the input
+// before the non-linearity; the soft-knee shape reads threshold, ratio and knee
+// instead. Both are read per block, so they can be parameters.
+func (s *shaperState) apply(x float64, vals nodeValues) float64 {
+	drive := vals.drive
 	if drive <= 0 {
 		drive = 1
 	}
@@ -529,6 +538,31 @@ func (s *shaperState) apply(x, drive float64) float64 {
 		}
 
 		return v
+
+	case shapeSoftKnee:
+		// The Audacity GainReductionComputer law: a level in dB in, a gain
+		// reduction in dB out. Matches the frontend's transferSample.
+		r := vals.ratio
+		if r < 1 {
+			r = 1
+		}
+		over := x - vals.threshold
+		if vals.knee <= 0 {
+			if over <= 0 {
+				return 0
+			}
+
+			return over * (1 - 1/r)
+		}
+		half := vals.knee / 2
+		if over <= -half {
+			return 0
+		}
+		if over >= half {
+			return over * (1 - 1/r)
+		}
+
+		return (1 - 1/r) * (over + half) * (over + half) / (2 * vals.knee)
 
 	default:
 		return math.Tanh(x * drive)

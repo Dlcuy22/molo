@@ -29,6 +29,9 @@ func cloneGraph(g *graph) *graph {
 	}
 	// A first pass copies nodes and their scalar fields, the second pass
 	// rewires edges to the clones.
+	out.latencyParam = g.latencyParam
+	out.latencySec = g.latencySec
+	out.latencySet = g.latencySet
 	for i, src := range g.nodes {
 		n := &node{
 			kind:     src.kind,
@@ -349,6 +352,15 @@ func resolveValues(n *node, rate int) error {
 	if v, ok := numberField(n, "drive"); ok {
 		n.vals.drive = v
 	}
+	if v, ok := numberField(n, "threshold"); ok {
+		n.vals.threshold = v
+	}
+	if v, ok := numberField(n, "ratio"); ok {
+		n.vals.ratio = v
+	}
+	if v, ok := numberField(n, "knee"); ok {
+		n.vals.knee = v
+	}
 	if v, ok := numberField(n, "factor"); ok {
 		n.vals.factor = v
 	}
@@ -470,6 +482,8 @@ func shapeSelector(name string) (int, error) {
 		return shapeSoft, nil
 	case "hard", "hardclip", "hard-clip", "clip":
 		return shapeHard, nil
+	case "softknee", "soft-knee", "knee":
+		return shapeSoftKnee, nil
 	case "db", "linear2db", "lin2db":
 		return shapeDb, nil
 	case "lin", "db2lin":

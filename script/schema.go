@@ -11,6 +11,18 @@ import (
 // for both the built-in and the scripted parameter paths.
 var ErrUnknownParam = dsp.ErrUnknownParam
 
+// numericKind reports whether a declared kind word names a number. It is the
+// one place the float/int aliases live, so a build-time check that reads a kind
+// before the schema exists cannot drift from buildParam's switch.
+func numericKind(kind string) bool {
+	switch lowerName(kind) {
+	case "float", "number", "int", "integer":
+		return true
+	default:
+		return false
+	}
+}
+
 // buildSchema turns Lua parameter declarations into a dsp schema, with the
 // three standard parameters in front.
 //

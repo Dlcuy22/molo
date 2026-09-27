@@ -217,6 +217,10 @@ func (b *controlBridge) replaceNodes(nodes []*node) {
 	b.nodes = nodes
 }
 
+// hasParamFields reports whether any of a node's scalar fields is backed by a
+// parameter, so a generic `set` would clobber the resolved values.
+func hasParamFields(n *node) bool { return len(n.paramFields) > 0 }
+
 // toCtrlValue converts one node's writes to the value the audio side applies.
 func (b *controlBridge) toCtrlValue(n *node, fields map[string]float64) (ctrlValue, error) {
 	switch n.kind {
@@ -253,9 +257,14 @@ func (b *controlBridge) toCtrlValue(n *node, fields map[string]float64) (ctrlVal
 		return v, nil
 	default:
 		// A generic scalar: the node's resolved scalar set changes, such as an
-		// lfo rate or a scale factor.
+		// lfo rate or a scale factor. A node with parameter-backed fields
+		// resolves them into the same set, so a write here would replace it
+		// with the literals and silently drop every parameterised field.
+		if hasParamFields(n) {
+			return ctrlValue{}, fmt.Errorf("script: %s has parameter-backed fields and cannot be set; drive them through their parameters", n.label())
+		}
 		v := ctrlValue{kind: ctrlVals, index: n.position, vals: n.lit}
-		for _, f := range []string{"rate", "factor", "value", "time", "drive", "phase"} {
+		for _, f := range []string{"rate", "factor", "value", "time", "drive", "phase", "threshold", "ratio", "knee"} {
 			x, ok := fields[f]
 			if !ok {
 				continue
@@ -269,6 +278,12 @@ func (b *controlBridge) toCtrlValue(n *node, fields map[string]float64) (ctrlVal
 				v.vals.time = x * float64(b.rate)
 			case "drive":
 				v.vals.drive = x
+			case "threshold":
+				v.vals.threshold = x
+			case "ratio":
+				v.vals.ratio = x
+			case "knee":
+				v.vals.knee = x
 			case "factor":
 				v.vals.factor = x
 			case "value":

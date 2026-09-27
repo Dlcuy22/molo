@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dlcuy22/player/core"
 	"github.com/dlcuy22/player/dsp"
@@ -91,6 +92,7 @@ var (
 	_ dsp.Metered    = (*Effect)(nil)
 	_ dsp.Described  = (*Effect)(nil)
 	_ dsp.Visualized = (*Effect)(nil)
+	_ dsp.Latent     = (*Effect)(nil)
 )
 
 // Name identifies the instance in a chain.
@@ -209,6 +211,25 @@ func (e *Effect) Bypassed() bool {
 	st := e.state.Load()
 
 	return st != nil && (st.bypassed || st.watchdogFailed)
+}
+
+// Latency reports how far the effect delays its output; the chain sums it into
+// the reported position. It is only called on the control side, so reading the
+// store's mutex here is fine. A negative resolved value clamps to zero: a
+// script cannot claim a latency that would advance the position.
+func (e *Effect) Latency() time.Duration {
+	if e.graph == nil {
+		return 0
+	}
+	sec := e.graph.latencySec
+	if e.graph.latencyParam != "" {
+		sec = e.store.Float(e.graph.latencyParam)
+	}
+	if !(sec > 0) {
+		return 0
+	}
+
+	return time.Duration(sec * float64(time.Second))
 }
 
 // Meters reports the input and output peaks in dBFS under the standard keys,
@@ -432,6 +453,12 @@ func paramValues(p *plan, st *store) []ctrlValue {
 				vals.time = v * float64(p.rate)
 			case "drive":
 				vals.drive = v
+			case "threshold":
+				vals.threshold = v
+			case "ratio":
+				vals.ratio = v
+			case "knee":
+				vals.knee = v
 			case "factor":
 				vals.factor = v
 			case "cutoff":
