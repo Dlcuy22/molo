@@ -55,8 +55,8 @@ func (*describedTestEffect) Readings() []dsp.Reading {
 	}}
 }
 
-func (*describedTestEffect) Visual() dsp.Visual {
-	return dsp.Visual{
+func (*describedTestEffect) Visuals() []dsp.Visual {
+	return []dsp.Visual{{
 		Kind:     dsp.VisualTransfer,
 		Params:   []string{"threshold", "ratio"},
 		Overlays: []string{"in", "gr"},
@@ -64,7 +64,7 @@ func (*describedTestEffect) Visual() dsp.Visual {
 		XMax:     0,
 		YMin:     -60,
 		YMax:     0,
-	}
+	}}
 }
 
 // meteredTestEffect implements dsp.Metered and nothing else. It is a distinct
@@ -92,12 +92,12 @@ type reusedVisualEffect struct {
 	telemetryBase
 }
 
-func (*reusedVisualEffect) Visual() dsp.Visual {
-	return dsp.Visual{
+func (*reusedVisualEffect) Visuals() []dsp.Visual {
+	return []dsp.Visual{{
 		Kind:     dsp.VisualTransfer,
 		Params:   reusedParams[:2],
 		Overlays: reusedOverlays[:2],
-	}
+	}}
 }
 
 // The interface assertions pin the two fakes to the shapes the test needs.
@@ -153,7 +153,7 @@ func registerTelemetryFactories() {
 
 // TestEffectStageReportsReadingsAndVisual proves the engine fills the new
 // telemetry fields from the optional interfaces: an effect that implements
-// dsp.Described and dsp.Visualized reports its readings and a non-nil visual
+// dsp.Described and dsp.Visualized reports its readings and its visuals
 // through EffectStages, beside its live meters.
 func TestEffectStageReportsReadingsAndVisual(t *testing.T) {
 	registerTelemetryFactories()
@@ -181,21 +181,22 @@ func TestEffectStageReportsReadingsAndVisual(t *testing.T) {
 		t.Fatalf("reading range = [%v %v], want [-30 0]", got.Min, got.Max)
 	}
 
-	if st.Visual == nil {
-		t.Fatal("Visual = nil, want the described transfer plot")
+	if len(st.Visuals) != 1 {
+		t.Fatalf("Visuals = %+v, want one", st.Visuals)
 	}
-	if st.Visual.Kind != dsp.VisualTransfer {
-		t.Fatalf("Visual.Kind = %q, want %q", st.Visual.Kind, dsp.VisualTransfer)
+	v := st.Visuals[0]
+	if v.Kind != dsp.VisualTransfer {
+		t.Fatalf("Visual.Kind = %q, want %q", v.Kind, dsp.VisualTransfer)
 	}
-	if len(st.Visual.Params) != 2 || st.Visual.Params[0] != "threshold" || st.Visual.Params[1] != "ratio" {
-		t.Fatalf("Visual.Params = %v, want [threshold ratio]", st.Visual.Params)
+	if len(v.Params) != 2 || v.Params[0] != "threshold" || v.Params[1] != "ratio" {
+		t.Fatalf("Visual.Params = %v, want [threshold ratio]", v.Params)
 	}
-	if len(st.Visual.Overlays) != 2 || st.Visual.Overlays[0] != "in" || st.Visual.Overlays[1] != "gr" {
-		t.Fatalf("Visual.Overlays = %v, want [in gr]", st.Visual.Overlays)
+	if len(v.Overlays) != 2 || v.Overlays[0] != "in" || v.Overlays[1] != "gr" {
+		t.Fatalf("Visual.Overlays = %v, want [in gr]", v.Overlays)
 	}
-	if st.Visual.XMin != -60 || st.Visual.XMax != 0 || st.Visual.YMin != -60 || st.Visual.YMax != 0 {
+	if v.XMin != -60 || v.XMax != 0 || v.YMin != -60 || v.YMax != 0 {
 		t.Fatalf("Visual bounds = [%v %v %v %v], want [-60 0 -60 0]",
-			st.Visual.XMin, st.Visual.XMax, st.Visual.YMin, st.Visual.YMax)
+			v.XMin, v.XMax, v.YMin, v.YMax)
 	}
 
 	// The legacy meter path is untouched: the described effect still reports
@@ -207,7 +208,7 @@ func TestEffectStageReportsReadingsAndVisual(t *testing.T) {
 
 // TestEffectStageMeteredOnlyReportsNoTelemetry is the backward-compatibility
 // check: an effect that implements only dsp.Metered reports no readings and no
-// visual, so the legacy in/out pair still renders.
+// visuals, so the legacy in/out pair still renders.
 func TestEffectStageMeteredOnlyReportsNoTelemetry(t *testing.T) {
 	registerTelemetryFactories()
 
@@ -226,8 +227,8 @@ func TestEffectStageMeteredOnlyReportsNoTelemetry(t *testing.T) {
 	if st.Readings != nil {
 		t.Fatalf("Readings = %+v, want nil for a Metered-only effect", st.Readings)
 	}
-	if st.Visual != nil {
-		t.Fatalf("Visual = %+v, want nil for a Metered-only effect", st.Visual)
+	if st.Visuals != nil {
+		t.Fatalf("Visuals = %+v, want nil for a Metered-only effect", st.Visuals)
 	}
 	if st.Meters == nil {
 		t.Fatal("Meters = nil, want the legacy pair")
@@ -257,18 +258,18 @@ func TestEffectStageVisualCopiesSlices(t *testing.T) {
 	if !ok {
 		t.Fatalf("stage %s missing", id)
 	}
-	if st.Visual == nil {
-		t.Fatal("Visual = nil, want the reused transfer plot")
+	if len(st.Visuals) != 1 {
+		t.Fatalf("Visuals = %+v, want one reused transfer plot", st.Visuals)
 	}
 
 	// Mutate the effect's backing slices as a reusing implementation would.
 	reusedParams[0] = "mutated-param"
 	reusedOverlays[0] = "mutated-overlay"
 
-	if got := st.Visual.Params[0]; got != "threshold" {
+	if got := st.Visuals[0].Params[0]; got != "threshold" {
 		t.Fatalf("Visual.Params[0] = %q after the effect mutated its slice, want the snapshot to keep %q", got, "threshold")
 	}
-	if got := st.Visual.Overlays[0]; got != "in" {
+	if got := st.Visuals[0].Overlays[0]; got != "in" {
 		t.Fatalf("Visual.Overlays[0] = %q after the effect mutated its slice, want the snapshot to keep %q", got, "in")
 	}
 }

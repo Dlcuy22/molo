@@ -58,27 +58,9 @@ describe("toEffectParam", () => {
 });
 
 describe("toEffectStage", () => {
-  // The generated binding carries no telemetry fields until W4 regenerates it;
-  // the adapter reads them as optional, so the fixture declares them too.
-  type WireStageT = WireStage & {
-    readings?: {
-      key: string;
-      label: string;
-      unit: string;
-      min: number;
-      max: number;
-      kind: string;
-    }[] | null;
-    visual?: {
-      kind: string;
-      params: string[] | null;
-      overlays: string[] | null;
-      xMin: number;
-      xMax: number;
-      yMin: number;
-      yMax: number;
-    } | null;
-  };
+  // The binding now carries the telemetry fields, so the fixture uses them
+  // directly rather than declaring its own optional shapes.
+  type WireStageT = WireStage;
 
   function wireStage(over: Partial<WireStageT>): WireStageT {
     return {
@@ -90,6 +72,8 @@ describe("toEffectStage", () => {
       schema: null,
       values: null,
       meters: null,
+      readings: null,
+      visuals: null,
       ...over,
     };
   }
@@ -113,10 +97,10 @@ describe("toEffectStage", () => {
     expect(s.schema.map((p) => p.key)).toEqual(["cutoff"]);
   });
 
-  it("defaults readings to empty and visual to null when absent", () => {
+  it("defaults readings and visuals to empty when absent", () => {
     const s = toEffectStage(wireStage({}));
     expect(s.readings).toEqual([]);
-    expect(s.visual).toBeNull();
+    expect(s.visuals).toEqual([]);
   });
 
   it("falls back to level for an unknown reading kind", () => {
@@ -133,43 +117,49 @@ describe("toEffectStage", () => {
   it("drops a visual whose kind the UI cannot draw", () => {
     const s = toEffectStage(
       wireStage({
-        visual: {
-          kind: "spectrum",
-          params: [],
-          overlays: [],
-          xMin: 0,
-          xMax: 1,
-          yMin: 0,
-          yMax: 1,
-        },
+        visuals: [
+          {
+            kind: "spectrum",
+            params: [],
+            overlays: [],
+            xMin: 0,
+            xMax: 1,
+            yMin: 0,
+            yMax: 1,
+          },
+        ],
       }),
     );
-    expect(s.visual).toBeNull();
+    expect(s.visuals).toEqual([]);
   });
 
   it("normalises absent params and overlays to empty lists", () => {
     const s = toEffectStage(
       wireStage({
-        visual: {
-          kind: "transfer",
-          params: null,
-          overlays: null,
-          xMin: -60,
-          xMax: 0,
-          yMin: -60,
-          yMax: 0,
-        },
+        visuals: [
+          {
+            kind: "transfer",
+            params: null,
+            overlays: null,
+            xMin: -60,
+            xMax: 0,
+            yMin: -60,
+            yMax: 0,
+          },
+        ],
       }),
     );
-    expect(s.visual).toEqual({
-      kind: "transfer",
-      params: [],
-      overlays: [],
-      xMin: -60,
-      xMax: 0,
-      yMin: -60,
-      yMax: 0,
-    });
+    expect(s.visuals).toEqual([
+      {
+        kind: "transfer",
+        params: [],
+        overlays: [],
+        xMin: -60,
+        xMax: 0,
+        yMin: -60,
+        yMax: 0,
+      },
+    ]);
   });
 
   it("normalises a telemetry payload", () => {
@@ -178,29 +168,33 @@ describe("toEffectStage", () => {
         readings: [
           { key: "gr", label: "Gain Reduction", unit: "dB", min: -30, max: 0, kind: "gain-reduction" },
         ],
-        visual: {
-          kind: "transfer",
-          params: ["threshold", "ratio"],
-          overlays: ["in", "gr"],
-          xMin: -60,
-          xMax: 0,
-          yMin: -60,
-          yMax: 0,
-        },
+        visuals: [
+          {
+            kind: "transfer",
+            params: ["threshold", "ratio"],
+            overlays: ["in", "gr"],
+            xMin: -60,
+            xMax: 0,
+            yMin: -60,
+            yMax: 0,
+          },
+        ],
       }),
     );
     expect(s.readings).toEqual([
       { key: "gr", label: "Gain Reduction", unit: "dB", min: -30, max: 0, kind: "gain-reduction" },
     ]);
-    expect(s.visual).toEqual({
-      kind: "transfer",
-      params: ["threshold", "ratio"],
-      overlays: ["in", "gr"],
-      xMin: -60,
-      xMax: 0,
-      yMin: -60,
-      yMax: 0,
-    });
+    expect(s.visuals).toEqual([
+      {
+        kind: "transfer",
+        params: ["threshold", "ratio"],
+        overlays: ["in", "gr"],
+        xMin: -60,
+        xMax: 0,
+        yMin: -60,
+        yMax: 0,
+      },
+    ]);
   });
 });
 

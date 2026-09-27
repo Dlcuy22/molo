@@ -65,12 +65,14 @@ export interface Reading {
 }
 
 /** VisualKind mirrors dsp.VisualKind: a plot the UI knows how to draw. The
- *  effect names the kind; the UI owns the renderer. */
-export type VisualKind = "transfer" | "gain-reduction";
+ *  effect names the kind; the UI owns the renderer. "dynamics" is a scrolling
+ *  level display whose overlays are reading keys plotted over time. */
+export type VisualKind = "transfer" | "gain-reduction" | "dynamics";
 
 /** Visual mirrors dsp.Visual: a plot declaration. Params are schema keys the
  *  curve is derived from, so a static curve is recomputed from Values rather
- *  than carried on the meter path. Overlays are reading keys drawn live. */
+ *  than carried on the meter path. Overlays are reading keys drawn live; for a
+ *  dynamics visual they are the series the scrolling display plots. */
 export interface Visual {
   kind: VisualKind;
   params: string[];
@@ -96,8 +98,8 @@ export interface EffectStage {
   /** dsp.Described. Empty when the effect implements only Metered; use
    *  effectiveReadings to get the drawable set either way. */
   readings: Reading[];
-  /** dsp.Visualized. Null when the effect wants no plot. */
-  visual: Visual | null;
+  /** dsp.Visualized. Empty when the effect wants no plot. */
+  visuals: Visual[];
 }
 
 /** EffectChain is the whole post-ring chain, in processing order. */

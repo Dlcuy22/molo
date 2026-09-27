@@ -567,18 +567,14 @@ func (b *builder) fnMeter(L *lua.LState) int {
 	return 1
 }
 
-// fnVisual records the plot the effect wants drawn. It is not a node: it names
-// a kind the UI knows and the schema keys the curve is derived from, so the UI
-// can recompute it from values it already has.
+// fnVisual records a plot the effect wants drawn. It is not a node: it names a
+// kind the UI knows and the schema keys the curve is derived from, so the UI
+// can recompute it from values it already has. A script may declare more than
+// one, and the display order is the declaration order.
 func (b *builder) fnVisual(L *lua.LState) int {
 	tbl, ok := L.Get(1).(*lua.LTable)
 	if !ok {
 		L.RaiseError("visual expects a table")
-
-		return 0
-	}
-	if b.g.visual != nil {
-		L.RaiseError("visual is declared more than once")
 
 		return 0
 	}
@@ -635,7 +631,7 @@ func (b *builder) fnVisual(L *lua.LState) int {
 			return 0
 		}
 	}
-	b.g.visual = v
+	b.g.visuals = append(b.g.visuals, v)
 
 	return 0
 }

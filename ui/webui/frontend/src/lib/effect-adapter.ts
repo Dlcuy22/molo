@@ -24,13 +24,13 @@ import type {
 const WIDGETS: readonly Widget[] = ["", "slider", "knob", "switch", "select"];
 
 const READING_KINDS: readonly ReadingKind[] = ["level", "gain-reduction", "scalar"];
-const VISUAL_KINDS: readonly VisualKind[] = ["transfer", "gain-reduction"];
+const VISUAL_KINDS: readonly VisualKind[] = ["transfer", "gain-reduction", "dynamics"];
 
 // The generated binding is a W4 concern; until it carries these fields they
 // are declared here as optional, so this stays correct when the bindings are
 // regenerated with the real fields. Omit first: intersecting an optional
 // field over a declared one would collapse to never.
-type WireStageBase = Omit<WireStage, "readings" | "visual">;
+type WireStageBase = Omit<WireStage, "readings" | "visuals">;
 
 interface WireReading {
   key: string;
@@ -53,7 +53,7 @@ interface WireVisual {
 
 type WireStageWithTelemetry = WireStageBase & {
   readings?: WireReading[] | null;
-  visual?: WireVisual | null;
+  visuals?: WireVisual[] | null;
 };
 
 /** toWidget narrows the wire string to a known hint, else "". A hint the UI
@@ -133,7 +133,7 @@ export function toEffectStage(s: WireStageWithTelemetry): EffectStage {
     values: s.values ?? {},
     meters,
     readings: (s.readings ?? []).map(toReading),
-    visual: s.visual ? toVisual(s.visual) : null,
+    visuals: (s.visuals ?? []).map(toVisual).filter((v): v is Visual => v !== null),
   };
 }
 

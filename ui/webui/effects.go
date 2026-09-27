@@ -75,7 +75,7 @@ type EffectStageInfo struct {
 	Values   map[string]any      `json:"values"`
 	Meters   map[string]float32  `json:"meters"`
 	Readings []EffectReadingInfo `json:"readings"`
-	Visual   *EffectVisualInfo   `json:"visual"`
+	Visuals  []EffectVisualInfo  `json:"visuals"`
 }
 
 // EffectChainInfo is the whole chain in processing order.
@@ -250,6 +250,11 @@ func effectStageInfo(st player.EffectStage) EffectStageInfo {
 		readings = append(readings, effectReadingInfo(r))
 	}
 
+	visuals := make([]EffectVisualInfo, 0, len(st.Visuals))
+	for _, v := range st.Visuals {
+		visuals = append(visuals, effectVisualInfo(v))
+	}
+
 	return EffectStageInfo{
 		ID:       st.ID,
 		Kind:     st.Kind,
@@ -260,7 +265,7 @@ func effectStageInfo(st player.EffectStage) EffectStageInfo {
 		Values:   st.Values,
 		Meters:   st.Meters,
 		Readings: readings,
-		Visual:   effectVisualInfo(st.Visual),
+		Visuals:  visuals,
 	}
 }
 
@@ -277,14 +282,9 @@ func effectReadingInfo(r dsp.Reading) EffectReadingInfo {
 	}
 }
 
-// effectVisualInfo maps one engine visual, or returns nil when the effect does
-// not implement Visualized. Params and Overlays are normalized to empty slices
-// rather than nil so the frontend always sees arrays.
-func effectVisualInfo(v *dsp.Visual) *EffectVisualInfo {
-	if v == nil {
-		return nil
-	}
-
+// effectVisualInfo maps one engine visual. Params and Overlays are normalized
+// to empty slices rather than nil so the frontend always sees arrays.
+func effectVisualInfo(v dsp.Visual) EffectVisualInfo {
 	params := v.Params
 	if params == nil {
 		params = []string{}
@@ -294,7 +294,7 @@ func effectVisualInfo(v *dsp.Visual) *EffectVisualInfo {
 		overlays = []string{}
 	}
 
-	return &EffectVisualInfo{
+	return EffectVisualInfo{
 		Kind:     string(v.Kind),
 		Params:   params,
 		Overlays: overlays,

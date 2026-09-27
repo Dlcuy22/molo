@@ -211,8 +211,8 @@ type graph struct {
 	// readings is every meter declaration, in declaration order. It is static
 	// metadata; the numbers live in the meter nodes' published values.
 	readings []readingDecl
-	// visual is the plot the script declared, nil when it declared none.
-	visual *dsp.Visual
+	// visuals is every plot the script declared, in declaration order.
+	visuals []*dsp.Visual
 }
 
 // newGraph returns an empty graph.

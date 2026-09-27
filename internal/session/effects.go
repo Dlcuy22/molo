@@ -35,10 +35,10 @@ type EffectKindInfo struct {
 
 // EffectStage is one stage of the chain in force: its identity, its schema, its
 // current parameter values, its live meters and its described readings and
-// visual. Schema and Values are snapshots taken when the stage is read, so a UI
+// visuals. Schema and Values are snapshots taken when the stage is read, so a UI
 // can render it without holding an effect. Meters is nil for an effect that does
-// not implement dsp.Metered. Readings is empty and Visual is nil for an effect
-// that does not implement dsp.Described or dsp.Visualized.
+// not implement dsp.Metered. Readings is empty and Visuals is empty for an
+// effect that does not implement dsp.Described or dsp.Visualized.
 type EffectStage struct {
 	ID       string
 	Kind     string
@@ -49,7 +49,7 @@ type EffectStage struct {
 	Values   dsp.Values
 	Meters   map[string]float32
 	Readings []dsp.Reading
-	Visual   *dsp.Visual
+	Visuals  []dsp.Visual
 }
 
 // EffectMeters is one stage's live meters with no schema or values attached. It
@@ -199,14 +199,15 @@ func stageFromEffect(spec dsp.Spec, e dsp.Effect) EffectStage {
 		stage.Readings = d.Readings()
 	}
 	if v, ok := e.(dsp.Visualized); ok {
-		// The Visual struct is copied into local storage, but its slices would
-		// still alias whatever the effect returned. A Visualized that reuses
-		// or mutates its backing slices would then corrupt a snapshot a UI is
-		// already reading, so both are deep-copied before being stored.
-		visual := v.Visual()
-		visual.Params = append([]string(nil), visual.Params...)
-		visual.Overlays = append([]string(nil), visual.Overlays...)
-		stage.Visual = &visual
+		// Each Visual is copied into local storage, but its slices would still
+		// alias whatever the effect returned. A Visualized that reuses or
+		// mutates its backing slices would then corrupt a snapshot a UI is
+		// already reading, so every slice is deep-copied before being stored.
+		for _, visual := range v.Visuals() {
+			visual.Params = append([]string(nil), visual.Params...)
+			visual.Overlays = append([]string(nil), visual.Overlays...)
+			stage.Visuals = append(stage.Visuals, visual)
+		}
 	}
 
 	return stage

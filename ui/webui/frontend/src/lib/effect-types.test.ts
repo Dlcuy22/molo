@@ -104,7 +104,7 @@ function stage(over: Partial<EffectStage>): EffectStage {
     values: {},
     meters: null,
     readings: [],
-    visual: null,
+    visuals: [],
     ...over,
   };
 }

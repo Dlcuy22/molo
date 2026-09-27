@@ -63,6 +63,8 @@ func parseVisualKind(name string) (dsp.VisualKind, bool) {
 		return dsp.VisualTransfer, true
 	case dsp.VisualGainReduction:
 		return dsp.VisualGainReduction, true
+	case dsp.VisualDynamics:
+		return dsp.VisualDynamics, true
 	default:
 		return "", false
 	}
@@ -95,7 +97,7 @@ func (m *meterValue) load() float64 {
 // published under dsp.MeterIn/dsp.MeterOut, so a visual may draw it without a
 // meter node of its own.
 func checkOverlays(g *graph) error {
-	if g.visual == nil {
+	if len(g.visuals) == 0 {
 		return nil
 	}
 	known := map[string]struct{}{
@@ -105,9 +107,11 @@ func checkOverlays(g *graph) error {
 	for _, r := range g.readings {
 		known[r.Key] = struct{}{}
 	}
-	for _, name := range g.visual.Overlays {
-		if _, ok := known[name]; !ok {
-			return fmt.Errorf("script: visual overlay %q is not a declared reading", name)
+	for _, v := range g.visuals {
+		for _, name := range v.Overlays {
+			if _, ok := known[name]; !ok {
+				return fmt.Errorf("script: visual overlay %q is not a declared reading", name)
+			}
 		}
 	}
 

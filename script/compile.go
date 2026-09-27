@@ -25,7 +25,7 @@ func cloneGraph(g *graph) *graph {
 		paramRefs:  g.paramRefs,
 		visualRefs: g.visualRefs,
 		readings:   g.readings,
-		visual:     g.visual,
+		visuals:    g.visuals,
 	}
 	// A first pass copies nodes and their scalar fields, the second pass
 	// rewires edges to the clones.

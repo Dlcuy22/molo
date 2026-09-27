@@ -293,7 +293,7 @@ func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
 		t.Fatalf("chain has %d stages, want 1", len(chain.Stages))
 	}
 	st := chain.Stages[0]
-	t.Logf("compressor stage %s: %d readings, visual=%+v, meters=%v", st.ID, len(st.Readings), st.Visual, st.Meters)
+	t.Logf("compressor stage %s: %d readings, visuals=%+v, meters=%v", st.ID, len(st.Readings), st.Visuals, st.Meters)
 
 	// The declared reading: key "gr", the words "Gain Reduction", and the
 	// gain-reduction kind, so the panel can draw it as a reduction rather than a
@@ -314,17 +314,21 @@ func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
 		t.Fatalf("gr range = [%v, %v], want [-30, 0]", gr.Min, gr.Max)
 	}
 
-	// The declared visual: a transfer curve derived from the compressor params.
-	if st.Visual == nil {
-		t.Fatal("stage reports no visual")
+	// The declared visuals: a transfer curve derived from the compressor params,
+	// and (from Phase A on) a scrolling dynamics display over the same readings.
+	var transfer *EffectVisualInfo
+	for i := range st.Visuals {
+		if st.Visuals[i].Kind == string(dsp.VisualTransfer) {
+			transfer = &st.Visuals[i]
+		}
 	}
-	if st.Visual.Kind != string(dsp.VisualTransfer) {
-		t.Fatalf("visual kind = %q, want %q", st.Visual.Kind, dsp.VisualTransfer)
+	if transfer == nil {
+		t.Fatalf("stage reports no transfer visual: %+v", st.Visuals)
 	}
-	if got := strings.Join(st.Visual.Params, ","); got != "threshold,ratio,makeup" {
+	if got := strings.Join(transfer.Params, ","); got != "threshold,ratio,makeup" {
 		t.Fatalf("visual params = %q, want threshold,ratio,makeup", got)
 	}
-	if got := strings.Join(st.Visual.Overlays, ","); got != "in,gr" {
+	if got := strings.Join(transfer.Overlays, ","); got != "in,gr" {
 		t.Fatalf("visual overlays = %q, want in,gr", got)
 	}
 

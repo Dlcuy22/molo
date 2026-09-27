@@ -81,7 +81,7 @@ export interface EffectStageInfo {
     "values": { [_ in string]?: any } | null;
     "meters": { [_ in string]?: number } | null;
     "readings": EffectReadingInfo[] | null;
-    "visual": EffectVisualInfo | null;
+    "visuals": EffectVisualInfo[] | null;
 }
 
 /**

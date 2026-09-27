@@ -106,7 +106,7 @@ func TestEffectStageInfoReadingsAndVisual(t *testing.T) {
 			Max:   0,
 			Kind:  dsp.ReadingGainReduction,
 		}},
-		Visual: &dsp.Visual{
+		Visuals: []dsp.Visual{{
 			Kind:     dsp.VisualTransfer,
 			Params:   []string{"threshold", "ratio"},
 			Overlays: []string{"in", "gr"},
@@ -114,7 +114,7 @@ func TestEffectStageInfoReadingsAndVisual(t *testing.T) {
 			XMax:     0,
 			YMin:     -48,
 			YMax:     6,
-		},
+		}},
 	})
 
 	raw, err := json.Marshal(stage)
@@ -145,9 +145,13 @@ func TestEffectStageInfoReadingsAndVisual(t *testing.T) {
 		}
 	}
 
-	visual, ok := got["visual"].(map[string]any)
+	visuals, ok := got["visuals"].([]any)
+	if !ok || len(visuals) != 1 {
+		t.Fatalf("visuals = %v, want one entry", got["visuals"])
+	}
+	visual, ok := visuals[0].(map[string]any)
 	if !ok {
-		t.Fatalf("visual = %v, want object", got["visual"])
+		t.Fatalf("visuals[0] = %v, want object", visuals[0])
 	}
 	wantVisual := map[string]any{
 		"kind": "transfer",
@@ -156,22 +160,22 @@ func TestEffectStageInfoReadingsAndVisual(t *testing.T) {
 	}
 	for k, v := range wantVisual {
 		if visual[k] != v {
-			t.Errorf("visual[%q] = %v, want %v", k, visual[k], v)
+			t.Errorf("visuals[0][%q] = %v, want %v", k, visual[k], v)
 		}
 	}
 	params, ok := visual["params"].([]any)
 	if !ok || len(params) != 2 || params[0] != "threshold" || params[1] != "ratio" {
-		t.Errorf("visual[params] = %v, want [threshold ratio]", visual["params"])
+		t.Errorf("visuals[0][params] = %v, want [threshold ratio]", visual["params"])
 	}
 	overlays, ok := visual["overlays"].([]any)
 	if !ok || len(overlays) != 2 || overlays[0] != "in" || overlays[1] != "gr" {
-		t.Errorf("visual[overlays] = %v, want [in gr]", visual["overlays"])
+		t.Errorf("visuals[0][overlays] = %v, want [in gr]", visual["overlays"])
 	}
 }
 
-// A stage with no readings and no visual must still marshal readings as an
-// empty array (the frontend loops over it) and visual as null (which is how the
-// UI knows not to mount a plot).
+// A stage with no readings and no visuals must still marshal readings and
+// visuals as empty arrays (the frontend loops over them), so the UI knows not
+// to mount a plot.
 func TestEffectStageInfoNoReadingsOrVisual(t *testing.T) {
 	raw, err := json.Marshal(effectStageInfo(player.EffectStage{
 		ID: "s1", Kind: "crossfeed", Label: "Crossfeed",
@@ -187,15 +191,15 @@ func TestEffectStageInfoNoReadingsOrVisual(t *testing.T) {
 	if string(got["readings"]) != "[]" {
 		t.Fatalf("readings = %s, want []", got["readings"])
 	}
-	if string(got["visual"]) != "null" {
-		t.Fatalf("visual = %s, want null", got["visual"])
+	if string(got["visuals"]) != "[]" {
+		t.Fatalf("visuals = %s, want []", got["visuals"])
 	}
 }
 
 // A visual with nil params and overlays must marshal both as arrays, not null:
 // the frontend treats null and empty differently when deriving the curve.
 func TestEffectVisualInfoSlicesAreNeverNull(t *testing.T) {
-	raw, err := json.Marshal(effectVisualInfo(&dsp.Visual{Kind: dsp.VisualTransfer}))
+	raw, err := json.Marshal(effectVisualInfo(dsp.Visual{Kind: dsp.VisualTransfer}))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -216,7 +220,7 @@ func TestEffectVisualInfoSlicesAreNeverNull(t *testing.T) {
 // unknown one. A well-formed object must cross verbatim, with params and
 // overlays normalized to arrays like any other visual.
 func TestEffectVisualInfoUnknownKindPassesThrough(t *testing.T) {
-	raw, err := json.Marshal(effectVisualInfo(&dsp.Visual{
+	raw, err := json.Marshal(effectVisualInfo(dsp.Visual{
 		Kind: "spectrogram",
 	}))
 	if err != nil {

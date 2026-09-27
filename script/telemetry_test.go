@@ -63,7 +63,11 @@ func TestCompressorDeclaresReadingAndVisual(t *testing.T) {
 		t.Fatalf("reading kind = %q, want %q", gr.Kind, dsp.ReadingGainReduction)
 	}
 
-	visual := ef.Visual()
+	visuals := ef.Visuals()
+	if len(visuals) != 1 {
+		t.Fatalf("Visuals() returned %d visuals, want 1: %+v", len(visuals), visuals)
+	}
+	visual := visuals[0]
 	t.Logf("compressor visual: %+v", visual)
 	if visual.Kind != dsp.VisualTransfer {
 		t.Fatalf("visual kind = %q, want %q", visual.Kind, dsp.VisualTransfer)
@@ -282,7 +286,7 @@ func TestOverlayDeclaredAfterVisualLoads(t *testing.T) {
     ctx.out(ctx.input())
   end,
 }`, nil)
-	if got := strings.Join(e.Visual().Overlays, ","); got != "in,gr" {
+	if got := strings.Join(e.Visuals()[0].Overlays, ","); got != "in,gr" {
 		t.Fatalf("overlays = %q, want in,gr", got)
 	}
 }
@@ -335,7 +339,7 @@ func TestArrayAndAbsentListsAccepted(t *testing.T) {
     ctx.visual { kind = "transfer", params = { "gain" }, overlays = { "in" } }
   end,
 }`, nil)
-	v := e.Visual()
+	v := e.Visuals()[0]
 	if got := strings.Join(v.Params, ","); got != "gain" {
 		t.Fatalf("params = %q, want gain", got)
 	}
@@ -380,7 +384,7 @@ func TestVisualJSONListsEmptyNotNil(t *testing.T) {
     ctx.visual { kind = "transfer" }
   end,
 }`, nil)
-	v := e.Visual()
+	v := e.Visuals()[0]
 	if v.Params == nil || v.Overlays == nil {
 		t.Fatalf("Visual() lists are nil: %+v", v)
 	}

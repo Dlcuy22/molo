@@ -57,12 +57,16 @@ const (
 	VisualTransfer VisualKind = "transfer"
 	// VisualGainReduction is a reduction-over-time display.
 	VisualGainReduction VisualKind = "gain-reduction"
+	// VisualDynamics is a scrolling level display: the overlays are reading
+	// keys plotted over time, newest at the right edge, on the yMin..yMax scale.
+	VisualDynamics VisualKind = "dynamics"
 )
 
 // Visual declares a plot. Params are schema keys the curve is derived from,
 // which is what keeps a static curve off the meter path: the UI recomputes it
-// from the Values it already has. Overlays are reading keys drawn live on top,
-// such as the current input dot and the gain-reduction bar.
+// from the Values it already has. Overlays are reading keys drawn live, such as
+// the current input dot and the gain-reduction bar; for VisualDynamics they are
+// the series the scrolling display plots.
 type Visual struct {
 	Kind     VisualKind `json:"kind"`
 	Params   []string   `json:"params"`
@@ -73,9 +77,11 @@ type Visual struct {
 	YMax     float64    `json:"yMax"`
 }
 
-// Visualized is implemented by an effect that wants a plot. Like Described it
-// is optional and additive.
+// Visualized is implemented by an effect that wants one or more plots. Like
+// Described it is optional and additive.
 type Visualized interface {
-	// Visual returns the plot this effect wants drawn.
-	Visual() Visual
+	// Visuals returns every plot this effect wants drawn, in display order.
+	// The returned slice and the inner Params and Overlays slices are copies
+	// and may be kept.
+	Visuals() []Visual
 }

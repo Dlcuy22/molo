@@ -123,9 +123,11 @@
       dims with the controls while bypassed because the live overlays freeze at
       the last value the effect published.
     -->
-    {#if stage.visual}
-      <TransferCurve visual={stage.visual} values={stage.values} meters={stage.meters} />
-    {/if}
+    {#each stage.visuals as visual, i (i)}
+      {#if visual.kind === "transfer"}
+        <TransferCurve visual={visual} values={stage.values} meters={stage.meters} />
+      {/if}
+    {/each}
 
     {#each groups as group (group.name)}
       <div class="flex flex-col gap-2">

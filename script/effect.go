@@ -251,29 +251,29 @@ func (e *Effect) Readings() []dsp.Reading {
 	return out
 }
 
-// Visual returns the plot the script declared, or a zero Visual when it
-// declared none. The slices are copied so a caller cannot reach into the
-// effect's declaration, and they are always non-nil so an empty list marshals
-// as [] rather than null.
-func (e *Effect) Visual() dsp.Visual {
-	v := dsp.Visual{
-		Params:   []string{},
-		Overlays: []string{},
+// Visuals returns the plots the script declared, in declaration order, or an
+// empty slice when it declared none. The slices are copied so a caller cannot
+// reach into the effect's declaration, and they are always non-nil so an empty
+// list marshals as [] rather than null.
+func (e *Effect) Visuals() []dsp.Visual {
+	if e.graph == nil || len(e.graph.visuals) == 0 {
+		return []dsp.Visual{}
 	}
-	if e.graph == nil || e.graph.visual == nil {
-		return v
+	out := make([]dsp.Visual, 0, len(e.graph.visuals))
+	for _, src := range e.graph.visuals {
+		v := *src
+		if v.Params == nil {
+			v.Params = []string{}
+		}
+		if v.Overlays == nil {
+			v.Overlays = []string{}
+		}
+		v.Params = slices.Clone(v.Params)
+		v.Overlays = slices.Clone(v.Overlays)
+		out = append(out, v)
 	}
-	v = *e.graph.visual
-	if v.Params == nil {
-		v.Params = []string{}
-	}
-	if v.Overlays == nil {
-		v.Overlays = []string{}
-	}
-	v.Params = slices.Clone(v.Params)
-	v.Overlays = slices.Clone(v.Overlays)
 
-	return v
+	return out
 }
 
 // Watchdog returns the fault reason, empty when the callback is healthy. It

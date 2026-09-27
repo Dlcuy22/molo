@@ -55,10 +55,11 @@ const positionInterval = 250 * time.Millisecond
 
 // effectMeterInterval is the fast effect-meter tick. The snapshot's 4 Hz is
 // fine for a static curve but visibly stepped for a moving gain-reduction
-// needle, so the meters ride their own tick between snapshots. 30 Hz reads as
-// continuous and stays far cheaper than the spectrum's 60 Hz, because the
-// payload is a few floats per metered stage and no schema or values.
-const effectMeterInterval = 33 * time.Millisecond
+// needle or a scrolling dynamics graph, so the meters ride their own tick
+// between snapshots. 60 Hz matches the display so a graph's newest sample lands
+// once per frame; the payload is a few floats per metered stage and no schema
+// or values, so it stays cheaper than the spectrum's own 60 Hz transform.
+const effectMeterInterval = 16 * time.Millisecond
 
 // PlayerService owns the engine and the bridge to the frontend.
 //
@@ -226,8 +227,8 @@ func (s *PlayerService) pumpEvents() {
 
 // pumpEffectMeters publishes the lean effect meters on their own faster tick.
 // It is separate from pumpEvents because the 4 Hz snapshot would make a moving
-// needle step, and separate from pumpSpectrum because the payload and the rate
-// are different: a few floats per metered stage at 30 Hz, not 150 bands at 60.
+// needle step, and separate from pumpSpectrum because the payload is different:
+// a few floats per metered stage, not 150 bands.
 func (s *PlayerService) pumpEffectMeters() {
 	defer s.wg.Done()
 
@@ -246,7 +247,7 @@ func (s *PlayerService) pumpEffectMeters() {
 
 // publishEffectMeters emits one lean meter payload. A chain with no metered
 // stage, or an engine that is not built yet, emits nothing rather than an empty
-// event, so an idle player does not push a payload at 30 Hz forever.
+// event, so an idle player does not push a payload at 60 Hz forever.
 func (s *PlayerService) publishEffectMeters() {
 	fx, err := s.effects()
 	if err != nil {
