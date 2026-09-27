@@ -1,6 +1,7 @@
 <script lang="ts">
   import { effectiveReadings, type EffectStage } from "../../effect-types";
   import { commonParam, effectGroups, isKnobBank, numericValue, paramValue } from "./effects-helpers";
+  import DynamicsGraph from "./DynamicsGraph.svelte";
   import ParamControl from "./ParamControl.svelte";
   import Readings from "./Readings.svelte";
   import TransferCurve from "./TransferCurve.svelte";
@@ -50,6 +51,13 @@
   // In/Out pair when it only meters. This is what replaces the hardcoded two
   // bars, so an effect with no readings still shows the legacy pair.
   const readings = $derived(effectiveReadings(stage));
+
+  // Split the declared plots by kind so the layout is not at the mercy of the
+  // script's declaration order: the scrolling dynamics graph reads as the
+  // headline and sits first, the transfer curve stays with the controls it
+  // explains.
+  const dynamicsVisuals = $derived(stage.visuals.filter((v) => v.kind === "dynamics"));
+  const transferVisuals = $derived(stage.visuals.filter((v) => v.kind === "transfer"));
 
   // The checkbox shows the user's bypass parameter, so it never flips on its
   // own. The dimming follows the effective flag, which an effect may set for a
@@ -118,15 +126,24 @@
     {/if}
 
     <!--
-      The plot sits with the controls it explains, above the groups, so the
-      curve and the threshold, ratio and knee that shape it read together. It
-      dims with the controls while bypassed because the live overlays freeze at
-      the last value the effect published.
+      The plots sit with the controls they explain, above the groups, so the
+      curve and the threshold, ratio and knee that shape it read together. The
+      dynamics graph comes first: it is the scrolling headline, and the curve
+      and knobs below are what shape it. Both dim with the controls while
+      bypassed because the live overlays freeze at the last value the effect
+      published.
     -->
-    {#each stage.visuals as visual, i (i)}
-      {#if visual.kind === "transfer"}
-        <TransferCurve visual={visual} values={stage.values} meters={stage.meters} />
-      {/if}
+    {#each dynamicsVisuals as visual, i (i)}
+      <DynamicsGraph
+        visual={visual}
+        {readings}
+        stageId={stage.id}
+        meters={stage.meters}
+      />
+    {/each}
+
+    {#each transferVisuals as visual, i (i)}
+      <TransferCurve visual={visual} values={stage.values} meters={stage.meters} />
     {/each}
 
     {#each groups as group (group.name)}

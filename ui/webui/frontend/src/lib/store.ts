@@ -169,7 +169,7 @@ export const busy = writable(false);
 export const ready = writable(false);
 
 /** EffectMetersInfo is the lean fast-tick payload: one stage's live meters. */
-interface EffectMetersInfo {
+export interface EffectMetersInfo {
   id: string;
   meters: Record<string, number> | null;
 }
@@ -250,6 +250,20 @@ export function onSpectrum(handler: (bands: Float64Array) => void): () => void {
   return Events.On(EVENT_FRAME, (ev) => {
     const data = ev.data as number[] | Float64Array;
     handler(data instanceof Float64Array ? data : Float64Array.from(data));
+  });
+}
+
+/**
+ * onEffectMeters registers the fast meter listener. It is separate from connect
+ * for the same reason onSpectrum is: a component that plots the meters owns the
+ * subscription, so a window with no such plot does not pay for the tick. The
+ * payload is passed through as-is; the caller filters the rows it wants.
+ */
+export function onEffectMeters(
+  handler: (rows: { id: string; meters: Record<string, number> | null }[]) => void,
+): () => void {
+  return Events.On(EVENT_EFFECT_METERS, (ev) => {
+    handler(ev.data as EffectMetersInfo[]);
   });
 }
 
