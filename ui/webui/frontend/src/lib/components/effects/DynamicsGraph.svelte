@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { onEffectMeters } from "../../store";
   import type { Reading, Visual } from "../../effect-types";
   import {
@@ -41,6 +42,20 @@
 
   const infos = $derived(resolveSeries(visual.overlays, readings));
 
+  // The graph's identity as a string. The panel rebuilds `readings` on every
+  // meter tick, so a plain `infos` dependency would restart the draw loop 60
+  // times a second and no frame would ever land. This changes only when the
+  // stage, the overlay set, their kinds, or the scale actually change.
+  const signature = $derived(
+    JSON.stringify({
+      stage: stageId,
+      overlays: visual.overlays,
+      kinds: infos.map((s) => `${s.key}:${s.kind}`),
+      x: [visual.xMin, visual.xMax],
+      y: [visual.yMin, visual.yMax],
+    }),
+  );
+
   // The stated legend, not the live values: this is what the graph is, so it
   // reads the same at rest as while playing.
   const summary = $derived(
@@ -54,23 +69,28 @@
   // Re-runs when the graph's identity changes. EffectPanel mounts this inside
   // an each keyed by index, so a stage switch reuses the instance with a new
   // stageId and visual; without a rebuild the subscription and rings would stay
-  // pointed at the old stage.
+  // pointed at the old stage. `signature` is the only reactive read, so the
+  // 60 Hz meter tick does not restart the loop.
   $effect(() => {
-    const stage = stageId;
-    const info = infos;
-    // Read the scale here, not in the draw loop: a visual swap must rebuild,
-    // and the effect must not depend on a draw-time read.
-    const scale = visual.yMin;
-    const ceiling = visual.yMax;
+    void signature;
+    const stage = untrack(() => stageId);
+    const info = untrack(() => infos);
+    // Every prop read is untracked: the panel rebuilds `visuals` on each
+    // snapshot, so a tracked read would restart the loop and empty the rings.
+    // `signature` is what decides a rebuild.
+    const scale = untrack(() => visual.yMin);
+    const ceiling = untrack(() => visual.yMax);
+    const xMin = untrack(() => visual.xMin);
+    const xMax = untrack(() => visual.xMax);
     // A bad range disables the plot rather than collapsing it onto an edge.
     const valid =
       Number.isFinite(scale) &&
       Number.isFinite(ceiling) &&
-      Number.isFinite(visual.xMin) &&
-      Number.isFinite(visual.xMax) &&
+      Number.isFinite(xMin) &&
+      Number.isFinite(xMax) &&
       ceiling > scale;
     // Seeding from the current meters avoids a frame of empty plot on setup.
-    const seed = meters;
+    const seed = untrack(() => meters);
 
     const ctx = canvas.getContext("2d");
     if (!ctx) {
