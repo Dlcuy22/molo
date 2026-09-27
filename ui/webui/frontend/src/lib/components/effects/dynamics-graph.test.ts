@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Reading } from "../../effect-types";
 import {
   createRing,
+  graphSignature,
   levelToY,
   meterValue,
   plotX,
@@ -191,5 +192,43 @@ describe("resolveSeries", () => {
     const out = resolveSeries(["gr", "in"], [gr]);
     expect(out.map((s) => s.key)).toEqual(["gr", "in"]);
     expect(out[0].reading).toBe(gr);
+  });
+});
+
+describe("graphSignature", () => {
+  const series = resolveSeries(["in", "out", "gr"], [reading({ key: "gr", kind: "gain-reduction" })]);
+
+  it("is stable when a re-created series has equal contents", () => {
+    // The panel rebuilds readings and visuals every meter tick; a rebuilt but
+    // equal series must not restart the draw loop.
+    const rebuilt = resolveSeries(
+      ["in", "out", "gr"],
+      [reading({ key: "gr", kind: "gain-reduction" })],
+    );
+    expect(graphSignature("s1", ["in", "out", "gr"], rebuilt, -60, 0, -60, 0)).toBe(
+      graphSignature("s1", ["in", "out", "gr"], series, -60, 0, -60, 0),
+    );
+  });
+
+  it("changes when the stage changes", () => {
+    const a = graphSignature("s1", ["in"], series, -60, 0, -60, 0);
+    const b = graphSignature("s2", ["in"], series, -60, 0, -60, 0);
+    expect(a).not.toBe(b);
+  });
+
+  it("changes when an overlay or its kind changes", () => {
+    const base = graphSignature("s1", ["in"], series, -60, 0, -60, 0);
+    expect(graphSignature("s1", ["out"], series, -60, 0, -60, 0)).not.toBe(base);
+    const asLevel = resolveSeries(["gr"], [reading({ key: "gr", kind: "level" })]);
+    const asReduction = resolveSeries(["gr"], [reading({ key: "gr", kind: "gain-reduction" })]);
+    expect(graphSignature("s1", ["gr"], asLevel, -60, 0, -60, 0)).not.toBe(
+      graphSignature("s1", ["gr"], asReduction, -60, 0, -60, 0),
+    );
+  });
+
+  it("changes when the scale changes", () => {
+    const base = graphSignature("s1", ["in"], series, -60, 0, -60, 0);
+    expect(graphSignature("s1", ["in"], series, -48, 0, -60, 0)).not.toBe(base);
+    expect(graphSignature("s1", ["in"], series, -60, 0, -48, 0)).not.toBe(base);
   });
 });

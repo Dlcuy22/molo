@@ -4,6 +4,7 @@
   import type { Reading, Visual } from "../../effect-types";
   import {
     createRing,
+    graphSignature,
     meterValue,
     plotX,
     push,
@@ -42,18 +43,18 @@
 
   const infos = $derived(resolveSeries(visual.overlays, readings));
 
-  // The graph's identity as a string. The panel rebuilds `readings` on every
-  // meter tick, so a plain `infos` dependency would restart the draw loop 60
-  // times a second and no frame would ever land. This changes only when the
-  // stage, the overlay set, their kinds, or the scale actually change.
+  // The graph's identity as a string, so a rebuilt-but-equal object does not
+  // restart the loop. See graphSignature.
   const signature = $derived(
-    JSON.stringify({
-      stage: stageId,
-      overlays: visual.overlays,
-      kinds: infos.map((s) => `${s.key}:${s.kind}`),
-      x: [visual.xMin, visual.xMax],
-      y: [visual.yMin, visual.yMax],
-    }),
+    graphSignature(
+      stageId,
+      visual.overlays,
+      infos,
+      visual.xMin,
+      visual.xMax,
+      visual.yMin,
+      visual.yMax,
+    ),
   );
 
   // The stated legend, not the live values: this is what the graph is, so it
@@ -66,18 +67,14 @@
 
   let canvas: HTMLCanvasElement;
 
-  // Re-runs when the graph's identity changes. EffectPanel mounts this inside
+  // Re-runs when the graph's identity changes: EffectPanel mounts this inside
   // an each keyed by index, so a stage switch reuses the instance with a new
-  // stageId and visual; without a rebuild the subscription and rings would stay
-  // pointed at the old stage. `signature` is the only reactive read, so the
-  // 60 Hz meter tick does not restart the loop.
+  // stageId and visual. `signature` is the only tracked read, so the meter tick
+  // feeds the rings without restarting the loop.
   $effect(() => {
     void signature;
     const stage = untrack(() => stageId);
     const info = untrack(() => infos);
-    // Every prop read is untracked: the panel rebuilds `visuals` on each
-    // snapshot, so a tracked read would restart the loop and empty the rings.
-    // `signature` is what decides a rebuild.
     const scale = untrack(() => visual.yMin);
     const ceiling = untrack(() => visual.yMax);
     const xMin = untrack(() => visual.xMin);
@@ -160,10 +157,11 @@
     const drawStrips = (w: number, h: number) => {
       const level = meterValue(latestMeters, "out");
       const gr = meterValue(latestMeters, "gr");
-      const top = levelToY(0, scale, ceiling, h) ?? 0;
+      // The 0 dB line is the boundary the two bars share: output fills up from
+      // the floor to the level, compression fills down from the line.
+      const zeroY = levelToY(0, scale, ceiling, h) ?? h;
       const x0 = w - STRIP_W;
 
-      // Output level fills upward from the floor to the current value.
       ctx.strokeStyle = colors.line;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -171,9 +169,12 @@
       ctx.lineTo(x0 - 0.5, h);
       ctx.stroke();
 
+      // Output level fills upward from the floor to the current value. An
+      // absent reading leaves the gutter empty rather than drawing full scale.
+      const levelY = level === null ? h : levelToY(level, scale, ceiling, h) ?? h;
       ctx.fillStyle = colors.accent;
       ctx.beginPath();
-      ctx.rect(x0, top, STRIP_W, Math.max(0, h - top));
+      ctx.rect(x0, levelY, STRIP_W, Math.max(0, h - levelY));
       ctx.fill();
 
       // Gain reduction fills downward from the 0 line to the current value,
@@ -183,7 +184,7 @@
         ctx.fillStyle = colors.danger;
         ctx.globalAlpha = 0.85;
         ctx.beginPath();
-        ctx.rect(x0, top, STRIP_W, Math.max(0, grY - top));
+        ctx.rect(x0, zeroY, STRIP_W, Math.max(0, grY - zeroY));
         ctx.fill();
         ctx.globalAlpha = 1;
       }

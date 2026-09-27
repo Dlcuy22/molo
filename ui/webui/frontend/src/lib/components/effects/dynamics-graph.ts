@@ -119,6 +119,32 @@ export function meterValue(
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/**
+ * graphSignature is the identity of a mounted graph. The panel rebuilds the
+ * readings and visual objects on every meter tick, so an effect that depended
+ * on them directly would restart its draw loop 60 times a second and never
+ * paint a frame. The signature is a string, so a re-created object with equal
+ * contents yields the same value and does not rebuild. It changes only when the
+ * stage, the overlay set, a series kind, or the scale actually changes.
+ */
+export function graphSignature(
+  stageId: string,
+  overlays: string[],
+  series: SeriesInfo[],
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+): string {
+  return JSON.stringify({
+    stage: stageId,
+    overlays,
+    kinds: series.map((s) => `${s.key}:${s.kind}`),
+    x: [xMin, xMax],
+    y: [yMin, yMax],
+  });
+}
+
 /** SeriesKind is how one overlay key is drawn. */
 export type SeriesKind = "level" | "gain-reduction" | "scalar";
 
