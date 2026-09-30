@@ -16,6 +16,7 @@ import (
 	"github.com/dlcuy22/player/dsp"
 	"github.com/dlcuy22/player/meta"
 	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/player/provider"
 	"github.com/dlcuy22/player/stream"
 )
 
@@ -54,6 +55,27 @@ var (
 	ErrBadProbeMode = errors.New("session: unknown duration mode")
 	// ErrBadVolume means a gain outside dsp's accepted range.
 	ErrBadVolume = errors.New("session: volume out of range")
+	// ErrNoProvider means the session was configured with providers, none of
+	// them claimed the reference, and the reference is not a local path. It is
+	// the error an empty provider list never produces: with no providers the
+	// session runs the legacy local path, which is behaviourally LocalAudio.
+	// Non-empty providers are a deliberate configuration, so an unclaimed ref is
+	// a caller mistake rather than something to silently open as a file.
+	ErrNoProvider = provider.ErrNoProvider
+	// ErrProviderNoOpener means a matching provider returned a Source with no
+	// Opener. The provider matched, so this is not ErrNoProvider: it is a broken
+	// provider, and passing the Source on would panic the producer goroutine.
+	ErrProviderNoOpener = errors.New("session: provider returned no Opener")
+	// ErrProviderNoDecoder means a provider's Opener returned a nil decoder with
+	// a nil error. The Source contract requires a non-nil decoder or an error,
+	// so this is a provider bug, not a decode failure.
+	ErrProviderNoDecoder = errors.New("session: provider Opener returned a nil decoder")
+	// ErrProviderNoDecoderSwap means SwapDecoder was asked to change the decoder
+	// of a track owned by a provider. A provider supplies an opaque Opener, so
+	// the session cannot rebuild it with a different decoder name; a decoder
+	// swap is only meaningful on the local path, where the registry can open the
+	// named codec. Local references are unaffected.
+	ErrProviderNoDecoderSwap = errors.New("session: cannot swap the decoder of a provider reference")
 	// ErrInvalidSetting marks a rejected Settings update. The field-specific
 	// errors above are wrapped inside it, so a caller can match on this one to
 	// tell "bad value" apart from every other failure.
@@ -130,6 +152,15 @@ type Config struct {
 
 	// Resolver describes each track. Nil selects meta.Default().
 	Resolver meta.Resolver
+
+	// Providers resolves track references, highest priority first. Nil or empty
+	// selects the legacy local path, which is behaviourally LocalAudio and keeps
+	// the historic Config.openDecoder seam intact. When the list is non-empty
+	// the first provider whose Match returns true wins, so order is significant
+	// and a catch-all provider such as LocalAudio must stay last. A non-empty
+	// list that claims nothing is an error (ErrNoProvider) rather than a silent
+	// fallback to a file.
+	Providers []provider.AudioProvider
 
 	// ProbeMode selects how much work the asynchronous duration probe may do.
 	// Nil selects the cheap tail probe. A pointer, not a value, because
@@ -412,6 +443,18 @@ type openResult struct {
 	decoder string
 	parser  string
 	err     error
+
+	// providerMeta is true when a provider supplied the track's description.
+	// It changes two things downstream: activate seeds the view from Meta
+	// instead of an empty Meta, and enrich skips the local resolver, which has
+	// nothing to read for a remote ref and would clobber the provider's tags
+	// with filename-derived junk.
+	providerMeta bool
+	meta         meta.Meta
+	// probe is the provider's optional duration probe. Nil means the total
+	// stays unknown for a provider ref, because the session's own prober only
+	// works on a local path.
+	probe func(mode core.DurationMode) (core.StreamInfo, error)
 }
 
 type probeResult struct {
@@ -463,6 +506,13 @@ type view struct {
 	// the track, so startIndex clears them with the rest of the per-track state.
 	decoder string
 	parser  string
+
+	// providerRef is true when the live track was opened through a provider
+	// Source rather than the session's own decoder path. SwapDecoder refuses
+	// such a track, so the flag lives here, under the same lock SwapDecoder
+	// reads the path under, rather than being re-derived from the ref (which
+	// would need to inspect the provider's identity).
+	providerRef bool
 
 	queueIndex int
 	queueLen   int
@@ -581,6 +631,10 @@ type seekRequest struct {
 	frame  int64
 	from   time.Duration
 	resume bool
+	// providerRef mirrors the live track's provider ownership, captured on the
+	// control loop, so the worker refuses a decoder swap on a provider ref even
+	// if the caller raced a track change.
+	providerRef bool
 }
 
 // New builds a session and starts its control goroutine. It does not touch the
@@ -909,6 +963,35 @@ func probeWithDefaultRegistry(path string, opts decode.ProbeOptions) (core.Strea
 	return p.Probe(path, opts)
 }
 
+// providerFor returns the first configured provider that claims ref. The bool
+// is false when nothing matches, including when the list is empty; callers tell
+// "no providers configured" (legacy path) from "providers configured but
+// nothing matched" (ErrNoProvider) by checking len(cfg.Providers).
+func (s *Session) providerFor(ref string) (provider.AudioProvider, bool) {
+	for _, p := range s.cfg.Providers {
+		if p.Match(ref) {
+			return p, true
+		}
+	}
+
+	return nil, false
+}
+
+// swapRefused reports the path of a track whose decoder cannot be swapped, or
+// the empty string when a swap is allowed. A provider ref carries an opaque
+// Opener, so there is no way to rebuild it with a different decoder; only the
+// session's own decoder path can. The flag is set by activate, so a swap during
+// the build window is allowed and simply records the preference.
+func (s *Session) swapRefused() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.v.providerRef {
+		return s.v.path
+	}
+
+	return ""
+}
+
 // Snapshot reports the controller state. It is safe to call from any
 // goroutine and is cheap enough to poll every frame.
 func (s *Session) Snapshot() Snapshot {
@@ -959,7 +1042,8 @@ func (s *Session) Snapshot() Snapshot {
 // Snapshot.DroppedEvents.
 func (s *Session) Events() <-chan Event { return s.events.channel() }
 
-// Play replaces the queue with one track and starts it.
+// Play replaces the queue with one track and starts it. ref is a provider
+// reference when a provider claims it, and a filesystem path otherwise.
 func (s *Session) Play(path string) error {
 	if path == "" {
 		return ErrEmptyPath
@@ -969,7 +1053,9 @@ func (s *Session) Play(path string) error {
 	return nil
 }
 
-// PlayQueue replaces the queue and starts at the first track.
+// PlayQueue replaces the queue and starts at the first track. Each entry is a
+// provider reference when a provider claims it, and a filesystem path
+// otherwise.
 func (s *Session) PlayQueue(paths []string) error {
 	if len(paths) == 0 {
 		return ErrEmptyQueue
@@ -1018,6 +1104,18 @@ func (s *Session) Queue() []string {
 	return append([]string(nil), s.queue...)
 }
 
+// Providers lists the names of the configured providers in the order they are
+// tried. It is empty for the default local-only setup, which has no explicit
+// provider list.
+func (s *Session) Providers() []string {
+	names := make([]string, 0, len(s.cfg.Providers))
+	for _, p := range s.cfg.Providers {
+		names = append(names, p.Name())
+	}
+
+	return names
+}
+
 // Pause stops the device. It is ignored unless the session is playing.
 func (s *Session) Pause() error {
 	s.enqueue(command{kind: cmdPause})
@@ -1055,9 +1153,17 @@ func (s *Session) Seek(d time.Duration) error {
 // the position playback has reached. Empty means automatic selection. A bad
 // name is rejected synchronously and changes nothing; an engine failure
 // surfaces as a Failed event while the old decoder keeps playing.
+//
+// A track owned by a provider cannot switch decoder: the provider supplied an
+// opaque Opener, so the session has no way to rebuild it with the named codec.
+// That is refused synchronously with ErrProviderNoDecoderSwap. A local track is
+// unaffected.
 func (s *Session) SwapDecoder(name string) error {
 	if err := s.cfg.validate(name, ValidateDecoder); err != nil {
 		return err
+	}
+	if path := s.swapRefused(); path != "" {
+		return fmt.Errorf("%w: %s", ErrProviderNoDecoderSwap, path)
 	}
 	s.enqueue(command{kind: cmdSwapDecoder, name: name})
 
@@ -1370,6 +1476,9 @@ func (s *Session) startIndex(index int) {
 		v.lastPos = 0
 		v.decoder = ""
 		v.parser = ""
+		// Unknown until the provider resolves the ref: a swap during the build
+		// window just records the preference, so false here is safe.
+		v.providerRef = false
 		v.queueIndex = index
 		v.queueLen = len(s.queue)
 	})
@@ -1446,6 +1555,11 @@ func (s *Session) openTrack(seq uint64, index int, path string) {
 // responsive. The pipeline snapshot and its generation are captured before the
 // effects are built, so the loop can tell whether a change landed while this
 // ran and prefer the newer one.
+//
+// A reference claimed by a non-local provider is resolved here too, on this
+// worker, because Open may block on the network. LocalAudio is transparent: it
+// is treated as the legacy path so the decoder preference and the existing
+// openDecoder seam keep working unchanged.
 func (s *Session) build(seq uint64, index int, path string) openResult {
 	select {
 	case <-s.closing:
@@ -1464,13 +1578,57 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 	// already current, so the IDs are what actually say which stages are live.
 	keys := stageKeys(pipeline)
 
+	var src *provider.Source
+	if len(s.cfg.Providers) > 0 {
+		p, ok := s.providerFor(path)
+		if !ok {
+			return openResult{seq: seq, index: index, path: path, err: fmt.Errorf("%w: %s", ErrNoProvider, path)}
+		}
+		source, err := p.Open(s.ctx, path)
+		if err != nil {
+			return openResult{seq: seq, index: index, path: path, err: err}
+		}
+		// Source.Local means the provider wrapped a filesystem source and the
+		// session must keep its own opener, resolver and prober. Identity is
+		// never inspected, so LocalAudio, &LocalAudio{} and any wrapper that
+		// sets Local are all transparent.
+		if !source.Local {
+			// A Source with no Opener cannot produce audio, and passing it on
+			// would panic the producer goroutine. The contract requires one, so
+			// a violation is a provider bug surfaced as a track failure.
+			if source.Opener == nil {
+				return openResult{seq: seq, index: index, path: path, err: fmt.Errorf("%w: %s returned no Opener", ErrProviderNoOpener, p.Name())}
+			}
+			src = &source
+		}
+	}
+
 	var info core.StreamInfo
 	var decoderName, parserName string
-	open := func(<-chan struct{}) (decode.Decoder, error) {
+	open := func(stop <-chan struct{}) (decode.Decoder, error) {
 		select {
 		case <-s.closing:
 			return nil, ErrClosed
 		default:
+		}
+
+		if src != nil {
+			// The provider owns how the bytes are produced. Its Opener is
+			// called again by the streamer on the reopen-and-discard seek
+			// fallback and on a decoder swap, which is why it is a factory.
+			d, err := src.Opener(stop)
+			if err != nil {
+				return nil, err
+			}
+			// A decoder plus a nil error but no decoder would panic Info below,
+			// so the contract violation is a failed track instead.
+			if d == nil {
+				return nil, fmt.Errorf("%w: opener returned a nil decoder", ErrProviderNoDecoder)
+			}
+			info = d.Info()
+			decoderName, parserName = decode.Describe(d)
+
+			return d, nil
 		}
 
 		// Read the preference here, not at New: changing it must affect the
@@ -1496,11 +1654,18 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 		return openResult{seq: seq, index: index, path: path, err: err}
 	}
 
-	return openResult{
+	res := openResult{
 		seq: seq, index: index, path: path,
 		streamer: st, effects: effects, pipelineGen: gen, keys: keys,
 		info: info, decoder: decoderName, parser: parserName,
 	}
+	if src != nil {
+		res.providerMeta = true
+		res.meta = src.Meta
+		res.probe = src.Probe
+	}
+
+	return res
 }
 
 // handleOpen installs a finished build, or discards it when the queue has
@@ -1564,10 +1729,22 @@ func (s *Session) activate(res openResult) {
 
 	s.updateView(func(v *view) {
 		v.path = res.path
-		v.meta = meta.Meta{Path: res.path, Stream: res.info}
+		if res.providerMeta {
+			// The provider described the track. Its Meta.Path and Stream are
+			// overwritten with what the session knows for sure: the ref is the
+			// identity the queue uses, and only the decoder can report the true
+			// stream shape, so the provider's guess is never trusted for those.
+			m := res.meta
+			m.Path = res.path
+			m.Stream = res.info
+			v.meta = m
+		} else {
+			v.meta = meta.Meta{Path: res.path, Stream: res.info}
+		}
 		v.duration = 0
 		v.decoder = res.decoder
 		v.parser = res.parser
+		v.providerRef = res.providerMeta
 		v.queueIndex = res.index
 		v.queueLen = len(s.queue)
 	})
@@ -1587,27 +1764,58 @@ func (s *Session) activate(res openResult) {
 
 	s.setState(StatePlaying)
 	s.emit(TrackChanged{Index: res.index, Path: res.path})
-	s.enrich(res.seq, res.index, res.path)
+	s.enrich(res)
 }
 
 // enrich starts the asynchronous metadata and duration lookups. Play never
 // waits for either: the snapshot reports an unknown duration until the probe
 // lands. These workers own no engine resource, so Close does not wait for
 // them; their channel sends are released by the closing signal.
-func (s *Session) enrich(seq uint64, index int, path string) {
+//
+// A provider ref is described by its Source, so the local resolver is skipped:
+// meta.Default() would read a file that does not exist and invent a title from
+// the ref string. The duration likewise comes from Source.Probe when one was
+// supplied; without it the total stays unknown, because the session's own
+// prober only understands a local path.
+func (s *Session) enrich(res openResult) {
 	go func() {
-		mode := s.runtime.probeDurationMode()
-		info, err := s.cfg.probeStream(path, decode.ProbeOptions{Duration: mode})
+		var info core.StreamInfo
+		var err error
+		switch {
+		case res.providerMeta && res.probe != nil:
+			info, err = res.probe(s.runtime.probeDurationMode())
+		case res.providerMeta:
+			info = core.StreamInfo{Format: canonical, TotalFrames: -1}
+		default:
+			mode := s.runtime.probeDurationMode()
+			info, err = s.cfg.probeStream(res.path, decode.ProbeOptions{Duration: mode})
+		}
 		select {
-		case s.probeCh <- probeResult{seq: seq, index: index, info: info, err: err}:
+		case s.probeCh <- probeResult{seq: res.seq, index: res.index, info: info, err: err}:
 		case <-s.closing:
 		}
 	}()
 
 	go func() {
-		m, err := s.cfg.Resolver.Resolve(s.ctx, path)
+		if res.providerMeta {
+			// Path is the ref the queue holds, not whatever the provider put
+			// in Meta: it is the track's identity in the session, and handleMeta
+			// replaces the whole meta, so leaving it out here would erase the
+			// path activate already published.
+			m := res.meta
+			m.Path = res.path
+			m.Stream = res.info
+			select {
+			case s.metaCh <- metaResult{seq: res.seq, index: res.index, m: &m}:
+			case <-s.closing:
+			}
+
+			return
+		}
+
+		m, err := s.cfg.Resolver.Resolve(s.ctx, res.path)
 		select {
-		case s.metaCh <- metaResult{seq: seq, index: index, m: m, err: err}:
+		case s.metaCh <- metaResult{seq: res.seq, index: res.index, m: m, err: err}:
 		case <-s.closing:
 		}
 	}()
@@ -1768,14 +1976,15 @@ func (s *Session) requestSwapDecoder(name string) {
 	s.resetChain()
 	frame := live.Position()
 	req := &seekRequest{
-		seq:    s.seq,
-		stream: live,
-		kind:   requestSwapDecoder,
-		name:   name,
-		path:   s.trackPath(),
-		frame:  frame,
-		from:   stream.FramesToDuration(frame),
-		resume: s.state() == StatePlaying,
+		seq:         s.seq,
+		stream:      live,
+		kind:        requestSwapDecoder,
+		name:        name,
+		path:        s.trackPath(),
+		frame:       frame,
+		from:        stream.FramesToDuration(frame),
+		resume:      s.state() == StatePlaying,
+		providerRef: s.v.providerRef,
 	}
 
 	s.submit(req)
@@ -1891,6 +2100,14 @@ func (s *Session) startRequest(req *seekRequest) {
 		case requestSwapBackend:
 			res.device, res.err = s.buildDevice(req.name)
 		case requestSwapDecoder:
+			// SwapDecoder refuses a provider ref on the caller's goroutine, so
+			// this is a belt-and-braces guard for a track that changed between
+			// the check and the worker. The error is reported as Failed below.
+			if req.providerRef {
+				res.err = fmt.Errorf("%w: %s", ErrProviderNoDecoderSwap, req.path)
+
+				break
+			}
 			open, labels := s.decoderOpener(req.name, req.path)
 			res.err = req.stream.SwapDecoder(req.frame, open)
 			if res.err == nil {

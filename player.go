@@ -17,6 +17,7 @@ import (
 	"github.com/dlcuy22/player/internal/session"
 	"github.com/dlcuy22/player/meta"
 	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/player/provider"
 )
 
 // State is the playback lifecycle. It is an alias of the controller's type, so
@@ -139,15 +140,27 @@ type Player interface {
 	Snapshot() Snapshot
 	Events() <-chan Event
 
-	Play(path string) error
-	PlayQueue(paths []string) error
+	// Play replaces the queue with one track and starts it. ref is a track
+	// reference, not necessarily a filesystem path: it may be any string a
+	// configured provider claims (see WithProviders). With no providers it is a
+	// path resolved by the decode registry.
+	Play(ref string) error
+	// PlayQueue replaces the queue with refs and starts at the first. Each entry
+	// is a track reference, as for Play.
+	PlayQueue(refs []string) error
 	// PlayIndex starts the queue entry at index, keeping the queue. It is what
 	// a click on a row in a track list means. An index outside the queue is
 	// rejected synchronously and changes nothing.
 	PlayIndex(index int) error
 	Next() error
 	Prev() error
+	// Queue returns a copy of the current queue, which holds track references
+	// (for example "ytm:abc123") rather than paths once a provider is in use.
 	Queue() []string
+	// Providers lists the names of the providers in effect, in priority order,
+	// for a UI that shows where audio can come from. It is empty for the default
+	// local-only setup.
+	Providers() []string
 
 	Pause() error
 	Resume() error
@@ -249,6 +262,17 @@ func WithPipeline(p dsp.Pipeline) Option {
 	return func(c *session.Config) { c.Pipeline = p }
 }
 
+// WithProviders sets the audio source providers, highest priority first. Each
+// track reference is given to the first provider whose Match returns true, so a
+// catch-all provider such as provider.LocalAudio must stay last. Nil keeps the
+// default: local files only, through the decode registry.
+//
+// A non-empty list that claims nothing fails the track with ErrNoProvider
+// rather than silently treating the reference as a file path.
+func WithProviders(ps ...provider.AudioProvider) Option {
+	return func(c *session.Config) { c.Providers = append([]provider.AudioProvider(nil), ps...) }
+}
+
 // player is the facade implementation. It adds nothing to the session: its
 // whole job is to keep internal/session out of a UI's import graph.
 type player struct {
@@ -272,16 +296,21 @@ func New(opts ...Option) (Player, error) {
 	return &player{session: s}, nil
 }
 
-func (p *player) Snapshot() Snapshot     { return p.session.Snapshot() }
-func (p *player) Events() <-chan Event   { return p.session.Events() }
-func (p *player) Play(path string) error { return p.session.Play(path) }
-func (p *player) PlayQueue(paths []string) error {
-	return p.session.PlayQueue(paths)
+func (p *player) Snapshot() Snapshot    { return p.session.Snapshot() }
+func (p *player) Events() <-chan Event  { return p.session.Events() }
+func (p *player) Play(ref string) error { return p.session.Play(ref) }
+func (p *player) PlayQueue(refs []string) error {
+	return p.session.PlayQueue(refs)
 }
-func (p *player) PlayIndex(index int) error  { return p.session.PlayIndex(index) }
-func (p *player) Next() error                { return p.session.Next() }
-func (p *player) Prev() error                { return p.session.Prev() }
-func (p *player) Queue() []string            { return p.session.Queue() }
+func (p *player) PlayIndex(index int) error { return p.session.PlayIndex(index) }
+func (p *player) Next() error               { return p.session.Next() }
+func (p *player) Prev() error               { return p.session.Prev() }
+func (p *player) Queue() []string           { return p.session.Queue() }
+
+// Providers lists the names of the providers in effect, in priority order, for
+// a UI that shows where audio can come from. It is empty for the default
+// local-only setup.
+func (p *player) Providers() []string        { return p.session.Providers() }
 func (p *player) Pause() error               { return p.session.Pause() }
 func (p *player) Resume() error              { return p.session.Resume() }
 func (p *player) Stop() error                { return p.session.Stop() }

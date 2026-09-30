@@ -174,6 +174,10 @@ func (f *fakePlayer) Queue() []string {
 	return append([]string(nil), f.queue...)
 }
 
+// Providers satisfies the facade. The CLI has no source chooser yet, so the
+// local-only default is the whole list.
+func (f *fakePlayer) Providers() []string { return nil }
+
 func (f *fakePlayer) Pause() error {
 	f.mu.Lock()
 	f.record("Pause")
