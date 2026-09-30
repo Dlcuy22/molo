@@ -27,6 +27,22 @@ ENCODE=(-c:a libopus -vbr on -application audio -serial_offset 0 -fflags +bitexa
   -filter_complex "[0:a][1:a]amerge=inputs=2,volume=4.0[a]" \
   -map "[a]" "${ENCODE[@]}" -b:a 96k short_stereo.opus
 
+# WebM (Matroska) Opus fixtures. They are the same deterministic sources as the
+# Ogg fixtures, so webmopus_test.go can decode both containers and require the
+# same PCM. -map_metadata -1 strips the encoder tag so re-running on a different
+# libopus build still reproduces the bytes.
+WEBM=(-c:a libopus -vbr on -application audio -fflags +bitexact -map_metadata -1)
+
+"${FFMPEG[@]}" \
+  -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" \
+  -f lavfi -i "sine=frequency=660:sample_rate=48000:duration=2" \
+  -filter_complex "[0:a][1:a]amerge=inputs=2,volume=4.0[a]" \
+  -map "[a]" "${WEBM[@]}" -b:a 128k webm_stereo_2s.webm
+
+"${FFMPEG[@]}" \
+  -f lavfi -i "sine=frequency=523.25:sample_rate=48000:duration=1" \
+  -af volume=4.0 "${WEBM[@]}" -b:a 64k webm_mono_1s.webm
+
 # FLAC fixtures. FLAC is lossless, so these double as bit-exactness oracles: a
 # decoder either reproduces the samples or it is wrong. 48 kHz 16-bit is the
 # native path, 44.1 kHz exercises rate conversion, 24-bit exercises wide
@@ -107,4 +123,4 @@ WAV=(-c:a pcm_s16le)
   -filter_complex "[0:a][1:a]amerge=inputs=2,volume=4.0[a]" \
   -map "[a]" "${BASE[@]}" "${WAV[@]}" sine_stereo_44k.wav
 
-ls -l ./*.opus ./*.flac ./*.aac ./*.m4a ./*.mp3 ./*.wav
+ls -l ./*.opus ./*.webm ./*.flac ./*.aac ./*.m4a ./*.mp3 ./*.wav

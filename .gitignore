@@ -1,0 +1,4 @@
+# Scratch experiments and probes. Kept in the working tree for iteration, not
+# in history: they pin upstream client identities and wire formats that go
+# stale, and they talk to live services.
+/experiments/

@@ -204,12 +204,25 @@ func openOpusPackets(r io.Reader) (opusPacketSource, error) {
 	return newForwardOggOpus(r)
 }
 
+// opusContainer opens a packet source from a stream. It is a function rather
+// than a hardcoded call so a second container (WebM) can drive the same decoder
+// without a second decoder implementation.
+type opusContainer func(io.Reader) (opusPacketSource, error)
+
 type pionOpusDecoder struct {
 	src pionSource
 
 	srcCloser io.Closer
 	reader    opusPacketSource
 	dec       opus.Decoder
+
+	// container opens the packet source. It is Ogg for the Opus factories and
+	// the WebM reader for the WebM factory, so the decoder below is shared.
+	container opusContainer
+
+	// parserName labels the container for Descriptor, so the same decoder
+	// reports the container it actually consumed.
+	parserName string
 
 	// warmup is the seek pre-roll in granules: the profile's fast/exact window.
 	// It is per-decoder rather than a package constant because the two registry
@@ -243,10 +256,19 @@ type pionOpusDecoder struct {
 }
 
 func newPionOpusDecoder(src pionSource, warmup int64) (*pionOpusDecoder, error) {
+	return newPionOpusDecoderWith(openOpusPackets, src, warmup, "player/decode (oggopus)")
+}
+
+// newPionOpusDecoderWith builds the decoder over an explicit container. The
+// Ogg path calls it through newPionOpusDecoder, so its behaviour is unchanged;
+// the WebM path supplies openWebMOpusPackets and its own parser label.
+func newPionOpusDecoderWith(container opusContainer, src pionSource, warmup int64, parserName string) (*pionOpusDecoder, error) {
 	d := &pionOpusDecoder{
-		src:    src,
-		warmup: warmup,
-		decBuf: make([]float32, maxOpusPacketSamples),
+		src:        src,
+		container:  container,
+		parserName: parserName,
+		warmup:     warmup,
+		decBuf:     make([]float32, maxOpusPacketSamples),
 	}
 	if err := d.openSource(); err != nil {
 		return nil, err
@@ -264,11 +286,14 @@ func (d *pionOpusDecoder) openSource() error {
 	}
 	d.srcCloser = closer
 
-	reader, err := openOpusPackets(r)
+	reader, err := d.container(r)
 	if err != nil {
 		d.detachSource()
 
-		return fmt.Errorf("decode: parse Ogg Opus header: %w", err)
+		// The container is pluggable, so name it from the label the decoder
+		// carries rather than hardcoding Ogg: a corrupt WebM saying "Ogg"
+		// would send a reader down the wrong path.
+		return fmt.Errorf("decode: parse Opus container %s: %w", d.parserName, err)
 	}
 	dec, err := opus.NewDecoderWithOutput(48000, 2)
 	if err != nil {
@@ -324,8 +349,9 @@ func (d *pionOpusDecoder) Info() core.StreamInfo {
 func (d *pionOpusDecoder) DecoderName() string { return "pion/opus" }
 
 // ParserName names the container reader this decoder consumes. It is this
-// package's native reader, not pion's forward-only oggreader.
-func (d *pionOpusDecoder) ParserName() string { return "player/decode (oggopus)" }
+// package's native reader for whichever container was opened: oggopus or
+// webmopus.
+func (d *pionOpusDecoder) ParserName() string { return d.parserName }
 
 func (d *pionOpusDecoder) ReadFrames(dst []float32) (int, error) {
 	if d.closed {
