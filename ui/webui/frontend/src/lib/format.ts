@@ -2,9 +2,9 @@
 // one of them is about turning an engine value into text, and a component that
 // needs one usually needs two.
 
-/** formatTime renders milliseconds as m:ss, or h:mm:ss past an hour. An unknown
- *  duration (0) renders as "--:--" rather than "0:00", so an unresolved probe
- *  is not shown as an empty track. */
+/** formatTime renders milliseconds as m:ss, or h:mm:ss past an hour. A negative
+ *  value is an unknown duration and renders as "--:--"; zero is a real zero, so
+ *  an elapsed time at the start of a track reads "0:00". */
 export function formatTime(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) {
     return "--:--";
@@ -26,7 +26,8 @@ export function formatTime(ms: number): string {
 /**
  * displayTitle picks the best name for the current track: the tag if it has
  * one, otherwise the file name. It is the same precedence the TUI uses, so the
- * two front ends name a track identically.
+ * two front ends name a track identically. A remote reference has no file name,
+ * so it falls back to nothing rather than to its identifier.
  */
 export function displayTitle(title: string, path: string): string {
   const tag = title.trim();
@@ -52,9 +53,23 @@ export function subtitle(artist: string, album: string): string {
   return a !== "" ? a : b;
 }
 
+/**
+ * A provider reference is an identifier, not a file path. The scheme marks it
+ * as remote: the UI knows one provider today ("ytm:"), and this is the single
+ * place that has to learn about a second one.
+ */
+export function isRemoteRef(path: string): boolean {
+  return path.startsWith("ytm:");
+}
+
 /** baseName is path.basename for the browser: the last segment, POSIX or
- *  Windows separators both handled. */
+ *  Windows separators both handled. A remote reference has no file name, so it
+ *  yields nothing rather than "ytm:abc123" shown as a title. */
 export function baseName(path: string): string {
+  if (isRemoteRef(path)) {
+    return "";
+  }
+
   const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
 
   return cut >= 0 ? path.slice(cut + 1) : path;

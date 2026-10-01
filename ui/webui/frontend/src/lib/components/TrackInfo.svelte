@@ -1,7 +1,7 @@
 <script lang="ts">
   import { MusicNotes } from "phosphor-svelte";
   import { cover } from "../store";
-  import { displayTitle, subtitle } from "../format";
+  import { displayTitle, isRemoteRef, subtitle } from "../format";
   import type { Snapshot } from "../../../bindings/github.com/dlcuy22/player/ui/webui/models";
 
   let { snap }: { snap: Snapshot } = $props();
@@ -48,7 +48,10 @@
       <p class="truncate text-base text-muted">Nothing playing</p>
       <p class="truncate text-xs text-muted">Add files to get started</p>
     {:else}
-      <p class="truncate text-base font-medium text-fg" title={snap.path}>
+      <p
+        class="truncate text-base font-medium text-fg"
+        title={isRemoteRef(snap.path) ? undefined : snap.path}
+      >
         {title}
       </p>
       {#if sub !== ""}

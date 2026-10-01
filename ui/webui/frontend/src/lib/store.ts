@@ -17,6 +17,7 @@ import type {
   PreviewConfig,
   Snapshot,
   SpectrumConfig,
+  YTMResult,
 } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
 import type { Param } from "../../bindings/github.com/dlcuy22/player/ui/webui/internal/spectrum/models";
 import type { EffectKind, EffectStage } from "./effect-types";
@@ -125,6 +126,83 @@ export function queueCover(id: string, path: string): Promise<string> {
     }
   }
   queueCoverCache.set(id, p);
+
+  return p;
+}
+
+/** ytmCover memoises YouTube Music artwork by the reference the row carries. It
+ *  is separate from the queue cache because its key is the reference, not a
+ *  file path, and a search hit is drawn before it is ever queued. */
+const ytmCoverCache = new Map<string, Promise<string>>();
+
+/** ytmCover fetches a YouTube Music track's artwork once per reference. The
+ *  backend downloads and re-encodes it, so the webview never talks to the
+ *  image host itself. */
+export function ytmCover(ref: string): Promise<string> {
+  if (ref === "") {
+    return Promise.resolve("");
+  }
+  const hit = ytmCoverCache.get(ref);
+  if (hit) {
+    return hit;
+  }
+
+  const p = commands
+    .ytmCover(ref)
+    .catch(() => "")
+    .then((url) => {
+      // Do not pin an empty result: the art may not have been fetched yet when
+      // the row was first drawn, and a later ask should be able to pick it up.
+      if (url === "") {
+        ytmCoverCache.delete(ref);
+      }
+
+      return url;
+    });
+  if (ytmCoverCache.size >= queueCoverCacheMax) {
+    const oldest = ytmCoverCache.keys().next().value;
+    if (oldest !== undefined) {
+      ytmCoverCache.delete(oldest);
+    }
+  }
+  ytmCoverCache.set(ref, p);
+
+  return p;
+}
+
+/** ytmSearch memoises a settled query's results, so arrowing back through a
+ *  half-typed query and returning does not spend a request. A failure is not
+ *  cached, so a retry reaches the network. */
+const ytmSearchCache = new Map<string, Promise<YTMResult[]>>();
+const ytmSearchCacheMax = 32;
+
+/** searchYTM runs a YouTube Music search. The caller owns the debounce; this is
+ *  the deduplicated call underneath it. */
+export function searchYTM(query: string): Promise<YTMResult[]> {
+  const key = query.trim().toLowerCase();
+  if (key === "") {
+    return Promise.resolve([]);
+  }
+  const hit = ytmSearchCache.get(key);
+  if (hit) {
+    return hit;
+  }
+
+  const p = commands.searchYTM(query).then(
+    (rows) => rows ?? [],
+    (err) => {
+      // Drop the failure so the next attempt is not served a rejection.
+      ytmSearchCache.delete(key);
+      throw err;
+    },
+  );
+  if (ytmSearchCache.size >= ytmSearchCacheMax) {
+    const oldest = ytmSearchCache.keys().next().value;
+    if (oldest !== undefined) {
+      ytmSearchCache.delete(oldest);
+    }
+  }
+  ytmSearchCache.set(key, p);
 
   return p;
 }
@@ -290,6 +368,15 @@ export const commands = {
   // queueCover is the palette's lazy artwork fetch. It is a plain read, not an
   // invoke: a failure means "no art", which is not an error worth surfacing.
   queueCover: (path: string) => PlayerService.QueueCover(path),
+  // YouTube Music is catalogue work, not engine work. A search is a plain read
+  // whose failure the palette reports in its own body, next to the query; a
+  // play is an engine command like any other, so it goes through invoke and
+  // lands on the error line. ytmCover reuses the same read path as queueCover,
+  // because the backend serves both as a data URL.
+  searchYTM: (query: string) => PlayerService.SearchYTMSongs(query),
+  insertNextYTM: (videoID: string) => invoke(PlayerService.InsertNextYTM(videoID)),
+  appendYTM: (videoID: string) => invoke(PlayerService.AppendYTM(videoID)),
+  ytmCover: (ref: string) => PlayerService.QueueCover(ref),
   // The preview calls are plain too: a preview is an audition, so a rejected
   // one should quietly do nothing rather than take over the error line. The
   // config setter mirrors the value locally so a slider stays responsive.

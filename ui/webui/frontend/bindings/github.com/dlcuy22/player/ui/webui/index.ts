@@ -20,5 +20,6 @@ export type {
     PreviewState,
     QueueRow,
     Snapshot,
-    SpectrumConfig
+    SpectrumConfig,
+    YTMResult
 } from "./models.js";

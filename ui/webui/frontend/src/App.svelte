@@ -24,8 +24,10 @@
   // switcher in an editor. The browser's own Ctrl+P prints, so the default is
   // suppressed while the app has focus. Ctrl+Alt+P opens it straight into
   // preview mode, which is the one audition shortcut worth having outside the
-  // palette.
+  // palette. Ctrl+F opens the same palette against YouTube Music instead of the
+  // queue; the webview's own find-in-page is suppressed the same way.
   let paletteOpen = $state(false);
+  let paletteSource = $state<"queue" | "ytm">("queue");
   let previewOnOpen = $state(false);
   const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
   const shortcutLabel = isMac ? "⌘P" : "Ctrl P";
@@ -39,18 +41,31 @@
           // preview mode, so the app must not double-handle it.
           return;
         }
+        paletteSource = "queue";
         previewOnOpen = true;
+        paletteOpen = true;
+
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "f") {
+        e.preventDefault();
+        paletteSource = "ytm";
+        previewOnOpen = false;
         paletteOpen = true;
 
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "p") {
         e.preventDefault();
-        if (paletteOpen) {
+        // Ctrl+P always means the queue search. Open in that source, or close
+        // when it is already the one showing; from the YouTube source it is a
+        // switch back, not a close.
+        if (paletteOpen && paletteSource === "queue") {
           closePalette();
 
           return;
         }
+        paletteSource = "queue";
         previewOnOpen = false;
         paletteOpen = true;
       }
@@ -61,7 +76,14 @@
   });
 
   function openPalette(withPreview: boolean) {
+    paletteSource = "queue";
     previewOnOpen = withPreview;
+    paletteOpen = true;
+  }
+
+  function openYTMPalette() {
+    paletteSource = "ytm";
+    previewOnOpen = false;
     paletteOpen = true;
   }
 
@@ -98,8 +120,10 @@
                 {snap.queueIdx + 1} / {queue.length}
               </span>
             {/if}
-            <!-- The shortcut is the fast path; this button is the discoverable
-                 one, so the search is reachable without knowing the key. -->
+            <!-- The shortcut is the fast path; these buttons are the
+                 discoverable one, so neither search is reachable only by
+                 knowing a key. The queue search keeps Ctrl+P; YouTube Music
+                 gets its own entry rather than a hidden mode. -->
             <button
               class="flex items-center gap-1.5 rounded-[4px] border border-line bg-surface px-2 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg"
               onclick={() => openPalette(false)}
@@ -107,6 +131,14 @@
               <MagnifyingGlass size="12" aria-hidden="true" />
               Search
               <kbd class="font-sans text-fg">{shortcutLabel}</kbd>
+            </button>
+            <button
+              class="flex items-center gap-1.5 rounded-[4px] border border-line bg-surface px-2 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg"
+              onclick={() => openYTMPalette()}
+            >
+              <MagnifyingGlass size="12" aria-hidden="true" />
+              YouTube
+              <kbd class="font-sans text-fg">{isMac ? "⌘F" : "Ctrl F"}</kbd>
             </button>
           </div>
         </div>
@@ -172,6 +204,7 @@
 
   <CommandPalette
     open={paletteOpen}
+    source={paletteSource}
     {queue}
     preview={snap.preview}
     startPreview={previewOnOpen}

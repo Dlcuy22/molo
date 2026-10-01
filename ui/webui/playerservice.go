@@ -18,6 +18,7 @@ import (
 
 	"github.com/dlcuy22/player"
 	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/player/provider"
 	"github.com/dlcuy22/player/ui/webui/internal/cover"
 	"github.com/dlcuy22/player/ui/webui/internal/spectrum"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -87,6 +88,18 @@ type PlayerService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// ytm is the YouTube Music side: the catalogue metadata of every reference
+	// the session has seen, and the provider that resolves a reference into
+	// audio. The engine never sees either; the UI owns the catalogue.
+	ytm     *ytmIndex
+	ytmProv *ytmProvider
+
+	// search caches the last search per query, so arrowing back through a
+	// half-typed query does not spend a request. It is bounded and cleared on
+	// shutdown with the rest.
+	searchMu    sync.Mutex
+	searchCache map[string][]YTMResult
+
 	// preview is the palette's short-window audition, played on a second
 	// player so the main track can stay loaded and paused underneath. It is
 	// built on startup, once the engine exists.
@@ -117,11 +130,16 @@ type PlayerService struct {
 func newPlayerService() *PlayerService {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	ytmIndex := newYTMIndex()
+
 	return &PlayerService{
 		closing:     make(chan struct{}),
 		spectrumCfg: spectrum.DefaultConfig(),
 		coverCache:  make(map[string]string),
 		index:       newTagIndex(),
+		ytm:         ytmIndex,
+		ytmProv:     newYTMProvider(ytmIndex),
+		searchCache: make(map[string][]YTMResult),
 		ctx:         ctx,
 		cancel:      cancel,
 		log:         slog.Default(),
@@ -136,7 +154,7 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// logged and skipped, never fatal: a bad user script must not stop playback.
 	loadScripts()
 
-	p, err := player.New()
+	p, err := player.New(player.WithProviders(s.ytmProv, provider.LocalAudio{}))
 	if err != nil {
 		return fmt.Errorf("build player: %w", err)
 	}
@@ -432,6 +450,20 @@ func (s *PlayerService) syncIndex(queue []string) {
 	}
 
 	s.indexQueue(queue)
+	s.syncYTM(queue)
+}
+
+// syncYTM reconciles the YouTube Music catalogue index with the queue: it
+// protects the references the queue holds and bounds the rest. It runs whenever
+// the queue changes, alongside the tag index.
+func (s *PlayerService) syncYTM(queue []string) {
+	current := make(map[string]struct{}, len(queue))
+	for _, ref := range queue {
+		if isYTMRef(ref) {
+			current[ref] = struct{}{}
+		}
+	}
+	s.ytm.prune(current)
 }
 
 // equalPaths reports whether two queues hold the same paths in the same order.
@@ -491,12 +523,23 @@ func (s *PlayerService) Cover(id string) string {
 // cap is reached.
 const coverCacheMax = 64
 
+// searchCacheMax bounds the remembered searches. The palette fires one request
+// per settled query, so a session accumulates them; past the cap the cache is
+// dropped whole, which is cheap and cannot grow unbounded.
+const searchCacheMax = 32
+
 // QueueCover returns the artwork of one queued track as an inline data URL, or
 // an empty string when it has none. The palette asks only for the rows it is
 // about to draw, so a large queue never pays to decode art the user will not
 // see. The cache is keyed by the content id the row carries, so a repeat ask
 // and a track that reappears are both served without re-reading the file.
 func (s *PlayerService) QueueCover(path string) string {
+	// A remote reference has no file to read; its art comes from the
+	// catalogue, already fetched when the row was added or the track opened.
+	if isYTMRef(path) {
+		return s.ytmCover(path)
+	}
+
 	tags := s.index.lookup(path)
 	if tags.CoverID == "" {
 		return ""
@@ -549,6 +592,134 @@ func (s *PlayerService) storeCover(id, url string) {
 		s.coverOrder = append(s.coverOrder, id)
 	}
 	s.coverCache[id] = url
+}
+
+// ytmCover returns a remote track's artwork as an inline data URL, or "" when
+// it has none. It is a plain read for the frontend: a failure means "no art",
+// which is not worth the error line.
+func (s *PlayerService) ytmCover(ref string) string {
+	t, ok := s.ytm.lookup(ref)
+	if !ok {
+		return ""
+	}
+	id := t.coverID()
+	if id == "" {
+		return ""
+	}
+
+	s.coverMu.Lock()
+	if url, ok := s.coverCache[id]; ok {
+		s.coverMu.Unlock()
+
+		return url
+	}
+	s.coverMu.Unlock()
+
+	// The bytes may not be here yet: a row can be drawn from a search result
+	// before its art is fetched. Fetch off the lock, because it is a network
+	// round trip, then fall back to the URL hash as the cache key so a repeat
+	// ask still hits.
+	data := s.ytmProv.fetchThumb(ref)
+	if len(data) == 0 {
+		return ""
+	}
+	url, err := cover.DataURL(data)
+	if err != nil {
+		s.log.Warn("cover: skipping undecodable artwork", "ref", ref, "error", err)
+
+		return ""
+	}
+
+	id = cover.ID(data)
+	s.coverMu.Lock()
+	s.storeCover(id, url)
+	s.coverMu.Unlock()
+
+	return url
+}
+
+// SearchYTMSongs searches YouTube Music and returns the results a listener can
+// act on: songs first, then the other kinds, each labelled. The engine is not
+// involved; this is catalogue work, and it is the one call here that reaches
+// the network.
+func (s *PlayerService) SearchYTMSongs(query string) ([]YTMResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+
+	s.searchMu.Lock()
+	if hit, ok := s.searchCache[query]; ok {
+		s.searchMu.Unlock()
+
+		return hit, nil
+	}
+	s.searchMu.Unlock()
+
+	res, err := s.ytmProv.search(s.ctx, query, "", false)
+	if err != nil {
+		return nil, err
+	}
+	results := ytmResults(res)
+
+	// Cache the rows and their catalogue metadata, so a selected result has a
+	// title and art to show before its stream is resolved.
+	for _, r := range results {
+		if !r.Playable {
+			continue
+		}
+		s.ytm.put(ytmTrack{
+			ID:           r.VideoID,
+			Title:        r.Title,
+			Artist:       r.Artist,
+			Album:        r.Album,
+			DurationMs:   r.DurationMs,
+			ThumbnailURL: r.Thumbnail,
+		})
+	}
+
+	s.searchMu.Lock()
+	if len(s.searchCache) >= searchCacheMax {
+		s.searchCache = make(map[string][]YTMResult)
+	}
+	s.searchCache[query] = results
+	s.searchMu.Unlock()
+
+	return results, nil
+}
+
+// InsertNextYTM queues a YouTube Music track to play after the current one,
+// which is what Enter on a search result means. With a track already sounding
+// the queue is spliced after it, so that track keeps playing; with nothing
+// sounding there is no "next", so the insert also starts the track.
+func (s *PlayerService) InsertNextYTM(videoID string) error {
+	ref := ytmRef(videoID)
+	if ref == ytmRefPrefix {
+		return fmt.Errorf("ytm: no track id")
+	}
+
+	return s.command(func() error {
+		snap := s.player.Snapshot()
+		if snap.QueueIndex >= 0 && (snap.State == player.Playing || snap.State == player.Paused) {
+			return s.player.InsertQueue(snap.QueueIndex+1, []string{ref})
+		}
+
+		return s.player.InsertQueueAndPlay(0, []string{ref})
+	})
+}
+
+// AppendYTM adds a YouTube Music track to the end of the queue without starting
+// it, which is what Shift+Enter on a search result means. A live track is left
+// alone; an empty queue simply gains its first entry.
+func (s *PlayerService) AppendYTM(videoID string) error {
+	ref := ytmRef(videoID)
+	if ref == ytmRefPrefix {
+		return fmt.Errorf("ytm: no track id")
+	}
+
+	return s.command(func() error {
+		return s.player.InsertQueue(len(s.player.Queue()), []string{ref})
+	})
 }
 
 // Options is the static chooser data the UI reads once, because neither list
@@ -611,12 +782,19 @@ func (s *PlayerService) PlayIndex(index int) error {
 // PreviewStart begins previewing the queued track at path, or replaces the
 // current preview. It pauses the main track once for the session and resumes it
 // when the session ends, so arrow navigation never flaps the main track.
+//
+// A remote reference is refused: the preview player is built without providers,
+// so it could not open one, and the failure would leave the main track paused
+// for a session that never produced a sound.
 func (s *PlayerService) PreviewStart(path string) error {
 	if s.preview == nil {
 		return fmt.Errorf("preview is not available")
 	}
 	if path == "" {
 		return fmt.Errorf("preview needs a path")
+	}
+	if isYTMRef(path) {
+		return fmt.Errorf("preview is for local tracks")
 	}
 	s.preview.play(path)
 
@@ -976,10 +1154,16 @@ func stateName(st player.State) string {
 }
 
 // queueRows builds the bound queue view, marking the current row and attaching
-// the tags the index has resolved so far.
+// the tags the index has resolved so far. A remote reference has no file, so
+// its row is described from the catalogue metadata the YouTube Music index
+// holds; without that, the row would show the raw "ytm:..." reference.
 func (s *PlayerService) queueRows(paths []string, active int) []QueueRow {
 	rows := make([]QueueRow, len(paths))
 	for i, p := range paths {
+		if isYTMRef(p) {
+			rows[i] = ytmQueueRow(i, p, active, s.ytm)
+			continue
+		}
 		tags := s.index.lookup(p)
 		rows[i] = QueueRow{
 			Index:   i,
@@ -994,6 +1178,24 @@ func (s *PlayerService) queueRows(paths []string, active int) []QueueRow {
 	}
 
 	return rows
+}
+
+// ytmQueueRow describes one remote row from the catalogue index. Name stays
+// empty until the catalogue answers, so a row the index has not seen reads as
+// unnamed rather than showing its "ytm:..." identifier as a title.
+func ytmQueueRow(i int, ref string, active int, index *ytmIndex) QueueRow {
+	t, _ := index.lookup(ref)
+
+	return QueueRow{
+		Index:   i,
+		Path:    ref,
+		Name:    t.Title,
+		Title:   t.Title,
+		Artist:  t.Artist,
+		Album:   t.Album,
+		CoverID: t.coverID(),
+		Active:  i == active,
+	}
 }
 
 // codecOptions lists the decoder choices, Auto first. The label folds the

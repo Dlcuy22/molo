@@ -4,7 +4,8 @@
 // bridge per keystroke.
 
 import type { QueueRow } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
-import { baseName } from "./format";
+import type { YTMResult } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
+import { baseName, subtitle } from "./format";
 
 /**
  * searchText is what a row is matched against. Tags are included when the
@@ -33,6 +34,52 @@ export function hasTags(row: QueueRow): boolean {
   return (
     row.title.trim() !== "" || row.artist.trim() !== "" || row.album.trim() !== ""
   );
+}
+
+/**
+ * ytmResultRow projects a YouTube Music search result onto the row shape the
+ * palette already draws, so a remote hit and a queued track share one renderer
+ * and one keyboard model. The reference is the provider scheme the engine
+ * resolves, which is also what identifies the row for its artwork.
+ *
+ * A non-playable hit (an album, artist or playlist) carries no reference,
+ * because selecting it cannot play anything and pretending otherwise would
+ * offer a control that does nothing.
+ */
+export function ytmResultRow(result: YTMResult, index: number): QueueRow {
+  const playable = result.playable && result.videoId !== "";
+
+  return {
+    index,
+    path: playable ? `ytm:${result.videoId}` : "",
+    name: result.title,
+    title: result.title,
+    artist: result.artist,
+    album: result.album,
+    coverId: playable ? `ytm:${result.videoId}` : "",
+    active: false,
+  } as QueueRow;
+}
+
+/** ytmSubtitle is the row's second line: the credits, then the kind for a hit
+ *  that is not a song. A song with no credited artist still says what it is
+ *  rather than leaving the line blank. */
+export function ytmSubtitle(result: YTMResult): string {
+  const credits = subtitle(result.artist, result.album);
+  if (credits !== "") {
+    return credits;
+  }
+  if (result.kind !== "" && result.kind !== "Song") {
+    return result.kind;
+  }
+
+  return "";
+}
+
+/** ytmKindLabel names the kind of a hit the way a listener reads it: a plain
+ *  "Song" needs no label, anything else does. */
+export function ytmKindLabel(result: YTMResult): string {
+  return result.kind === "Song" ? "" : result.kind;
 }
 
 /**

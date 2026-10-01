@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/dlcuy22/player v0.0.0
+	github.com/dlcuy22/ytm-go v1.2.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.25
 	golang.org/x/image v0.41.0
 )

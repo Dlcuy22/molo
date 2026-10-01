@@ -31,6 +31,15 @@ export function AddEffect(kind: string, impl: string): $CancellablePromise<strin
 }
 
 /**
+ * AppendYTM adds a YouTube Music track to the end of the queue without starting
+ * it, which is what Shift+Enter on a search result means. A live track is left
+ * alone; an empty queue simply gains its first entry.
+ */
+export function AppendYTM(videoID: string): $CancellablePromise<void> {
+    return $Call.ByID(2115977784, videoID);
+}
+
+/**
  * ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
  * range and the points both take effect on the next tick.
  */
@@ -81,6 +90,16 @@ export function EffectMeters(): $CancellablePromise<$models.EffectMetersInfo[] |
  */
 export function EffectWindowOpen(): $CancellablePromise<boolean> {
     return $Call.ByID(3136939069);
+}
+
+/**
+ * InsertNextYTM queues a YouTube Music track to play after the current one,
+ * which is what Enter on a search result means. With a track already sounding
+ * the queue is spliced after it, so that track keeps playing; with nothing
+ * sounding there is no "next", so the insert also starts the track.
+ */
+export function InsertNextYTM(videoID: string): $CancellablePromise<void> {
+    return $Call.ByID(3049016008, videoID);
 }
 
 /**
@@ -159,6 +178,10 @@ export function PreviewConfig(): $CancellablePromise<$models.PreviewConfig> {
  * PreviewStart begins previewing the queued track at path, or replaces the
  * current preview. It pauses the main track once for the session and resumes it
  * when the session ends, so arrow navigation never flaps the main track.
+ * 
+ * A remote reference is refused: the preview player is built without providers,
+ * so it could not open one, and the failure would leave the main track paused
+ * for a session that never produced a sound.
  */
 export function PreviewStart(path: string): $CancellablePromise<void> {
     return $Call.ByID(3793691400, path);
@@ -188,6 +211,16 @@ export function QueueCover(path: string): $CancellablePromise<string> {
  */
 export function RemoveEffect(id: string): $CancellablePromise<void> {
     return $Call.ByID(3726857945, id);
+}
+
+/**
+ * SearchYTMSongs searches YouTube Music and returns the results a listener can
+ * act on: songs first, then the other kinds, each labelled. The engine is not
+ * involved; this is catalogue work, and it is the one call here that reaches
+ * the network.
+ */
+export function SearchYTMSongs(query: string): $CancellablePromise<$models.YTMResult[] | null> {
+    return $Call.ByID(2050862098, query);
 }
 
 /**

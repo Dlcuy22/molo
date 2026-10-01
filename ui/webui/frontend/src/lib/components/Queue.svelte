@@ -1,7 +1,7 @@
 <script lang="ts">
   import { MusicNote } from "phosphor-svelte";
   import { commands } from "../store";
-  import { baseName } from "../format";
+  import { baseName, isRemoteRef } from "../format";
   import type { QueueRow } from "../../../bindings/github.com/dlcuy22/player/ui/webui/models";
 
   let { queue, queueIdx }: { queue: QueueRow[]; queueIdx: number } = $props();
@@ -46,7 +46,7 @@
             class:bg-selected={row.active}
             class:hover:bg-hover={!row.active}
             aria-current={row.active ? "true" : undefined}
-            title={row.path}
+            title={isRemoteRef(row.path) ? undefined : row.path}
             onclick={() => commands.playIndex(row.index)}
           >
             <!-- The accent bar is the active marker; the reserved width keeps

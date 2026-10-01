@@ -220,3 +220,20 @@ export interface SpectrumConfig {
     "minHz": number;
     "maxHz": number;
 }
+
+/**
+ * YTMResult is one search hit, flattened for the frontend. Kind is the label a
+ * row shows; only a song is playable today, and a row says so rather than
+ * offering a control that does nothing.
+ */
+export interface YTMResult {
+    "videoId": string;
+    "title": string;
+    "artist": string;
+    "album": string;
+    "durationMs": number;
+    "kind": string;
+    "explicit": boolean;
+    "thumbnail": string;
+    "playable": boolean;
+}

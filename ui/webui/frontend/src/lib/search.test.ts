@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { hasTags, matchQueue, searchText, tokenize } from "./search";
+import { hasTags, matchQueue, searchText, tokenize, ytmKindLabel, ytmResultRow, ytmSubtitle } from "./search";
 import type { QueueRow } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
+import type { YTMResult } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
 
 // row builds a QueueRow with only the fields the search reads.
 function row(partial: Partial<QueueRow> & { index: number; path: string }): QueueRow {
@@ -30,6 +31,13 @@ describe("searchText", () => {
   it("still uses the file name when a track has no tags", () => {
     const r = row({ index: 0, path: "/m/Me and the colors.opus", name: "Me and the colors.opus" });
     expect(searchText(r)).toBe("me and the colors.opus");
+  });
+
+  it("does not offer a remote reference's identifier as a file name", () => {
+    // A provider ref has no file name; "ytm:abc123" must never be matched as
+    // if it were a title.
+    const r = row({ index: 0, path: "ytm:abc123" });
+    expect(searchText(r)).toBe("");
   });
 
   it("ignores a blank tag and still uses the others", () => {
@@ -99,5 +107,64 @@ describe("matchQueue", () => {
 
   it("keeps queue order for equal matches", () => {
     expect(matchQueue(queue, "band").map((r) => r.index)).toEqual([0, 1]);
+  });
+});
+
+// hit builds a YouTube Music search result with only the fields the helpers
+// read.
+function hit(partial: Partial<YTMResult>): YTMResult {
+  return {
+    videoId: "",
+    title: "",
+    artist: "",
+    album: "",
+    durationMs: 0,
+    kind: "Song",
+    explicit: false,
+    thumbnail: "",
+    playable: true,
+    ...partial,
+  };
+}
+
+describe("ytmResultRow", () => {
+  it("carries the provider reference for a playable song", () => {
+    const r = ytmResultRow(hit({ videoId: "abc123", title: "A Song" }), 3);
+    expect(r.path).toBe("ytm:abc123");
+    expect(r.title).toBe("A Song");
+    expect(r.coverId).toBe("ytm:abc123");
+  });
+
+  it("carries no reference for a hit that cannot be played", () => {
+    const r = ytmResultRow(hit({ videoId: "MPREalbum", title: "An Album", kind: "Album", playable: false }), 0);
+    expect(r.path).toBe("");
+    expect(r.coverId).toBe("");
+  });
+
+  it("treats an empty id as not playable", () => {
+    const r = ytmResultRow(hit({ title: "Nameless", playable: true }), 0);
+    expect(r.path).toBe("");
+  });
+});
+
+describe("ytmSubtitle", () => {
+  it("joins the credits when there are any", () => {
+    expect(ytmSubtitle(hit({ artist: "A", album: "B" }))).toBe("A · B");
+  });
+
+  it("falls back to the kind for a hit with no credits", () => {
+    expect(ytmSubtitle(hit({ kind: "Album" }))).toBe("Album");
+  });
+
+  it("leaves a song with no credits blank", () => {
+    expect(ytmSubtitle(hit({ kind: "Song" }))).toBe("");
+  });
+});
+
+describe("ytmKindLabel", () => {
+  it("labels everything but a plain song", () => {
+    expect(ytmKindLabel(hit({ kind: "Song" }))).toBe("");
+    expect(ytmKindLabel(hit({ kind: "Video" }))).toBe("Video");
+    expect(ytmKindLabel(hit({ kind: "Artist" }))).toBe("Artist");
   });
 });
