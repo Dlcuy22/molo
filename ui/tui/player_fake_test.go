@@ -174,6 +174,36 @@ func (f *fakePlayer) Queue() []string {
 	return append([]string(nil), f.queue...)
 }
 
+// Providers satisfies the facade. The TUI has no source chooser, so the
+// local-only default is the whole list.
+func (f *fakePlayer) Providers() []string { return nil }
+
+// InsertQueue splices refs into the fake queue. The TUI does not use it, but
+// the facade exposes it, so the fake has to satisfy the interface.
+func (f *fakePlayer) InsertQueue(index int, refs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("InsertQueue")
+
+	at := index
+	if at < 0 || at > len(f.queue) {
+		at = len(f.queue)
+	}
+	next := make([]string, 0, len(f.queue)+len(refs))
+	next = append(next, f.queue[:at]...)
+	next = append(next, refs...)
+	next = append(next, f.queue[at:]...)
+	f.queue = next
+	f.snap.QueueLen = len(next)
+
+	return nil
+}
+
+// InsertQueueAndPlay satisfies the facade. The TUI does not use it.
+func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
+	return f.InsertQueue(index, refs)
+}
+
 func (f *fakePlayer) Pause() error {
 	f.mu.Lock()
 	f.record("Pause")

@@ -99,6 +99,11 @@ var ErrInvalidSetting = session.ErrInvalidSetting
 // request reaches the engine.
 var ErrIndexOutOfRange = session.ErrIndexOutOfRange
 
+// ErrNoLiveTrack reports InsertQueueAndPlay while a track is already loaded,
+// which would cut that track off. The caller appends instead, which is
+// behaviourally what the user meant. It is returned synchronously.
+var ErrNoLiveTrack = session.ErrNoLiveTrack
+
 // ValidateDecoder reports whether name is a usable decoder preference: empty
 // means automatic selection. It is the same rule ApplySettings enforces, exposed
 // so a caller can check a value before offering it (a CLI flag, a settings
@@ -154,6 +159,15 @@ type Player interface {
 	PlayIndex(index int) error
 	Next() error
 	Prev() error
+	// InsertQueue inserts refs into the queue at index without touching the
+	// track that is playing, which is what "play next" means. An index at or
+	// past the end appends. The live track keeps sounding; the inserted refs
+	// are what the engine reaches when it advances.
+	InsertQueue(index int, refs []string) error
+	// InsertQueueAndPlay inserts refs and starts the first of them. With a
+	// track already sounding it would cut that track off, so it is refused with
+	// ErrNoLiveTrack and nothing changes; the caller then appends instead.
+	InsertQueueAndPlay(index int, refs []string) error
 	// Queue returns a copy of the current queue, which holds track references
 	// (for example "ytm:abc123") rather than paths once a provider is in use.
 	Queue() []string
@@ -307,8 +321,18 @@ func (p *player) Next() error               { return p.session.Next() }
 func (p *player) Prev() error               { return p.session.Prev() }
 func (p *player) Queue() []string           { return p.session.Queue() }
 
-// Providers lists the names of the providers in effect, in priority order, for
-// a UI that shows where audio can come from. It is empty for the default
+// InsertQueue inserts refs at index without disturbing the current track.
+func (p *player) InsertQueue(index int, refs []string) error {
+	return p.session.InsertQueue(index, refs)
+}
+
+// InsertQueueAndPlay inserts refs and starts the first, unless a track is
+// already live, which is refused rather than interrupted.
+func (p *player) InsertQueueAndPlay(index int, refs []string) error {
+	return p.session.InsertQueueAndPlay(index, refs)
+}
+
+// Providers lists the names of the providers in effect, in priority order, for// a UI that shows where audio can come from. It is empty for the default
 // local-only setup.
 func (p *player) Providers() []string        { return p.session.Providers() }
 func (p *player) Pause() error               { return p.session.Pause() }

@@ -121,6 +121,22 @@ func (f *fakePlayer) Prev() error { return nil }
 
 func (f *fakePlayer) Queue() []string { return nil }
 
+func (f *fakePlayer) Providers() []string { return nil }
+
+// InsertQueue and InsertQueueAndPlay satisfy the facade for the YouTube Music
+// command tests; the queue edit itself is covered by the engine's own tests.
+func (f *fakePlayer) InsertQueue(index int, refs []string) error {
+	f.record("insert:" + refs[0])
+
+	return nil
+}
+
+func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
+	f.record("insertAndPlay:" + refs[0])
+
+	return nil
+}
+
 func (f *fakePlayer) Pause() error {
 	f.record("pause")
 	f.mu.Lock()

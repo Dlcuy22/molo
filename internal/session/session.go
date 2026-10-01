@@ -40,6 +40,10 @@ var (
 	// ErrIndexOutOfRange means PlayIndex named a queue position that does not
 	// exist.
 	ErrIndexOutOfRange = errors.New("session: queue index out of range")
+	// ErrNoLiveTrack means InsertQueueAndPlay was asked to start a track while
+	// one is already loaded, which would cut that track off. It is not an error
+	// state, just a refusal: the caller appends instead.
+	ErrNoLiveTrack = errors.New("session: a track is already loaded")
 	// ErrNegativeSeek means a seek target was negative.
 	ErrNegativeSeek = errors.New("session: seek target is negative")
 	// ErrNoProber means the registry has no duration probe for the path. The
@@ -381,10 +385,18 @@ type command struct {
 	name  string
 	pos   time.Duration
 
-	// index is the queue position a cmdPlayIndex jumps to. It is a plain int
-	// rather than a replayed path list so the jump reuses the queue the
-	// controller already holds, the way Next and Prev do.
+	// index is the queue position a cmdPlayIndex jumps to, or the position a
+	// cmdInsertQueue inserts at. It is a plain int rather than a replayed path
+	// list so the jump reuses the queue the controller already holds, the way
+	// Next and Prev do.
 	index int
+
+	// play makes cmdInsertQueue start the first inserted ref instead of only
+	// splicing it in. It is a field on the insert command rather than a second
+	// PlayIndex call because PlayIndex validates its index synchronously,
+	// before the control loop has grown the queue, so the pair cannot be sent
+	// as two commands.
+	play bool
 
 	// effects is a pre-built, configured post-ring chain an ApplyPipeline or
 	// SetSettings accepted. It was built on the caller's goroutine, so the
@@ -412,6 +424,7 @@ const (
 	cmdPlay cmdKind = iota
 	cmdPlayQueue
 	cmdPlayIndex
+	cmdInsertQueue
 	cmdNext
 	cmdPrev
 	cmdPause
@@ -1082,6 +1095,69 @@ func (s *Session) PlayIndex(index int) error {
 	return nil
 }
 
+// InsertQueue inserts refs into the queue at index without touching the track
+// that is playing. An index at or past the end appends. Insertion is what
+// "play next" means: the current track keeps sounding, and the inserted refs
+// are what the engine plays when it advances.
+//
+// The live track is not preserved by re-seating the queue; it is preserved
+// because the queue and the current track's index are the only things that
+// change. Nothing re-opens the current streamer, so playback is continuous.
+func (s *Session) InsertQueue(index int, refs []string) error {
+	if err := validateRefs(refs); err != nil {
+		return err
+	}
+	s.enqueue(command{kind: cmdInsertQueue, index: index, paths: append([]string(nil), refs...)})
+
+	return nil
+}
+
+// InsertQueueAndPlay inserts refs like InsertQueue and then starts the first
+// inserted ref. With nothing playing that is simply "play this now"; with a
+// track sounding it would cut it off, so the live case is refused with
+// ErrNoLiveTrack and the caller keeps the refs to append instead. It is one
+// command rather than an insert plus a PlayIndex because PlayIndex validates
+// its index synchronously, before the control loop has grown the queue.
+func (s *Session) InsertQueueAndPlay(index int, refs []string) error {
+	if err := validateRefs(refs); err != nil {
+		return err
+	}
+
+	// The state is read through the accessor rather than s.v directly: this
+	// runs on the caller's goroutine, and the control loop writes s.v under the
+	// same lock, so an unguarded read would be a data race. The control loop
+	// re-checks before starting anything, so this is only the fast refusal.
+	if s.hasLiveTrack() {
+		return ErrNoLiveTrack
+	}
+
+	s.enqueue(command{kind: cmdInsertQueue, index: index, paths: append([]string(nil), refs...), play: true})
+
+	return nil
+}
+
+// hasLiveTrack reports whether a track is loaded, playing or paused. It is the
+// one definition of "the insert would cut something off".
+func (s *Session) hasLiveTrack() bool {
+	st := s.state()
+
+	return st == StatePlaying || st == StatePaused
+}
+
+// validateRefs applies the shared input rule: at least one ref, none empty.
+func validateRefs(refs []string) error {
+	if len(refs) == 0 {
+		return ErrEmptyQueue
+	}
+	for _, ref := range refs {
+		if ref == "" {
+			return ErrEmptyPath
+		}
+	}
+
+	return nil
+}
+
 // Next advances within the queue. Past the last track it stops.
 func (s *Session) Next() error {
 	s.enqueue(command{kind: cmdNext})
@@ -1312,6 +1388,8 @@ func (s *Session) apply(c command) {
 		if c.index >= 0 && c.index < len(s.queue) {
 			s.startIndex(c.index)
 		}
+	case cmdInsertQueue:
+		s.insertQueue(c.index, c.paths, c.play)
 	case cmdNext:
 		s.next()
 	case cmdPrev:
@@ -1457,6 +1535,44 @@ func (s *Session) setQueue(paths []string) {
 	s.mu.Lock()
 	s.queue = paths
 	s.mu.Unlock()
+}
+
+// insertQueue splices refs into the queue at index and republishes the length.
+// It deliberately does not touch the current track: no detach, no new open, no
+// seek. The streamer keeps feeding the device, so a track that is playing
+// carries on exactly where it was, and the inserted refs are simply what the
+// engine reaches when it advances.
+//
+// The current index is left alone when the insertion lands after it, because
+// the current track has not moved. Inserting at or before the current index
+// would shift the current track, so it is treated as an append: the engine has
+// no way to re-seat the live streamer's position, and pretending otherwise
+// would make the next advance skip or repeat a track.
+//
+// play starts the first inserted ref instead of leaving it queued. The decision
+// is re-made here, on the control loop that owns the queue: the caller's check
+// ran on its own goroutine, so a track may have started since and a live track
+// must never be cut off by an insert.
+func (s *Session) insertQueue(index int, refs []string, play bool) {
+	if len(refs) == 0 {
+		return
+	}
+	at := index
+	if at < 0 || at > len(s.queue) || at <= s.index {
+		at = len(s.queue)
+	}
+
+	next := make([]string, 0, len(s.queue)+len(refs))
+	next = append(next, s.queue[:at]...)
+	next = append(next, refs...)
+	next = append(next, s.queue[at:]...)
+
+	s.setQueue(next)
+	s.updateView(func(v *view) { v.queueLen = len(next) })
+
+	if play && !s.hasLiveTrack() {
+		s.startIndex(at)
+	}
 }
 
 // startIndex tears the current track down and opens index asynchronously.

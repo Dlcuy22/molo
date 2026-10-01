@@ -167,6 +167,56 @@ func (f *fakePlayer) Prev() error {
 	return nil
 }
 
+// InsertQueue records the call and splices the refs into the fake queue, so a
+// test can assert where a "play next" landed.
+func (f *fakePlayer) InsertQueue(index int, refs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("InsertQueue")
+
+	at := index
+	if at < 0 || at > len(f.queue) {
+		at = len(f.queue)
+	}
+	next := make([]string, 0, len(f.queue)+len(refs))
+	next = append(next, f.queue[:at]...)
+	next = append(next, refs...)
+	next = append(next, f.queue[at:]...)
+	f.queue = next
+	f.snap.QueueLen = len(next)
+
+	return nil
+}
+
+// InsertQueueAndPlay splices the refs and, when nothing is live, starts the
+// first of them. A live track is refused, mirroring the engine.
+func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
+	f.mu.Lock()
+	live := f.snap.State == player.Playing || f.snap.State == player.Paused
+	f.mu.Unlock()
+	if live {
+		return player.ErrNoLiveTrack
+	}
+
+	if err := f.InsertQueue(index, refs); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	f.record("InsertQueueAndPlay")
+	at := index
+	if at < 0 || at > len(f.queue)-len(refs) {
+		at = len(f.queue) - len(refs)
+	}
+	f.snap.State = player.Playing
+	f.snap.Path = f.queue[at]
+	f.snap.QueueIndex = at
+	f.mu.Unlock()
+	f.emit(player.StateChanged{From: player.Idle, To: player.Playing})
+	f.emit(player.TrackChanged{Index: at, Path: refs[0]})
+
+	return nil
+}
+
 func (f *fakePlayer) Queue() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
