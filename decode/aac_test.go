@@ -83,6 +83,33 @@ func TestAacHeaderAndLength(t *testing.T) {
 	}
 }
 
+// TestAacReservedSampleRateIsRejected guards the sampling_frequency_index table:
+// a 4-bit index can be 0..15 but only 0..12 are defined, so a reserved index
+// must be rejected rather than read past the table. A malformed file must not
+// panic the process.
+func TestAacReservedSampleRateIsRejected(t *testing.T) {
+	for _, idx := range []byte{13, 14, 15} {
+		t.Run(itoa(int64(idx)), func(t *testing.T) {
+			// A 7-byte ADTS header with the reserved index, LC profile, stereo
+			// channel config, and a minimal frame length of 7, so the sync,
+			// channel and length checks pass and only the rate table can reject
+			// it. Padded past 10 bytes so the header read does not fail first.
+			hdr := []byte{
+				0xFF, 0xF1, 0x40 | idx<<2, 0x80, 0x00, 0xE0, 0x00,
+				0, 0, 0, 0, 0, 0, 0, 0, 0,
+			}
+			path := writeFile(t, t.TempDir(), "reserved.aac", hdr)
+
+			if _, err := NewAacFactory().Open(path); err == nil {
+				t.Fatal("Open accepted a reserved sampling_frequency_index")
+			}
+			if _, err := NewAacFactory().Probe(path, ProbeOptions{Duration: core.DurationProbe}); err == nil {
+				t.Fatal("Probe accepted a reserved sampling_frequency_index")
+			}
+		})
+	}
+}
+
 // TestAacRegistrySelection proves the factory is wired into dispatch: the
 // extension resolves to it, and the magic check claims a real ADTS header
 // without over-claiming unrelated bytes.
@@ -316,16 +343,14 @@ func TestAacSeekBackwardsAndToEnd(t *testing.T) {
 	}
 }
 
-// matchesWithin reports whether got matches full somewhere in [at-tolerance,
-// at+tolerance] frames, each sample within slop. The window shifts because an
-// ADTS seek lands on the frame at or before the target, and the per-sample slop
-// absorbs the AAC decoder's cross-frame state.
+// matchesWithin reports whether got matches full at a start of at or earlier,
+// within shift frames, each sample within slop. The window can only shift
+// backward because an ADTS seek lands on the frame at or before the target; a
+// late landing would not be accepted. The per-sample slop absorbs the AAC
+// decoder's cross-frame state.
 func matchesWithin(full, got []float32, at int64, shift int, slop float64) bool {
 	for s := 0; s <= shift; s++ {
 		if windowWithin(full, got, at-int64(s), slop) {
-			return true
-		}
-		if windowWithin(full, got, at+int64(s), slop) {
 			return true
 		}
 	}

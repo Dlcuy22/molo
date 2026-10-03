@@ -17,8 +17,8 @@ place: decoders, streamer, ring buffer, device output, DSP, metadata, the Lua
 scripting engine, and the facade. The known limitations are listed here rather
 than hidden:
 
-- The AAC paths decode AAC-LC only; an HE-AAC (SBR or PS) stream is rejected at
-  open rather than decoded wrong.
+- The AAC paths decode AAC-LC only; an HE-AAC (SBR or PS) stream is rejected
+  rather than decoded wrong.
 - A forward-only source, such as a network body or a pipe, has no native seek,
   so the streamer reopens and discards to position it. Every local file format
   seeks natively, including the AAC and M4A paths, which index the stream.

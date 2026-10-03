@@ -77,22 +77,22 @@ type adtsIndexEntry struct {
 }
 
 // adtsSampleRates is the ADTS sampling_frequency_index table, in index order.
-var adtsSampleRates = [...]int{
+// Indices 13..15 are reserved or forbidden, so they hold zero; a stream that
+// declares one is rejected by the caller's rate check rather than read past the
+// table. The slice is exactly 16 entries so a 4-bit index can never be out of
+// range.
+var adtsSampleRates = [16]int{
 	96000, 88200, 64000, 48000, 44100, 32000, 24000,
 	22050, 16000, 12000, 11025, 8000, 7350,
+	0, 0, 0,
 }
-
-// adtsStopScan bounds a corrupt stream: a run of frames that fail to advance
-// the cursor can never make progress again, so the scan stops after this many.
-const adtsStopScan = 4
 
 // buildADTSIndex walks the 7-byte ADTS headers and returns one entry per frame
 // plus the sample rate parsed from the first header. It skips a leading ID3v2
 // tag if present and requires the first byte after it to be an ADTS sync. A
 // frame that declares a length below its header or that runs past EOF ends the
 // scan without failing, so a trailing tag or a truncated final frame keeps the
-// entries gathered so far. The file offset is restored on return, so the caller
-// can keep using f from where it was.
+// entries gathered so far. The file is left at offset 0 on return.
 func buildADTSIndex(f *os.File, size int64) ([]adtsIndexEntry, int, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, 0, err
@@ -108,7 +108,6 @@ func buildADTSIndex(f *os.File, size int64) ([]adtsIndexEntry, int, error) {
 		entries []adtsIndexEntry
 		rate    int
 		hdr     [7]byte
-		stalls  int
 	)
 
 	for off >= 0 && off+7 <= size {
@@ -129,16 +128,7 @@ func buildADTSIndex(f *os.File, size int64) ([]adtsIndexEntry, int, error) {
 			offset:      off,
 			startSample: int64(len(entries)) * 1024,
 		})
-
-		// A zero-length step would spin: stop once a few frames fail to move.
-		if frameLen == 0 {
-			stalls++
-			if stalls >= adtsStopScan {
-				break
-			}
-		} else {
-			stalls = 0
-		}
+		// frameLen >= 7, so off always advances and the scan terminates.
 		off += frameLen
 	}
 
