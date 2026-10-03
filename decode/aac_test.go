@@ -46,9 +46,10 @@ func openAacFixture(t *testing.T, name string) Decoder {
 	return d
 }
 
-// TestAacHeaderAndLength pins the stream shape and the end-of-stream contract.
-// Unlike FLAC, ADTS has no field that states the total, so Info must say so
-// with -1 rather than guess, and the only honest total is learned by draining.
+// TestAacHeaderAndLength pins the stream shape and the exact end-of-stream
+// contract. ADTS has no field that states the total, but the header scan turns
+// the frame count into an exact one, so Info can promise it and delivery clamps
+// to it.
 func TestAacHeaderAndLength(t *testing.T) {
 	d := openAacFixture(t, "sine_stereo_48k.aac")
 
@@ -56,8 +57,13 @@ func TestAacHeaderAndLength(t *testing.T) {
 	if info.Format != core.CanonicalFormat {
 		t.Fatalf("Format = %+v, want the canonical %+v", info.Format, core.CanonicalFormat)
 	}
-	if info.TotalFrames != -1 {
-		t.Fatalf("TotalFrames = %d, want -1 (ADTS carries no total)", info.TotalFrames)
+	// The fixture is 13 ADTS frames of 1024: 13312 source samples at 48 kHz
+	// divide evenly into the canonical domain.
+	if info.TotalFrames != 13312 {
+		t.Fatalf("TotalFrames = %d, want 13312", info.TotalFrames)
+	}
+	if info.SourceSamples != 13312 || info.SourceRate != 48000 {
+		t.Fatalf("source domain = %d @ %d Hz, want 13312 @ 48000 Hz", info.SourceSamples, info.SourceRate)
 	}
 
 	got := readAacAll(t, d)
@@ -154,29 +160,45 @@ func TestAacDecodesTheTone(t *testing.T) {
 	}
 }
 
-// TestAacIsNotASeeker pins the deliberate capability gap: go-aac decodes
-// forward only, so this decoder must not advertise a native seek. The streamer
-// relies on that absence to choose its reopen-and-discard fallback.
-func TestAacIsNotASeeker(t *testing.T) {
+// TestAacIsASeeker pins the native-seek capability. The ADTS header scan builds
+// a byte index, so the decoder reparses its own framing and jumps natively
+// instead of forcing the streamer's reopen-and-discard fallback.
+func TestAacIsASeeker(t *testing.T) {
 	d := openAacFixture(t, "sine_stereo_48k.aac")
-	if _, ok := d.(Seeker); ok {
-		t.Fatal("aac decoder implements Seeker, but go-aac has no seek")
+	if _, ok := d.(Seeker); !ok {
+		t.Fatal("aac decoder does not implement Seeker, but the ADTS index supports a native seek")
 	}
 }
 
-// TestAacProbeReportsCanonicalShape checks the prober: it reads the first ADTS
-// header for the configuration but must leave the total unknown, because ADTS
-// cannot state it without decoding the whole stream.
+// TestAacProbeReportsCanonicalShape checks the prober: DurationProbe scans the
+// 7-byte headers for the exact frame count, so TotalFrames is now exact rather
+// than -1, and DurationUnknown stays cheap and leaves it unknown.
 func TestAacProbeReportsCanonicalShape(t *testing.T) {
-	info, err := NewAacFactory().Probe(fixturePath(t, "sine_stereo_48k.aac"), ProbeOptions{Duration: core.DurationProbe})
+	factory := NewAacFactory()
+	path := fixturePath(t, "sine_stereo_48k.aac")
+
+	info, err := factory.Probe(path, ProbeOptions{Duration: core.DurationProbe})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 	if info.Format != core.CanonicalFormat {
 		t.Fatalf("Format = %+v, want the canonical %+v", info.Format, core.CanonicalFormat)
 	}
-	if info.TotalFrames != -1 {
-		t.Fatalf("TotalFrames = %d, want -1 for ADTS", info.TotalFrames)
+	// The fixture is 13 ADTS frames of 1024 source samples.
+	if info.TotalFrames != 13312 {
+		t.Fatalf("TotalFrames = %d, want the exact 13312", info.TotalFrames)
+	}
+	if info.SourceSamples != 13312 || info.SourceRate != 48000 {
+		t.Fatalf("source domain = %d @ %d Hz, want 13312 @ 48000 Hz", info.SourceSamples, info.SourceRate)
+	}
+
+	unknown, err := factory.Probe(path, ProbeOptions{Duration: core.DurationUnknown})
+	if err != nil {
+		t.Fatalf("Probe (unknown): %v", err)
+	}
+	if unknown.TotalFrames != -1 || unknown.SourceSamples != 0 {
+		t.Fatalf("DurationUnknown total = %d, source = %d, want -1 and 0",
+			unknown.TotalFrames, unknown.SourceSamples)
 	}
 }
 
@@ -214,6 +236,117 @@ func TestAacResamplesToCanonical(t *testing.T) {
 	if p := tonePower(got, 0, 2, 440, rate); p <= tonePower(got, 0, 2, 660, rate)*100 {
 		t.Fatalf("resampled left channel lost its 440 Hz tone: %v", p)
 	}
+}
+
+// TestAacSeekMatchesStraightDecode proves the native seek lands on an ADTS frame
+// boundary and delivers what a straight decode holds from that point. An ADTS
+// frame cannot start mid-frame, so the seek lands at the frame at or before the
+// target; the comparison allows a shift of up to one frame. The PCM is not
+// bit-identical because AAC reconstruction threads state (the PNS generator)
+// across frames, so a fresh decoder primes it from the frame before the landing
+// one only; the per-sample tolerance absorbs that small drift, which stays far
+// below the signal and would be near the full amplitude for a wrong landing.
+func TestAacSeekMatchesStraightDecode(t *testing.T) {
+	const (
+		auFrame   = 1024
+		window    = 4000
+		tolerance = 0.01
+	)
+	full := readAacAll(t, openAacFixture(t, "sine_stereo_48k.aac"))
+	total := int64(len(full) / 2)
+
+	targets := []int64{0, 2048, 4096, 4097, 9000, total - window - auFrame}
+	for _, at := range targets {
+		t.Run(itoa(at), func(t *testing.T) {
+			d := openAacFixture(t, "sine_stereo_48k.aac")
+			if err := d.(Seeker).SeekFrame(at); err != nil {
+				t.Fatalf("SeekFrame(%d): %v", at, err)
+			}
+
+			got := readExactlyFrames(t, d, window)
+			if !matchesWithin(full, got, at, auFrame, tolerance) {
+				t.Fatalf("seek to %d differs from the straight decode by more than %g per sample",
+					at, tolerance)
+			}
+		})
+	}
+}
+
+// TestAacSeekBackwardsAndToEnd walks the seek backwards, to the last frame, and
+// to a past-the-end target, which is where a stale index or a missed reset would
+// show.
+func TestAacSeekBackwardsAndToEnd(t *testing.T) {
+	const (
+		window    = 4000
+		tolerance = 0.01
+	)
+	full := readAacAll(t, openAacFixture(t, "sine_stereo_48k.aac"))
+	total := int64(len(full) / 2)
+
+	d := openAacFixture(t, "sine_stereo_48k.aac")
+	seeker := d.(Seeker)
+
+	if err := seeker.SeekFrame(9000); err != nil {
+		t.Fatalf("SeekFrame(9000): %v", err)
+	}
+	if err := seeker.SeekFrame(2048); err != nil {
+		t.Fatalf("SeekFrame(2048): %v", err)
+	}
+	got := readExactlyFrames(t, d, window)
+	if !matchesWithin(full, got, 2048, 1024, tolerance) {
+		t.Fatal("backwards seek did not restore the earlier position")
+	}
+
+	// A target past the end lands on the last frame and delivers its tail.
+	lastFrame := (total - 1) / 1024 * 1024
+	if err := seeker.SeekFrame(total + 10*1024); err != nil {
+		t.Fatalf("SeekFrame(past end): %v", err)
+	}
+	tail := readAacAll(t, d)
+	if int64(len(tail)/2) != total-lastFrame {
+		t.Fatalf("after seek past the end delivered %d frames, want the %d-frame tail",
+			len(tail)/2, total-lastFrame)
+	}
+	if !matchesWithin(full, tail, lastFrame, 0, tolerance) {
+		t.Fatal("the tail after a past-the-end seek does not match the straight decode")
+	}
+
+	if err := seeker.SeekFrame(-1); err == nil {
+		t.Fatal("SeekFrame(-1) succeeded, want an error")
+	}
+}
+
+// matchesWithin reports whether got matches full somewhere in [at-tolerance,
+// at+tolerance] frames, each sample within slop. The window shifts because an
+// ADTS seek lands on the frame at or before the target, and the per-sample slop
+// absorbs the AAC decoder's cross-frame state.
+func matchesWithin(full, got []float32, at int64, shift int, slop float64) bool {
+	for s := 0; s <= shift; s++ {
+		if windowWithin(full, got, at-int64(s), slop) {
+			return true
+		}
+		if windowWithin(full, got, at+int64(s), slop) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// windowWithin reports whether got matches full starting at start, sample by
+// sample within slop.
+func windowWithin(full, got []float32, start int64, slop float64) bool {
+	if start < 0 || start*2+int64(len(got)) > int64(len(full)) {
+		return false
+	}
+	off := start * 2
+	for i := range got {
+		if diff := float64(full[off+int64(i)] - got[i]); diff > slop || diff < -slop {
+			return false
+		}
+	}
+
+	return true
 }
 
 // TestAacConverterResamples is the direct converter check the fixture route
