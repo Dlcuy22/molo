@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // canonicalFormat is the one format the engine speaks. Tests pin it independently so

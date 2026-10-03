@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // readMp3All decodes a fixture to the end and returns interleaved stereo

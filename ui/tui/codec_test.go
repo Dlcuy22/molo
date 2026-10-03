@@ -9,8 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // fakeCodecs is an injected chooser list. Its names are not in the process
@@ -208,7 +208,7 @@ func TestCodecPickerSelectAutoAppliesEmpty(t *testing.T) {
 func TestCodecPickerRejectionKeepsSelection(t *testing.T) {
 	f := newFakePlayer()
 	f.settings.Decoder = "alpha"
-	f.applyErr = player.ErrInvalidSetting
+	f.applyErr = molo.ErrInvalidSetting
 
 	m := openPicker(t, f)
 	if m.pickerCursor != 1 {
@@ -221,7 +221,7 @@ func TestCodecPickerRejectionKeepsSelection(t *testing.T) {
 	if m.pickerErr == nil {
 		t.Fatal("rejection was silently ignored")
 	}
-	if !errors.Is(m.pickerErr, player.ErrInvalidSetting) {
+	if !errors.Is(m.pickerErr, molo.ErrInvalidSetting) {
 		t.Fatalf("picker error = %v, want ErrInvalidSetting", m.pickerErr)
 	}
 	if m.codecSetting != "alpha" {
@@ -281,7 +281,7 @@ func TestCodecPickerKeyboardLifecycle(t *testing.T) {
 // close the picker.
 func TestCodecPickerUnknownKeysDoNotLeak(t *testing.T) {
 	f := newFakePlayer()
-	f.snap.State = player.Playing
+	f.snap.State = molo.Playing
 	m := openPicker(t, f)
 
 	before := f.callCount()
@@ -322,7 +322,7 @@ func TestCodecPickerQuitStillWorks(t *testing.T) {
 // closed, the existing bindings still reach the engine.
 func TestMainControlsWorkWhenPickerClosed(t *testing.T) {
 	f := newFakePlayer()
-	f.snap.State = player.Playing
+	f.snap.State = molo.Playing
 	m := newModel(f)
 
 	next, _ := m.Update(keyPress("n"))
@@ -355,7 +355,7 @@ func TestCodecPickerLogsSelection(t *testing.T) {
 		t.Fatalf("debug log missing the accepted codec:\n%s", joined)
 	}
 
-	f.applyErr = player.ErrInvalidSetting
+	f.applyErr = molo.ErrInvalidSetting
 	m = press(t, m, "down")
 	m = press(t, m, "enter")
 

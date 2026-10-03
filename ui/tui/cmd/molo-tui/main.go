@@ -1,14 +1,14 @@
-// Command player-tui is the Bubble Tea front end for the player engine. It
+// Command molo-tui is the Bubble Tea front end for the molo engine. It
 // plays the files and folders named on the command line as a queue and draws
 // the now playing panel, a progress bar, a level meter, an optional waveform
 // and the queue.
 //
 // A folder argument is expanded to the playable files inside it, recursively,
-// so "player-tui ~/Music" works the way a listener expects. Files named
+// so "molo-tui ~/Music" works the way a listener expects. Files named
 // directly are queued where they appear, so an explicit order is preserved.
 //
 // It talks to the engine through the public facade only, so it shares no code
-// with the headless CLI beyond the contract in player.go.
+// with the headless CLI beyond the contract in molo.go.
 package main
 
 import (
@@ -22,9 +22,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/analysis"
-	"github.com/dlcuy22/player/ui/tui"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/analysis"
+	"github.com/dlcuy22/molo/ui/tui"
 )
 
 func main() {
@@ -33,21 +33,21 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: player-tui FILE|DIR [FILE|DIR...]")
+		fmt.Fprintln(os.Stderr, "usage: molo-tui FILE|DIR [FILE|DIR...]")
 
 		return 2
 	}
 
-	queue, err := expandArgs(args, supportedExtSet(player.SupportedExtensions()))
+	queue, err := expandArgs(args, supportedExtSet(molo.SupportedExtensions()))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "player-tui: %v\n", err)
+		fmt.Fprintf(os.Stderr, "molo-tui: %v\n", err)
 
 		return 1
 	}
 
-	p, err := player.New()
+	p, err := molo.New()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "player-tui: %v\n", err)
+		fmt.Fprintf(os.Stderr, "molo-tui: %v\n", err)
 
 		return 1
 	}
@@ -56,7 +56,7 @@ func run(args []string) int {
 	// The queue starts before the program so the first frame already has a
 	// track; a failure surfaces through the event bridge as a Failed message.
 	if err := p.PlayQueue(queue); err != nil {
-		fmt.Fprintf(os.Stderr, "player-tui: %v\n", err)
+		fmt.Fprintf(os.Stderr, "molo-tui: %v\n", err)
 
 		return 1
 	}
@@ -66,7 +66,7 @@ func run(args []string) int {
 		if errors.Is(err, tea.ErrProgramKilled) || errors.Is(err, tea.ErrInterrupted) {
 			return 0
 		}
-		fmt.Fprintf(os.Stderr, "player-tui: %v\n", err)
+		fmt.Fprintf(os.Stderr, "molo-tui: %v\n", err)
 
 		return 1
 	}

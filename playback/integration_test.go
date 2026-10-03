@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/stream"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/stream"
 )
 
 // fixturePath points at the Phase 1 Opus fixtures. They live in decode's

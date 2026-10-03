@@ -11,7 +11,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // The Lua front end is deliberately a binder, not an evaluator. It runs the

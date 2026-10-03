@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // --- EBML construction helpers -------------------------------------

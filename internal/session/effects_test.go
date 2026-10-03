@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // effectsSession wires a session over the fake playback backend. The fake

@@ -2,7 +2,7 @@
 // interleaved float32 PCM at a known frame format, frame-domain positions, and
 // the Module contract that pre- and post-ring processing both satisfy.
 //
-// Nothing in this package may import another player package; every other
+// Nothing in this package may import another molo package; every other
 // package depends on core.
 package core
 

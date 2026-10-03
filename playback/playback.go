@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // ErrUnknownBackend means no backend was registered under the requested name.

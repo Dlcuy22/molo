@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/meta"
 )
 
 // TestDebugLogIsBounded is the load-bearing memory assertion: the log drops the
@@ -39,7 +39,7 @@ func TestDebugFormatters(t *testing.T) {
 	}{
 		{"decoder", formatDecoderLine("pion/opus", "pion/opus/pkg/oggreader"), "decoder  pion/opus  parser  pion/opus/pkg/oggreader"},
 		{"meta", formatMetaLine("embedded-tags"), "meta     embedded-tags"},
-		{"state", formatStateLine(player.Playing), "state    playing"},
+		{"state", formatStateLine(molo.Playing), "state    playing"},
 		{"eos", formatEOSLine("/music/stereo_2s.opus"), "eos      stereo_2s.opus"},
 		{"seek", formatSeekLine(12*time.Second, 42*time.Second, 3*time.Millisecond), "seek     0:12 -> 0:42  took 3ms"},
 		{"error", formatErrorLine(errFailed), "error    test failure"},
@@ -74,7 +74,7 @@ func TestUpdateLogsEveryTrigger(t *testing.T) {
 	next, _ = m.Update(tickMsg(time.Now()))
 	m = next.(model)
 
-	next, _ = m.Update(stateMsg{to: player.Paused})
+	next, _ = m.Update(stateMsg{to: molo.Paused})
 	m = next.(model)
 
 	next, _ = m.Update(seekedMsg{position: 42 * time.Second, from: 12 * time.Second, elapsed: 3 * time.Millisecond})
@@ -147,7 +147,7 @@ func TestTrackChangeRearmsIdentityLogging(t *testing.T) {
 	next, _ = m.Update(tickMsg(time.Now()))
 	m = next.(model)
 
-	f.setSnapshot(func(s *player.Snapshot) {
+	f.setSnapshot(func(s *molo.Snapshot) {
 		s.Path = "/music/b.opus"
 		s.Decoder = "codec-b"
 		s.Parser = "parser-b"

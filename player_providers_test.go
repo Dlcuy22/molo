@@ -1,11 +1,11 @@
-package player_test
+package molo_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/provider"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/provider"
 )
 
 // namedProvider is a stub that only needs to report a name: the facade's
@@ -19,15 +19,15 @@ func (p namedProvider) Open(context.Context, string) (provider.Source, error) {
 }
 
 // TestProvidersIsReachableThroughTheInterface is the M2 regression: an external
-// caller holding the player.Player interface must be able to ask which sources
+// caller holding the molo.Player interface must be able to ask which sources
 // are configured. Before the method was on the interface this did not compile.
 func TestProvidersIsReachableThroughTheInterface(t *testing.T) {
 	// The assignment to the interface is the point: it fails to compile if
-	// Providers is missing from player.Player.
-	var p player.Player
+	// Providers is missing from molo.Player.
+	var p molo.Player
 
 	var err error
-	p, err = player.New(player.WithProviders(
+	p, err = molo.New(molo.WithProviders(
 		namedProvider{name: "remote"},
 		provider.LocalAudio{},
 	))
@@ -50,7 +50,7 @@ func TestProvidersIsReachableThroughTheInterface(t *testing.T) {
 
 // TestProvidersEmptyByDefault pins the local-only default.
 func TestProvidersEmptyByDefault(t *testing.T) {
-	p, err := player.New()
+	p, err := molo.New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

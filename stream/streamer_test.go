@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // canonicalFormat is the one output domain the streamer may hand downstream.

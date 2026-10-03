@@ -1,4 +1,4 @@
-// Command player is the headless CLI for the player engine. It plays the files
+// Command molo is the headless CLI for the molo engine. It plays the files
 // or directories named on the command line as a queue, offers single-key
 // controls when stdin is a terminal, and degrades to plain line output when it
 // is not.
@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 	"golang.org/x/term"
 )
 
@@ -45,7 +45,7 @@ func realEnv() env {
 		stderr:       os.Stderr,
 		interactive:  interactive,
 		makeRaw:      makeRaw,
-		newPlayer:    player.New,
+		newPlayer:    molo.New,
 		probe:        probeDuration,
 		signals:      signals,
 		pollInterval: displayInterval,

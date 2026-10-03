@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { hasTags, matchQueue, searchText, tokenize, ytmKindLabel, ytmResultRow, ytmSubtitle } from "./search";
-import type { QueueRow } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
-import type { YTMResult } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
+import type { QueueRow } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
+import type { YTMResult } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 
 // row builds a QueueRow with only the fields the search reads.
 function row(partial: Partial<QueueRow> & { index: number; path: string }): QueueRow {

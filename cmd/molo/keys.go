@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // seekStep and volumeStep are the granularity of the two continuous controls.
@@ -108,16 +108,16 @@ const (
 
 // handleKey applies one key to the player and reports whether the key also
 // asks the run loop to terminate. It is deliberately free of terminal and
-// ticker concerns so every binding is unit-testable against a fake player.
-func handleKey(p player.Player, k key) action {
+// ticker concerns so every binding is unit-testable against a fake molo.
+func handleKey(p molo.Player, k key) action {
 	snap := p.Snapshot()
 
 	switch k {
 	case keyTogglePause:
 		switch snap.State {
-		case player.Playing:
+		case molo.Playing:
 			_ = p.Pause()
-		case player.Paused:
+		case molo.Paused:
 			_ = p.Resume()
 		}
 	case keyNext:

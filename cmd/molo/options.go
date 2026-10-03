@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/core"
 )
 
 // Exit codes. They are distinct because a caller such as Recordan needs to
@@ -40,7 +40,7 @@ type options struct {
 	help    bool
 }
 
-const usageText = `usage: player [flags] <path>...
+const usageText = `usage: molo [flags] <path>...
 
 Plays each path as a queue. A directory expands to a recursive scan of the
 decodable extensions.
@@ -138,7 +138,7 @@ func parseArgs(args []string) (options, error) {
 // cannot drift from what ApplySettings accepts; only the message is the CLI's,
 // because it names the flag and the available choices.
 func validateDecoder(name string) error {
-	if err := player.ValidateDecoder(name); err != nil {
+	if err := molo.ValidateDecoder(name); err != nil {
 		return fmt.Errorf("%w: -decoder %q is not a codec; available: %s", errUsage, name, codecList())
 	}
 

@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // codecLabel builds a row label as "{Family} {FriendlyName}". The family is the
@@ -11,7 +11,7 @@ import (
 // codec collapse to a recognizable prefix: opus-pion and opus-pion-exact both
 // read "Opus ...". A name already equal to its family is not repeated, so
 // "flac" reads "Flac Lossless" rather than "Flac Flac".
-func codecLabel(c player.Codec) string {
+func codecLabel(c molo.Codec) string {
 	reg := c.Name
 	friendly := c.FriendlyName
 	if friendly == "" {

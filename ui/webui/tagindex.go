@@ -3,8 +3,8 @@ package main
 import (
 	"sync"
 
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/ui/webui/internal/cover"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/ui/webui/internal/cover"
 )
 
 // tagIndexWorkers bounds how many tag readers run at once. Tag parsing opens

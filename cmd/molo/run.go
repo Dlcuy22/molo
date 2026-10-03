@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // env is every seam run needs, so the whole command is exercisable without a
@@ -30,7 +30,7 @@ type env struct {
 	makeRaw func() (func(), error)
 
 	// newPlayer builds the facade. It is injected so tests never open audio.
-	newPlayer func(...player.Option) (player.Player, error)
+	newPlayer func(...molo.Option) (molo.Player, error)
 
 	// probe resolves a duration for the preflight. A nil probe disables it.
 	probe func(path string, mode core.DurationMode) (time.Duration, error)
@@ -108,14 +108,14 @@ func run(args []string, e env) int {
 	}
 	defer restore()
 
-	playerOpts := []player.Option{
-		player.WithBackend(opts.backend),
-		player.WithProbeMode(opts.probe),
+	playerOpts := []molo.Option{
+		molo.WithBackend(opts.backend),
+		molo.WithProbeMode(opts.probe),
 	}
 	// An empty -decoder means automatic selection, which is the facade's own
 	// default, so the option is omitted rather than passed as empty.
 	if opts.decoder != "" {
-		playerOpts = append(playerOpts, player.WithDecoder(opts.decoder))
+		playerOpts = append(playerOpts, molo.WithDecoder(opts.decoder))
 	}
 
 	p, err := e.newPlayer(playerOpts...)
@@ -135,7 +135,7 @@ func run(args []string, e env) int {
 // play runs the queue and returns the terminal error, if any. It owns the
 // player's lifecycle and joins every goroutine it starts except the key reader,
 // which is blocked on stdin and cannot be interrupted; see the note below.
-func play(p player.Player, opts options, paths []string, durations []time.Duration, e env) error {
+func play(p molo.Player, opts options, paths []string, durations []time.Duration, e env) error {
 	finish := make(chan struct{})
 	keyEnd := make(chan action, 1)
 	var once sync.Once
@@ -163,20 +163,20 @@ func play(p player.Player, opts options, paths []string, durations []time.Durati
 					return
 				}
 				switch ev := ev.(type) {
-				case player.TrackChanged:
+				case molo.TrackChanged:
 					sawActive = true
 					current = ev.Path
 					announceTrack(e, ev.Path)
-				case player.TrackEnded:
+				case molo.TrackEnded:
 					announceEnd(e, current)
-				case player.StateChanged:
-					if ev.To == player.Playing || ev.To == player.Paused {
+				case molo.StateChanged:
+					if ev.To == molo.Playing || ev.To == molo.Paused {
 						sawActive = true
 					}
-					if ev.To == player.Stopped && sawActive {
+					if ev.To == molo.Stopped && sawActive {
 						end()
 					}
-				case player.Failed:
+				case molo.Failed:
 					failed = ev.Err
 					fmt.Fprintf(e.stderr, "player: %v\n", ev.Err)
 					end()
@@ -279,7 +279,7 @@ func play(p player.Player, opts options, paths []string, durations []time.Durati
 
 // paint renders one progress line in place. The carriage return plus erase is
 // the entire reason interactive output is gated on a terminal.
-func paint(e env, p player.Player, durations []time.Duration, mode core.DurationMode) {
+func paint(e env, p molo.Player, durations []time.Duration, mode core.DurationMode) {
 	snap := p.Snapshot()
 	snap.Duration = displayDuration(snap, durations, mode)
 	fmt.Fprintf(e.stdout, "\r%s\x1b[K", formatProgress(snap))
@@ -325,7 +325,7 @@ func preflight(paths []string, mode core.DurationMode, probe func(string, core.D
 // the first frames have a total. Preferring the engine matters because the two
 // can legitimately differ (a scan versus a tail probe), and a displayed total
 // that disagrees with what is playing is worse than a brief unknown.
-func displayDuration(snap player.Snapshot, durations []time.Duration, mode core.DurationMode) time.Duration {
+func displayDuration(snap molo.Snapshot, durations []time.Duration, mode core.DurationMode) time.Duration {
 	if snap.Duration > 0 {
 		return snap.Duration
 	}

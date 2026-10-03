@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 	"github.com/ebitengine/oto/v3"
 )
 

@@ -7,7 +7,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // Telemetry is what a script says about what its effect is doing, as opposed to

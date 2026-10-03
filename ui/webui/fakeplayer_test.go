@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 )
 
-// fakePlayer is a scriptable player.Player for the preview session tests. It
+// fakePlayer is a scriptable molo.Player for the preview session tests. It
 // records the commands the previewer issues and lets a test drive the state
 // machine without an audio device.
 //
@@ -20,7 +20,7 @@ import (
 type fakePlayer struct {
 	mu sync.Mutex
 
-	state player.State
+	state molo.State
 	path  string
 	pos   time.Duration
 
@@ -37,10 +37,10 @@ type fakePlayer struct {
 	calls []string
 }
 
-var _ player.Player = (*fakePlayer)(nil)
+var _ molo.Player = (*fakePlayer)(nil)
 
 func newFakePlayer() *fakePlayer {
-	return &fakePlayer{state: player.Idle, autoActivate: true, autoSeek: true}
+	return &fakePlayer{state: molo.Idle, autoActivate: true, autoSeek: true}
 }
 
 func (f *fakePlayer) record(s string) {
@@ -62,7 +62,7 @@ func (f *fakePlayer) resetCalls() {
 	f.mu.Unlock()
 }
 
-func (f *fakePlayer) stateNow() player.State {
+func (f *fakePlayer) stateNow() molo.State {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -72,8 +72,8 @@ func (f *fakePlayer) stateNow() player.State {
 // activate completes a deferred Play, modelling the engine's build worker.
 func (f *fakePlayer) activate() {
 	f.mu.Lock()
-	if f.state == player.Idle || f.state == player.Stopped {
-		f.state = player.Playing
+	if f.state == molo.Idle || f.state == molo.Stopped {
+		f.state = molo.Playing
 		f.pos = 0
 	}
 	f.mu.Unlock()
@@ -87,24 +87,24 @@ func (f *fakePlayer) landSeek() {
 	f.mu.Unlock()
 }
 
-func (f *fakePlayer) Snapshot() player.Snapshot {
+func (f *fakePlayer) Snapshot() molo.Snapshot {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return player.Snapshot{State: f.state, Path: f.path, Position: f.pos}
+	return molo.Snapshot{State: f.state, Path: f.path, Position: f.pos}
 }
 
-func (f *fakePlayer) Events() <-chan player.Event { return nil }
+func (f *fakePlayer) Events() <-chan molo.Event { return nil }
 
 func (f *fakePlayer) Play(path string) error {
 	f.record("play:" + path)
 	f.mu.Lock()
 	f.path = path
 	if f.autoActivate {
-		f.state = player.Playing
+		f.state = molo.Playing
 		f.pos = 0
 	} else {
-		f.state = player.Idle
+		f.state = molo.Idle
 	}
 	f.mu.Unlock()
 
@@ -140,7 +140,7 @@ func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
 func (f *fakePlayer) Pause() error {
 	f.record("pause")
 	f.mu.Lock()
-	f.state = player.Paused
+	f.state = molo.Paused
 	f.mu.Unlock()
 
 	return nil
@@ -149,7 +149,7 @@ func (f *fakePlayer) Pause() error {
 func (f *fakePlayer) Resume() error {
 	f.record("resume")
 	f.mu.Lock()
-	f.state = player.Playing
+	f.state = molo.Playing
 	f.mu.Unlock()
 
 	return nil
@@ -158,7 +158,7 @@ func (f *fakePlayer) Resume() error {
 func (f *fakePlayer) Stop() error {
 	f.record("stop")
 	f.mu.Lock()
-	f.state = player.Stopped
+	f.state = molo.Stopped
 	f.pos = 0
 	f.mu.Unlock()
 
@@ -184,9 +184,9 @@ func (f *fakePlayer) SwapDecoder(name string) error { return nil }
 
 func (f *fakePlayer) SwapBackend(name string) error { return nil }
 
-func (f *fakePlayer) Settings() player.Settings { return player.Settings{} }
+func (f *fakePlayer) Settings() molo.Settings { return molo.Settings{} }
 
-func (f *fakePlayer) ApplySettings(s player.Settings) error { return nil }
+func (f *fakePlayer) ApplySettings(s molo.Settings) error { return nil }
 
 func (f *fakePlayer) Pipeline() dsp.Pipeline { return dsp.Pipeline{} }
 
@@ -202,17 +202,17 @@ func (f *fakePlayer) EffectKinds() []string { return nil }
 
 // Effects satisfies the editor surface the Player interface embeds. The
 // preview session tests never open the editor, so these are inert.
-func (f *fakePlayer) Effects() player.Effects                        { return f }
-func (f *fakePlayer) EffectKindList() []player.EffectKind            { return nil }
-func (f *fakePlayer) EffectChain() player.EffectChain                { return player.EffectChain{} }
-func (f *fakePlayer) EffectMeters() []player.EffectMeters            { return nil }
+func (f *fakePlayer) Effects() molo.Effects                          { return f }
+func (f *fakePlayer) EffectKindList() []molo.EffectKind              { return nil }
+func (f *fakePlayer) EffectChain() molo.EffectChain                  { return molo.EffectChain{} }
+func (f *fakePlayer) EffectMeters() []molo.EffectMeters              { return nil }
 func (f *fakePlayer) AddEffect(kind, impl string) (string, error)    { return "", nil }
 func (f *fakePlayer) RemoveEffect(id string) error                   { return nil }
 func (f *fakePlayer) MoveEffect(id string, to int) error             { return nil }
 func (f *fakePlayer) SetEffectParam(id, key string, value any) error { return nil }
 func (f *fakePlayer) SetEffectBypass(id string, bypassed bool) error { return nil }
 
-func (f *fakePlayer) Tap() player.Tap { return nil }
+func (f *fakePlayer) Tap() molo.Tap { return nil }
 
 func (f *fakePlayer) Close() error { return nil }
 

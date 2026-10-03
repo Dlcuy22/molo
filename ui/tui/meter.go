@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // meterHalfLife is the time for the held level to fall to half when the audio
@@ -73,7 +73,7 @@ func rms(samples []float32) float64 {
 // between meter samples: the tap drops frames when it is not read, so a reader
 // that took one block would silently miss the rest. It stops at meterMaxBlocks
 // so a stalled UI cannot spin; the tap's own overwrite policy bounds the rest.
-func drainTap(t player.Tap, block int) (float64, int) {
+func drainTap(t molo.Tap, block int) (float64, int) {
 	if t == nil || block <= 0 {
 		return 0, 0
 	}

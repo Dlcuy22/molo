@@ -10,7 +10,7 @@
   } from "phosphor-svelte";
   import { commands } from "../store";
   import { formatTime, isActive, percent, fillFrac } from "../format";
-  import type { Snapshot } from "../../../bindings/github.com/dlcuy22/player/ui/webui/models";
+  import type { Snapshot } from "../../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 
   let { snap }: { snap: Snapshot } = $props();
 

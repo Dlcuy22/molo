@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // streamDecoder is a synthetic decode.Decoder over a fixed sample slice. Tests

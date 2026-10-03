@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // finiteToneOpener and finiteForwardToneOpener reuse the swap-test tone sources

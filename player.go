@@ -1,23 +1,23 @@
-// Package player is the facade every UI imports. It exposes the controller as
+// Package molo is the facade every UI imports. It exposes the controller as
 // a small interface of cheap queries and non-blocking commands, and re-exports
 // the state and event types so a UI never has to reach into internal/session.
 //
 // The package is deliberately UI-agnostic: no terminal code, no bubbletea, no
 // os.Exit. A TUI, a GTK window and a headless CLI all program against the same
 // Player.
-package player
+package molo
 
 import (
 	"fmt"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/internal/session"
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/playback"
-	"github.com/dlcuy22/player/provider"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/internal/session"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/playback"
+	"github.com/dlcuy22/molo/provider"
 )
 
 // State is the playback lifecycle. It is an alias of the controller's type, so

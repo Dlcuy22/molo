@@ -16,8 +16,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/script"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/script"
 )
 
 //go:embed effects/*.lua

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // cacheVersion is part of the cache key. Bump it whenever the reduction or the

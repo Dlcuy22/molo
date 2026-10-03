@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 	mp3pcm "github.com/tphakala/go-mp3/pcm"
 )
 

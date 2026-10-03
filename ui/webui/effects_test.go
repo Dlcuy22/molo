@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // The wire shape is a contract the frontend reads by name, so it is pinned here
@@ -71,7 +71,7 @@ func TestEffectParamInfoOptionsAreNeverNull(t *testing.T) {
 // A stage with no meters must marshal null, which is how the UI knows the
 // effect does not meter rather than that it is silent.
 func TestEffectStageInfoNilMetersAreNull(t *testing.T) {
-	raw, err := json.Marshal(effectStageInfo(player.EffectStage{
+	raw, err := json.Marshal(effectStageInfo(molo.EffectStage{
 		ID: "s1", Kind: "crossfeed", Label: "Crossfeed", Meters: nil,
 	}))
 	if err != nil {
@@ -94,7 +94,7 @@ func TestEffectStageInfoNilMetersAreNull(t *testing.T) {
 // names the frontend reads, and the dsp kind constants must cross as their
 // string values, not their iota order.
 func TestEffectStageInfoReadingsAndVisual(t *testing.T) {
-	stage := effectStageInfo(player.EffectStage{
+	stage := effectStageInfo(molo.EffectStage{
 		ID:    "s1",
 		Kind:  "compressor",
 		Label: "Compressor",
@@ -177,7 +177,7 @@ func TestEffectStageInfoReadingsAndVisual(t *testing.T) {
 // visuals as empty arrays (the frontend loops over them), so the UI knows not
 // to mount a plot.
 func TestEffectStageInfoNoReadingsOrVisual(t *testing.T) {
-	raw, err := json.Marshal(effectStageInfo(player.EffectStage{
+	raw, err := json.Marshal(effectStageInfo(molo.EffectStage{
 		ID: "s1", Kind: "crossfeed", Label: "Crossfeed",
 	}))
 	if err != nil {
@@ -281,7 +281,7 @@ func TestEffectMetersInfoWireShape(t *testing.T) {
 // stageFixture builds a minimal engine stage for the mapping tests. It is not a
 // session, so the mapping is tested without a player or an audio device.
 func stageFixture(meters map[string]float32) EffectStageInfo {
-	return effectStageInfo(player.EffectStage{
+	return effectStageInfo(molo.EffectStage{
 		ID:       "s1",
 		Kind:     "crossfeed",
 		Impl:     "",

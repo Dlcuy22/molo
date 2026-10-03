@@ -7,7 +7,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // The builder is the Lua-visible half of the front end. Every ctx call appends

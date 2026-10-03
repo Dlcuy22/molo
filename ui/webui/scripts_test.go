@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/dlcuy22/player/script"
+	"github.com/dlcuy22/molo/script"
 )
 
 // The bundled effects are what the effect window shows on a fresh install, so

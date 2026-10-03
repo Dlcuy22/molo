@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/provider"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/provider"
 	ytm "github.com/dlcuy22/ytm-go"
 )
 

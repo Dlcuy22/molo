@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // TestNormalizePreviewConfigClamps pins the ranges: a bad value cannot wedge the
@@ -175,7 +175,7 @@ func TestPreviewPausesMainEvenIfItWasMidBuild(t *testing.T) {
 	main.activate()
 	waitForCall(t, main, "pause")
 
-	if st := main.stateNow(); st != player.Paused {
+	if st := main.stateNow(); st != molo.Paused {
 		t.Fatalf("main state = %v after activation, want paused (two players sounding)", st)
 	}
 }
@@ -192,7 +192,7 @@ func TestPreviewHaltIsNeverDropped(t *testing.T) {
 	// owed when it ends.
 	pv.play("/music/a.opus")
 	waitForCall(t, second, "play:/music/a.opus")
-	if main.stateNow() != player.Paused {
+	if main.stateNow() != molo.Paused {
 		t.Fatalf("main state = %v, want paused once the session began", main.stateNow())
 	}
 
@@ -288,7 +288,7 @@ func TestPreviewSessionLeavesAlreadyPausedMainAlone(t *testing.T) {
 }
 
 // TestPreviewHaltWithoutSessionIsSafe guards the no-op path: stopping a preview
-// that never started must not touch the main player.
+// that never started must not touch the main molo.
 func TestPreviewHaltWithoutSessionIsSafe(t *testing.T) {
 	main := newFakePlayer()
 	_ = main.Play("/music/main.opus")
@@ -314,7 +314,7 @@ func TestPreviewSessionPausesMainOnceAndResumes(t *testing.T) {
 
 	pv.play("/music/a.opus")
 	waitForCall(t, second, "play:/music/a.opus")
-	if main.stateNow() != player.Paused {
+	if main.stateNow() != molo.Paused {
 		t.Fatalf("main state = %v, want paused after first preview", main.stateNow())
 	}
 

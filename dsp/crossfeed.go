@@ -34,7 +34,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // init registers the crossfeed implementation, matching the decode and meta

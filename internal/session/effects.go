@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // ErrUnknownEffect means an effect stage ID does not name a stage in the chain

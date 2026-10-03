@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // readM4aAll decodes a fixture to the end and returns interleaved stereo

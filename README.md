@@ -1,4 +1,4 @@
-# player
+# molo
 
 An audio engine and a DSP scripting engine for Go, batteries included: decoder,
 parser, streamer, ring buffer, audio device, DSP, and metadata reader. Built
@@ -12,7 +12,7 @@ effects.
 
 ## Status
 
-player is at v1.0.0. The public surface is frozen and the core pieces are in
+molo is at v1.0.0. The public surface is frozen and the core pieces are in
 place: decoders, streamer, ring buffer, device output, DSP, metadata, the Lua
 scripting engine, and the facade. The known limitations are listed here rather
 than hidden:
@@ -30,8 +30,8 @@ than hidden:
 
 ## Architecture and approach
 
-player is a set of components wired together, not one monolith. Decoders and
-audio devices implement interfaces owned by their own component, and player is
+molo is a set of components wired together, not one monolith. Decoders and
+audio devices implement interfaces owned by their own component, and molo is
 the glue plus the components those libraries need to work: a streamer, a ring
 buffer, and so on.
 
@@ -95,9 +95,9 @@ codec implementation is genuinely needed, the project reaches it through
   `.webm` and `.weba`). Opus has three implementations with different seek
   trade-offs.
 - A provider seam. Play local files by default, or plug in sources with
-  `player.WithProviders`; a provider returns bytes and metadata, and
+  `molo.WithProviders`; a provider returns bytes and metadata, and
   `Player.Providers()` lists what is in effect.
-- Codec selection by name, or automatic by weight. `player -codecs` lists what
+- Codec selection by name, or automatic by weight. `molo -codecs` lists what
   the build supports.
 - Streaming through a power-of-two SPSC ring (about 300 ms) with a decoder
   goroutine, high and low watermarks, and 100 ms chunks.
@@ -110,7 +110,7 @@ codec implementation is genuinely needed, the project reaches it through
 - DSP with a post-ring gain stage, a bs2b crossfeed, a fade, an effect registry,
   and a parameter schema a UI can render controls from. An effect can also
   publish live meters, described readings, and plots, and the engine exposes a
-  separate effect-chain editor surface (`player.Effects`) to add, remove, move,
+  separate effect-chain editor surface (`molo.Effects`) to add, remove, move,
   parameterize, and bypass stages without rebuilding the chain.
 - A Lua DSP engine in the `script` package: effects are written in Lua, loaded
   at runtime, and registered alongside the built-ins, so a new effect needs no
@@ -143,10 +143,10 @@ is ignored when a name is requested explicitly.
 
 ## Using the library
 
-The facade is `github.com/dlcuy22/player`. A minimal program:
+The facade is `github.com/dlcuy22/molo`. A minimal program:
 
 ```go
-p, err := player.New()
+p, err := molo.New()
 if err != nil {
     log.Fatal(err)
 }
@@ -159,9 +159,9 @@ if err := p.PlayQueue([]string{"a.opus", "b.flac"}); err != nil {
 go func() {
     for ev := range p.Events() {
         switch ev := ev.(type) {
-        case player.TrackChanged:
+        case molo.TrackChanged:
             fmt.Println("track:", ev.Path)
-        case player.Failed:
+        case molo.Failed:
             fmt.Println("error:", ev.Err)
         }
     }
@@ -184,7 +184,7 @@ can change at runtime through `Settings`, or with `SwapDecoder` and
 The repository ships three front ends behind one facade, and they share no UI
 code. They are the portability claim made concrete.
 
-`cmd/player` is the headless CLI, plain Go. It lives in the engine module rather
+`cmd/molo` is the headless CLI, plain Go. It lives in the engine module rather
 than in a module of its own, and imports only the public facade. It plays the
 paths given on the command line as a queue and keeps single-key controls when
 stdin is a terminal.

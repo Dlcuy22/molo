@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // namedDecoder records which codec name opened it, so a test can prove that a

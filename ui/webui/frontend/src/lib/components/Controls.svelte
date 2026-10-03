@@ -3,8 +3,8 @@
   import { busy, commands, options, spectrumConfig, spectrumSchema } from "../store";
   import { fillFrac } from "../format";
 import { fftLabel } from "../spectrum-fft";
-  import type { Param } from "../../../bindings/github.com/dlcuy22/player/ui/webui/internal/spectrum/models";
-  import type { CodecOption } from "../../../bindings/github.com/dlcuy22/player/ui/webui/models";
+  import type { Param } from "../../../bindings/github.com/dlcuy22/molo/ui/webui/internal/spectrum/models";
+  import type { CodecOption } from "../../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 
   let { decoderPref, backend }: { decoderPref: string; backend: string } = $props();
 

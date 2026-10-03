@@ -4,22 +4,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/meta"
 )
 
-// fakePlayer is a player.Player that never touches audio or the file system.
+// fakePlayer is a molo.Player that never touches audio or the file system.
 // It lets the model's key handling, event translation and rendering be driven
 // from a unit test with no terminal and no engine.
 type fakePlayer struct {
 	mu       sync.Mutex
-	snap     player.Snapshot
-	events   chan player.Event
+	snap     molo.Snapshot
+	events   chan molo.Event
 	queue    []string
 	calls    []string
 	tap      *fakeTap
-	settings player.Settings
+	settings molo.Settings
 	// applyErr makes the next ApplySettings fail, which is how a test drives
 	// the picker's rejection path without a real engine.
 	applyErr error
@@ -28,8 +28,8 @@ type fakePlayer struct {
 
 func newFakePlayer() *fakePlayer {
 	return &fakePlayer{
-		events: make(chan player.Event, 64),
-		snap:   player.Snapshot{Volume: 1, QueueIndex: -1},
+		events: make(chan molo.Event, 64),
+		snap:   molo.Snapshot{Volume: 1, QueueIndex: -1},
 		tap:    &fakeTap{},
 	}
 }
@@ -74,16 +74,16 @@ func (f *fakePlayer) callCountOf(call string) int {
 	return n
 }
 
-func (f *fakePlayer) Snapshot() player.Snapshot {
+func (f *fakePlayer) Snapshot() molo.Snapshot {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	return f.snap
 }
 
-func (f *fakePlayer) Events() <-chan player.Event { return f.events }
+func (f *fakePlayer) Events() <-chan molo.Event { return f.events }
 
-func (f *fakePlayer) emit(ev player.Event) {
+func (f *fakePlayer) emit(ev molo.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
@@ -120,7 +120,7 @@ func (f *fakePlayer) PlayIndex(index int) error {
 	if index < 0 || index >= len(f.queue) {
 		f.mu.Unlock()
 
-		return player.ErrIndexOutOfRange
+		return molo.ErrIndexOutOfRange
 	}
 	f.snap.QueueIndex = index - 1
 	f.advanceLocked(1)
@@ -164,7 +164,7 @@ func (f *fakePlayer) advanceLocked(delta int) {
 	f.snap.Position = 0
 	f.snap.Duration = 0
 	f.snap.Meta = meta.Meta{}
-	f.events <- player.TrackChanged{Index: idx, Path: f.queue[idx]}
+	f.events <- molo.TrackChanged{Index: idx, Path: f.queue[idx]}
 }
 
 func (f *fakePlayer) Queue() []string {
@@ -207,7 +207,7 @@ func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
 func (f *fakePlayer) Pause() error {
 	f.mu.Lock()
 	f.record("Pause")
-	f.snap.State = player.Paused
+	f.snap.State = molo.Paused
 	f.mu.Unlock()
 
 	return nil
@@ -216,7 +216,7 @@ func (f *fakePlayer) Pause() error {
 func (f *fakePlayer) Resume() error {
 	f.mu.Lock()
 	f.record("Resume")
-	f.snap.State = player.Playing
+	f.snap.State = molo.Playing
 	f.mu.Unlock()
 
 	return nil
@@ -246,7 +246,7 @@ func (f *fakePlayer) SetVolume(v float64) {
 	f.mu.Unlock()
 }
 
-func (f *fakePlayer) Tap() player.Tap { return f.tap }
+func (f *fakePlayer) Tap() molo.Tap { return f.tap }
 
 func (f *fakePlayer) SwapDecoder(name string) error {
 	f.mu.Lock()
@@ -278,7 +278,7 @@ func (f *fakePlayer) Close() error {
 	return nil
 }
 
-func (f *fakePlayer) setSnapshot(fn func(*player.Snapshot)) {
+func (f *fakePlayer) setSnapshot(fn func(*molo.Snapshot)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fn(&f.snap)
@@ -325,14 +325,14 @@ func (t *fakeTap) readCount() int {
 // Settings and ApplySettings satisfy the facade so the TUI fake stays a valid
 // Player. The picker is the caller: the fake stores no state on a rejected
 // update, mirroring the engine's all-or-nothing contract.
-func (f *fakePlayer) Settings() player.Settings {
+func (f *fakePlayer) Settings() molo.Settings {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	return f.settings
 }
 
-func (f *fakePlayer) ApplySettings(s player.Settings) error {
+func (f *fakePlayer) ApplySettings(s molo.Settings) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("ApplySettings")
@@ -371,14 +371,14 @@ func (f *fakePlayer) EffectKinds() []string { return dsp.Default.Kinds() }
 
 // Effects satisfies the editor surface the Player interface embeds. The model
 // does not drive the editor yet, so these are inert and change no state.
-func (f *fakePlayer) Effects() player.Effects                        { return f }
-func (f *fakePlayer) EffectKindList() []player.EffectKind            { return nil }
-func (f *fakePlayer) EffectChain() player.EffectChain                { return player.EffectChain{} }
-func (f *fakePlayer) EffectMeters() []player.EffectMeters            { return nil }
+func (f *fakePlayer) Effects() molo.Effects                          { return f }
+func (f *fakePlayer) EffectKindList() []molo.EffectKind              { return nil }
+func (f *fakePlayer) EffectChain() molo.EffectChain                  { return molo.EffectChain{} }
+func (f *fakePlayer) EffectMeters() []molo.EffectMeters              { return nil }
 func (f *fakePlayer) AddEffect(kind, impl string) (string, error)    { return "", nil }
 func (f *fakePlayer) RemoveEffect(id string) error                   { return nil }
 func (f *fakePlayer) MoveEffect(id string, to int) error             { return nil }
 func (f *fakePlayer) SetEffectParam(id, key string, value any) error { return nil }
 func (f *fakePlayer) SetEffectBypass(id string, bypassed bool) error { return nil }
 
-var _ player.Player = (*fakePlayer)(nil)
+var _ molo.Player = (*fakePlayer)(nil)

@@ -9,7 +9,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // oggTailWindow is how far back from EOF a duration probe looks for the final

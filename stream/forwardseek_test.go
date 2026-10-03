@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // readerOnly hides io.Seeker, standing in for a network body. The Ogg factory

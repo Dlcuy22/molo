@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 func TestFormatClock(t *testing.T) {
@@ -38,27 +38,27 @@ func TestFormatProgressStates(t *testing.T) {
 	}{
 		{
 			"playing known duration",
-			formatProgress(player.Playing, 1500*time.Millisecond, 2*time.Second),
+			formatProgress(molo.Playing, 1500*time.Millisecond, 2*time.Second),
 			"playing  0:01 / 0:02  75%",
 		},
 		{
 			"paused",
-			formatProgress(player.Paused, 0, 2*time.Second),
+			formatProgress(molo.Paused, 0, 2*time.Second),
 			"paused   0:00 / 0:02   0%",
 		},
 		{
 			"stopped",
-			formatProgress(player.Stopped, 2*time.Second, 2*time.Second),
+			formatProgress(molo.Stopped, 2*time.Second, 2*time.Second),
 			"stopped  0:02 / 0:02 100%",
 		},
 		{
 			"idle",
-			formatProgress(player.Idle, 0, 0),
+			formatProgress(molo.Idle, 0, 0),
 			"idle",
 		},
 		{
 			"position past duration clamps",
-			formatProgress(player.Playing, 5*time.Second, 2*time.Second),
+			formatProgress(molo.Playing, 5*time.Second, 2*time.Second),
 			"playing  0:05 / 0:02 100%",
 		},
 	}
@@ -78,14 +78,14 @@ func TestFormatProgressStates(t *testing.T) {
 func TestFormatProgressUnknownDuration(t *testing.T) {
 	cases := []struct {
 		name  string
-		state player.State
+		state molo.State
 		pos   time.Duration
 		dur   time.Duration
 		want  string
 	}{
-		{"zero duration", player.Playing, 3 * time.Second, 0, "playing  0:03 / --:--"},
-		{"negative duration", player.Paused, 3 * time.Second, -time.Second, "paused   0:03 / --:--"},
-		{"zero position and duration", player.Playing, 0, 0, "playing  0:00 / --:--"},
+		{"zero duration", molo.Playing, 3 * time.Second, 0, "playing  0:03 / --:--"},
+		{"negative duration", molo.Paused, 3 * time.Second, -time.Second, "paused   0:03 / --:--"},
+		{"zero position and duration", molo.Playing, 0, 0, "playing  0:00 / --:--"},
 	}
 
 	for _, tc := range cases {
@@ -193,11 +193,11 @@ func TestVolumePercent(t *testing.T) {
 }
 
 func TestStateName(t *testing.T) {
-	cases := map[player.State]string{
-		player.Idle:    "idle",
-		player.Playing: "playing",
-		player.Paused:  "paused",
-		player.Stopped: "stopped",
+	cases := map[molo.State]string{
+		molo.Idle:    "idle",
+		molo.Playing: "playing",
+		molo.Paused:  "paused",
+		molo.Stopped: "stopped",
 	}
 	for state, want := range cases {
 		if got := stateName(state); got != want {

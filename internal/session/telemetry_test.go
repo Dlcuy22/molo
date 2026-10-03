@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // The telemetry test effects register under kinds the real registry does not

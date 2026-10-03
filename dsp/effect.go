@@ -3,7 +3,7 @@ package dsp
 import (
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // Placement says where an effect may run. A pipeline stage is either pre-ring

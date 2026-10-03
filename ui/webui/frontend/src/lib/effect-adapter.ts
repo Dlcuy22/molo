@@ -9,7 +9,7 @@ import type {
   EffectKindInfo as WireKind,
   EffectParamInfo as WireParam,
   EffectStageInfo as WireStage,
-} from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
+} from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 import type {
   EffectKind,
   EffectParam,

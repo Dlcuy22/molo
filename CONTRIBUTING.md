@@ -10,7 +10,7 @@ the root:
 
 | Module | Path | Contents |
 |---|---|---|
-| engine | `.` | `core`, `decode`, `stream`, `playback`, `dsp`, `script`, `meta`, `analysis`, `provider`, `internal/session`, and the `player` facade |
+| engine | `.` | `core`, `decode`, `stream`, `playback`, `dsp`, `script`, `meta`, `analysis`, `provider`, `internal/session`, and the `molo` facade |
 | TUI | `ui/tui` | the Bubble Tea front end |
 | desktop | `ui/webui` | the Wails v3 backend and Svelte 5 frontend |
 
@@ -53,7 +53,7 @@ check on the file header, so it must not open or seek. A factory may also
 implement any of the optional interfaces:
 
 - `Profile` (`FriendlyName`, `Weight`) to appear in automatic selection and in
-  `player -codecs`.
+  `molo -codecs`.
 - `Prober` to report stream shape without decoding.
 - `Seeker` when the format supports a native seek. Without it the streamer falls
   back to reopen-and-discard, which still plays but is slower.

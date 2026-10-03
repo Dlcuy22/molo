@@ -26,7 +26,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 	aacpcm "github.com/tphakala/go-aac/pcm"
 	m4a "github.com/tphakala/go-m4a"
 )

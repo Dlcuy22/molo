@@ -5,8 +5,8 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/stream"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/stream"
 )
 
 // feedKind classifies an internal engine notification. These are separate from

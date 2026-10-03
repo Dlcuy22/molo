@@ -5,7 +5,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // TestHandleKeyPauseResume covers the space bar across every state. The v2 key
@@ -14,13 +14,13 @@ import (
 func TestHandleKeyPauseResume(t *testing.T) {
 	cases := []struct {
 		name     string
-		state    player.State
+		state    molo.State
 		wantCall string
 	}{
-		{"playing pauses", player.Playing, "Pause"},
-		{"paused resumes", player.Paused, "Resume"},
-		{"idle ignores", player.Idle, ""},
-		{"stopped ignores", player.Stopped, ""},
+		{"playing pauses", molo.Playing, "Pause"},
+		{"paused resumes", molo.Paused, "Resume"},
+		{"idle ignores", molo.Idle, ""},
+		{"stopped ignores", molo.Stopped, ""},
 	}
 
 	for _, tc := range cases {

@@ -1,4 +1,4 @@
-package player_test
+package molo_test
 
 import (
 	"errors"
@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // facadeDevice is a passive backend used to drive the facade without an audio
@@ -60,7 +60,7 @@ func fixture(t *testing.T, name string) string {
 	return path
 }
 
-func waitState(t *testing.T, p player.Player, want player.State, timeout time.Duration) {
+func waitState(t *testing.T, p molo.Player, want molo.State, timeout time.Duration) {
 	t.Helper()
 
 	deadline := time.Now().Add(timeout)
@@ -74,13 +74,13 @@ func waitState(t *testing.T, p player.Player, want player.State, timeout time.Du
 }
 
 func TestNewReturnsAPlayer(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"))
+	p, err := molo.New(molo.WithBackend("facade-test"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
 
-	if got := p.Snapshot().State; got != player.Idle {
+	if got := p.Snapshot().State; got != molo.Idle {
 		t.Fatalf("initial state = %d, want Idle", got)
 	}
 }
@@ -89,9 +89,9 @@ func TestNewReturnsAPlayer(t *testing.T) {
 // Option as a plain closure over the exported Config, with no access to the
 // internal session type.
 func TestHandWrittenOption(t *testing.T) {
-	p, err := player.New(
-		player.WithBackend("facade-test"),
-		func(c *player.Config) { c.Decoder = "opus-pion" },
+	p, err := molo.New(
+		molo.WithBackend("facade-test"),
+		func(c *molo.Config) { c.Decoder = "opus-pion" },
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -104,7 +104,7 @@ func TestHandWrittenOption(t *testing.T) {
 }
 
 func TestFacadePlaysATrack(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"))
+	p, err := molo.New(molo.WithBackend("facade-test"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestFacadePlaysATrack(t *testing.T) {
 	if err := p.Play(path); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	waitState(t, p, player.Playing, 3*time.Second)
+	waitState(t, p, molo.Playing, 3*time.Second)
 
 	if got := p.Snapshot().Path; got != path {
 		t.Fatalf("Path = %q, want %q", got, path)
@@ -127,9 +127,9 @@ func TestFacadePlaysATrack(t *testing.T) {
 		select {
 		case ev := <-p.Events():
 			switch ev.(type) {
-			case player.TrackChanged:
+			case molo.TrackChanged:
 				return
-			case player.StateChanged, player.TrackEnded, player.Seeked, player.Failed:
+			case molo.StateChanged, molo.TrackEnded, molo.Seeked, molo.Failed:
 			default:
 				t.Fatalf("facade emitted an unknown event type %T", ev)
 			}
@@ -140,7 +140,7 @@ func TestFacadePlaysATrack(t *testing.T) {
 }
 
 func TestFacadeRejectsAnEmptyQueue(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"))
+	p, err := molo.New(molo.WithBackend("facade-test"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -161,43 +161,43 @@ func TestFacadeRejectsAnEmptyQueue(t *testing.T) {
 // returns or wraps are the same values the session owns, so a consumer outside
 // the module can match them with errors.Is.
 func TestFacadeReExportsCommandErrors(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"))
+	p, err := molo.New(molo.WithBackend("facade-test"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
 
-	if err := p.PlayQueue(nil); !errors.Is(err, player.ErrEmptyQueue) {
+	if err := p.PlayQueue(nil); !errors.Is(err, molo.ErrEmptyQueue) {
 		t.Fatalf("PlayQueue(nil) = %v, want ErrEmptyQueue", err)
 	}
 
 	bad := p.Settings()
 	bad.Decoder = "not-a-codec"
-	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrUnknownDecoder) {
+	if err := p.ApplySettings(bad); !errors.Is(err, molo.ErrUnknownDecoder) {
 		t.Fatalf("ApplySettings(bad decoder) = %v, want ErrUnknownDecoder", err)
 	}
 
 	bad = p.Settings()
 	bad.Backend = "not-a-backend"
-	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrUnknownBackend) {
+	if err := p.ApplySettings(bad); !errors.Is(err, molo.ErrUnknownBackend) {
 		t.Fatalf("ApplySettings(bad backend) = %v, want ErrUnknownBackend", err)
 	}
 
 	bad = p.Settings()
 	bad.Volume = 2.5
-	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrBadVolume) {
+	if err := p.ApplySettings(bad); !errors.Is(err, molo.ErrBadVolume) {
 		t.Fatalf("ApplySettings(bad volume) = %v, want ErrBadVolume", err)
 	}
 
 	bad = p.Settings()
 	bad.ProbeMode = core.DurationMode(99)
-	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrBadProbeMode) {
+	if err := p.ApplySettings(bad); !errors.Is(err, molo.ErrBadProbeMode) {
 		t.Fatalf("ApplySettings(bad probe mode) = %v, want ErrBadProbeMode", err)
 	}
 }
 
 func TestFacadeNonBlockingPlay(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"))
+	p, err := molo.New(molo.WithBackend("facade-test"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestFacadeNonBlockingPlay(t *testing.T) {
 }
 
 func TestFacadeVolumeAndQueue(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"), player.WithVolume(0.25))
+	p, err := molo.New(molo.WithBackend("facade-test"), molo.WithVolume(0.25))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -248,12 +248,12 @@ func TestFacadeVolumeAndQueue(t *testing.T) {
 }
 
 // TestFacadeExposesTheTapFeed proves the facade re-exports the visualizer feed
-// and that Read is non-blocking on an idle player. Post-gain sample values are
+// and that Read is non-blocking on an idle molo. Post-gain sample values are
 // asserted where the pipeline actually runs (internal/session); a passive
 // backend here cannot push audio through the tap, so this test deliberately
 // stops at the contract.
 func TestFacadeExposesTheTapFeed(t *testing.T) {
-	p, err := player.New(player.WithBackend("facade-test"))
+	p, err := molo.New(molo.WithBackend("facade-test"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -281,5 +281,5 @@ func TestFacadeExposesTheTapFeed(t *testing.T) {
 	if err := p.Play(fixture(t, "short_stereo.opus")); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	waitState(t, p, player.Playing, 3*time.Second)
+	waitState(t, p, molo.Playing, 3*time.Second)
 }

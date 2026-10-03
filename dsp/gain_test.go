@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 func scaleBuffer(n int, start float32) []float32 {

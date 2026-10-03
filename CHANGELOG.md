@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- The module path is now `github.com/dlcuy22/molo`, renamed from
+  `github.com/dlcuy22/player`. This is a breaking change: update every import
+  path, and `go get github.com/dlcuy22/molo`. The public package is `molo`, the
+  headless CLI is `cmd/molo`, and the TUI is `cmd/molo-tui`.
+
 ### Added
 
 - Continuous integration on GitHub Actions: `go vet`, `go build`, `go test`,
@@ -34,7 +41,7 @@ cut.
 
 ### Added
 
-- The `github.com/dlcuy22/player` facade: a play queue, non-blocking commands,
+- The `github.com/dlcuy22/molo` facade: a play queue, non-blocking commands,
   and a polled `Snapshot` for a UI to read.
 - One canonical pipeline. Every decoder normalizes to 48 kHz stereo float32
   before a power-of-two SPSC ring (about 300 ms), with a decoder goroutine, high
@@ -63,7 +70,7 @@ cut.
   library.
 - Events for discrete transitions and a polled snapshot for the continuous
   position. Neither blocks the engine.
-- Example front ends, each in its own module: `cmd/player`, a headless CLI;
+- Example front ends, each in its own module: `cmd/molo`, a headless CLI;
   `ui/tui`, a Bubble Tea and Lip Gloss terminal UI; and `ui/webui`, a Wails v3
   and Svelte 5 desktop app.
 

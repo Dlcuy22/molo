@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 func TestReadKeySingleBytes(t *testing.T) {
@@ -93,28 +93,28 @@ func TestHandleKeyDispatch(t *testing.T) {
 	cases := []struct {
 		name      string
 		key       key
-		state     player.State
+		state     molo.State
 		wantCall  string
 		wantAct   action
 		wantValue float64
 	}{
-		{name: "space pauses while playing", key: keyTogglePause, state: player.Playing, wantCall: "Pause"},
-		{name: "space resumes while paused", key: keyTogglePause, state: player.Paused, wantCall: "Resume"},
-		{name: "n nexts", key: keyNext, state: player.Playing, wantCall: "Next"},
-		{name: "p prevs", key: keyPrev, state: player.Playing, wantCall: "Prev"},
-		{name: "right seeks", key: keySeekForward, state: player.Playing, wantCall: "Seek"},
-		{name: "left seeks", key: keySeekBack, state: player.Playing, wantCall: "Seek"},
-		{name: "plus raises", key: keyVolumeUp, state: player.Playing, wantCall: "SetVolume", wantValue: 0.6},
-		{name: "minus lowers", key: keyVolumeDown, state: player.Playing, wantCall: "SetVolume", wantValue: 0.4},
-		{name: "q quits", key: keyQuit, state: player.Playing, wantAct: actionQuit},
-		{name: "ctrl-c interrupts", key: keyInterrupt, state: player.Playing, wantAct: actionInterrupt},
-		{name: "unknown is inert", key: keyNone, state: player.Playing},
+		{name: "space pauses while playing", key: keyTogglePause, state: molo.Playing, wantCall: "Pause"},
+		{name: "space resumes while paused", key: keyTogglePause, state: molo.Paused, wantCall: "Resume"},
+		{name: "n nexts", key: keyNext, state: molo.Playing, wantCall: "Next"},
+		{name: "p prevs", key: keyPrev, state: molo.Playing, wantCall: "Prev"},
+		{name: "right seeks", key: keySeekForward, state: molo.Playing, wantCall: "Seek"},
+		{name: "left seeks", key: keySeekBack, state: molo.Playing, wantCall: "Seek"},
+		{name: "plus raises", key: keyVolumeUp, state: molo.Playing, wantCall: "SetVolume", wantValue: 0.6},
+		{name: "minus lowers", key: keyVolumeDown, state: molo.Playing, wantCall: "SetVolume", wantValue: 0.4},
+		{name: "q quits", key: keyQuit, state: molo.Playing, wantAct: actionQuit},
+		{name: "ctrl-c interrupts", key: keyInterrupt, state: molo.Playing, wantAct: actionInterrupt},
+		{name: "unknown is inert", key: keyNone, state: molo.Playing},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newFakePlayer()
-			p.snap = player.Snapshot{State: tc.state, Position: snapPos, Volume: 0.5}
+			p.snap = molo.Snapshot{State: tc.state, Position: snapPos, Volume: 0.5}
 			p.snap.QueueIndex = 0
 			p.snap.QueueLen = 1
 
@@ -144,7 +144,7 @@ func TestHandleKeyDispatch(t *testing.T) {
 // engine rejects a negative target.
 func TestHandleKeySeekNeverGoesNegative(t *testing.T) {
 	p := newFakePlayer()
-	p.snap = player.Snapshot{State: player.Playing, Position: time.Second, Volume: 1}
+	p.snap = molo.Snapshot{State: molo.Playing, Position: time.Second, Volume: 1}
 
 	handleKey(p, keySeekBack)
 
@@ -158,7 +158,7 @@ func TestHandleKeySeekNeverGoesNegative(t *testing.T) {
 // known duration must stop at the end instead of ending playback.
 func TestHandleKeyForwardSeekClampsToDuration(t *testing.T) {
 	p := newFakePlayer()
-	p.snap = player.Snapshot{State: player.Playing, Position: 0, Duration: 2 * time.Second, Volume: 1}
+	p.snap = molo.Snapshot{State: molo.Playing, Position: 0, Duration: 2 * time.Second, Volume: 1}
 
 	handleKey(p, keySeekForward)
 
@@ -169,14 +169,14 @@ func TestHandleKeyForwardSeekClampsToDuration(t *testing.T) {
 
 func TestHandleKeyVolumeClamps(t *testing.T) {
 	p := newFakePlayer()
-	p.snap = player.Snapshot{State: player.Playing, Volume: 0.95}
+	p.snap = molo.Snapshot{State: molo.Playing, Volume: 0.95}
 	handleKey(p, keyVolumeUp)
 	if got := p.Snapshot().Volume; got != 1 {
 		t.Fatalf("volume after up = %v, want 1", got)
 	}
 
 	p2 := newFakePlayer()
-	p2.snap = player.Snapshot{State: player.Playing, Volume: 0.05}
+	p2.snap = molo.Snapshot{State: molo.Playing, Volume: 0.05}
 	handleKey(p2, keyVolumeDown)
 	if got := p2.Snapshot().Volume; got != 0 {
 		t.Fatalf("volume after down = %v, want 0", got)

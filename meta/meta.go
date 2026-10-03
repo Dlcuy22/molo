@@ -13,7 +13,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // ErrNoMatch means every matching resolver failed. It is not returned for an

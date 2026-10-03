@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // numericKind reports whether a declared kind word names a number. It is the

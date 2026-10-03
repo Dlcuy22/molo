@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // fakeEffect is a minimal Effect that records how it was called and can be

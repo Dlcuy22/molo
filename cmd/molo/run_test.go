@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
-// testEnv builds a non-interactive env wired to a fake player. makeRaw is nil,
+// testEnv builds a non-interactive env wired to a fake molo. makeRaw is nil,
 // so a test that wants the interactive path must opt in.
 func testEnv(t *testing.T, p *fakePlayer) (env, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
@@ -29,7 +29,7 @@ func testEnv(t *testing.T, p *fakePlayer) (env, *bytes.Buffer, *bytes.Buffer) {
 		interactive:  false,
 		pollInterval: time.Millisecond,
 		signals:      make(chan os.Signal, 1),
-		newPlayer: func(...player.Option) (player.Player, error) {
+		newPlayer: func(...molo.Option) (molo.Player, error) {
 			return p, nil
 		},
 		probe: nil,
@@ -252,8 +252,8 @@ func TestRunDecoderReachesWithDecoder(t *testing.T) {
 	// device, so this stays headless.
 	var got string
 	e, _, stderr := testEnv(t, p)
-	e.newPlayer = func(opts ...player.Option) (player.Player, error) {
-		applied, err := player.New(opts...)
+	e.newPlayer = func(opts ...molo.Option) (molo.Player, error) {
+		applied, err := molo.New(opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -322,7 +322,7 @@ func codecLine(out, name string) string {
 func TestRunCodecsDoesNotConstructAPlayer(t *testing.T) {
 	built := false
 	e, _, _ := testEnv(t, newFakePlayer())
-	e.newPlayer = func(...player.Option) (player.Player, error) {
+	e.newPlayer = func(...molo.Option) (molo.Player, error) {
 		built = true
 
 		return newFakePlayer(), nil
@@ -390,7 +390,7 @@ func TestRunListDoesNotTouchThePlayer(t *testing.T) {
 
 	built := false
 	e, _, _ := testEnv(t, newFakePlayer())
-	e.newPlayer = func(...player.Option) (player.Player, error) {
+	e.newPlayer = func(...molo.Option) (molo.Player, error) {
 		built = true
 
 		return newFakePlayer(), nil
@@ -480,7 +480,7 @@ func TestDisplayDurationPrefersTheEngineOverThePreflight(t *testing.T) {
 	// audio.
 	preflight := []time.Duration{42 * time.Second}
 
-	snap := player.Snapshot{QueueIndex: 0, Duration: 3 * time.Second}
+	snap := molo.Snapshot{QueueIndex: 0, Duration: 3 * time.Second}
 	if got := displayDuration(snap, preflight, core.DurationProbe); got != 3*time.Second {
 		t.Fatalf("displayDuration = %v, want the engine's 3s", got)
 	}

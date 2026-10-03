@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/playback"
 )
 
 func TestSnapshotDurationIsZeroUntilTheProbeAnswers(t *testing.T) {

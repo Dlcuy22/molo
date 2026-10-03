@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // The effect wraps a compiled plan and exposes it as an ordinary dsp.Effect.

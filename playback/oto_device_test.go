@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 var deviceFormat = core.FrameFormat{Rate: deviceRate, Ch: deviceChannels, Fmt: core.F32}

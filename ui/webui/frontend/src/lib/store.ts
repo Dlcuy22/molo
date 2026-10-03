@@ -7,7 +7,7 @@
 
 import { get, writable } from "svelte/store";
 import { Events } from "@wailsio/runtime";
-import { PlayerService } from "../../bindings/github.com/dlcuy22/player/ui/webui";
+import { PlayerService } from "../../bindings/github.com/dlcuy22/molo/ui/webui";
 import type {
   EffectChainInfo,
   EffectKindInfo,
@@ -18,17 +18,17 @@ import type {
   Snapshot,
   SpectrumConfig,
   YTMResult,
-} from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
-import type { Param } from "../../bindings/github.com/dlcuy22/player/ui/webui/internal/spectrum/models";
+} from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
+import type { Param } from "../../bindings/github.com/dlcuy22/molo/ui/webui/internal/spectrum/models";
 import type { EffectKind, EffectStage } from "./effect-types";
 import { toEffectKind, toEffectStage } from "./effect-adapter";
 
 // The event names mirror the Go constants. They are repeated here rather than
 // imported because the generator does not emit string constants for register
 // calls; the payload types below are the compile-time check that they match.
-const EVENT_SNAPSHOT = "player:snapshot";
-const EVENT_FRAME = "player:spectrum";
-const EVENT_EFFECT_METERS = "player:effect-meters";
+const EVENT_SNAPSHOT = "molo:snapshot";
+const EVENT_FRAME = "molo:spectrum";
+const EVENT_EFFECT_METERS = "molo:effect-meters";
 
 /** Empty is the honest initial state: nothing is playing and nothing is queued. */
 export const EMPTY: Snapshot = {

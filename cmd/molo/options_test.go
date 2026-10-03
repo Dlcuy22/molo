@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
 func TestParseArgsDefaults(t *testing.T) {

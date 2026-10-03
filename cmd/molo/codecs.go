@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // printCodecs writes the registry's codec list as plain lines. Recordan reads

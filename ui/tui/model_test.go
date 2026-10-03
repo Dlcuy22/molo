@@ -6,8 +6,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/meta"
 )
 
 // TestUpdateKeyQuit proves the model turns the quit key into the quit command
@@ -30,7 +30,7 @@ func TestUpdateKeyQuit(t *testing.T) {
 // Update path, not the helper directly.
 func TestUpdateKeyThroughModel(t *testing.T) {
 	f := newFakePlayer()
-	f.snap.State = player.Playing
+	f.snap.State = molo.Playing
 	m := newModel(f)
 
 	for _, k := range []string{"space", "n", "l", "p", "+", "-", "left", "right", "x"} {
@@ -95,10 +95,10 @@ func TestUpdateStateChangedDoesNotClobberTrack(t *testing.T) {
 	m := newModel(f)
 	m.snap = f.snap
 
-	next, _ := m.Update(stateMsg{to: player.Paused})
+	next, _ := m.Update(stateMsg{to: molo.Paused})
 	got := next.(model)
 
-	if got.snap.State != player.Paused {
+	if got.snap.State != molo.Paused {
 		t.Fatalf("state = %v, want paused", got.snap.State)
 	}
 	if got.snap.Path != "/music/a.opus" {

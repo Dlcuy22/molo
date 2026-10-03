@@ -1,16 +1,16 @@
-module github.com/dlcuy22/player/ui/webui
+module github.com/dlcuy22/molo/ui/webui
 
 go 1.27.1
 
 require (
-	github.com/dlcuy22/player v0.0.0
+	github.com/dlcuy22/molo v0.0.0
 	github.com/dlcuy22/ytm-go v1.2.1
 	github.com/tphakala/simd v1.9.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.25
 	golang.org/x/image v0.41.0
 )
 
-replace github.com/dlcuy22/player => ../..
+replace github.com/dlcuy22/molo => ../..
 
 require (
 	github.com/adrg/xdg v0.5.3 // indirect

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // TestTranslateEvent covers every member of the sealed event set: the UI must
@@ -17,32 +17,32 @@ func TestTranslateEvent(t *testing.T) {
 
 	cases := []struct {
 		name string
-		ev   player.Event
+		ev   molo.Event
 		want tea.Msg
 	}{
 		{
 			"state changed",
-			player.StateChanged{From: player.Playing, To: player.Paused},
-			stateMsg{to: player.Paused},
+			molo.StateChanged{From: molo.Playing, To: molo.Paused},
+			stateMsg{to: molo.Paused},
 		},
 		{
 			"track changed",
-			player.TrackChanged{Index: 2, Path: "/music/c.opus"},
+			molo.TrackChanged{Index: 2, Path: "/music/c.opus"},
 			trackMsg{index: 2, path: "/music/c.opus"},
 		},
 		{
 			"seeked",
-			player.Seeked{Position: 42 * time.Second},
+			molo.Seeked{Position: 42 * time.Second},
 			seekedMsg{position: 42 * time.Second},
 		},
 		{
 			"track ended",
-			player.TrackEnded{},
+			molo.TrackEnded{},
 			endedMsg{},
 		},
 		{
 			"failed",
-			player.Failed{Err: boom},
+			molo.Failed{Err: boom},
 			failedMsg{err: boom},
 		},
 	}
@@ -62,7 +62,7 @@ func TestTranslateEvent(t *testing.T) {
 func TestTranslateFailedKeepsError(t *testing.T) {
 	boom := errors.New("device unplugged")
 
-	msg, ok := translateEvent(player.Failed{Err: boom}).(failedMsg)
+	msg, ok := translateEvent(molo.Failed{Err: boom}).(failedMsg)
 	if !ok {
 		t.Fatalf("Failed did not translate to failedMsg")
 	}
@@ -74,8 +74,8 @@ func TestTranslateFailedKeepsError(t *testing.T) {
 // TestWaitForEvent is the bridge itself: one read must produce one translated
 // message, and a closed channel must produce the sentinel that stops the drain.
 func TestWaitForEvent(t *testing.T) {
-	ch := make(chan player.Event, 1)
-	ch <- player.TrackChanged{Index: 1, Path: "b.opus"}
+	ch := make(chan molo.Event, 1)
+	ch <- molo.TrackChanged{Index: 1, Path: "b.opus"}
 
 	got := waitForEvent(ch)()
 	if got != (trackMsg{index: 1, path: "b.opus"}) {

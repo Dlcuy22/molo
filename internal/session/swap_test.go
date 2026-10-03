@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // swapBackendName is a second registered backend, so the session's backend

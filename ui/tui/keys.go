@@ -4,7 +4,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // seekStep and volumeStep are the granularity of the two continuous controls.
@@ -27,11 +27,11 @@ type keyResult struct {
 
 // handleKey maps one key press to a keyResult. It is deliberately free of
 // terminal and ticker concerns so every binding, including illegal input, is
-// unit-testable against a fake player.
+// unit-testable against a fake molo.
 //
 // An unrecognised key is ignored rather than treated as an error: keystrokes
 // arrive from a human, and the UI must not fall over on the first stray press.
-func handleKey(p player.Player, msg tea.KeyPressMsg) keyResult {
+func handleKey(p molo.Player, msg tea.KeyPressMsg) keyResult {
 	switch msg.String() {
 	case "space":
 		togglePause(p)
@@ -77,15 +77,15 @@ func handleKey(p player.Player, msg tea.KeyPressMsg) keyResult {
 
 // togglePause is the space bar. It only ever acts on a state it can act on, so
 // pressing space on an idle player is a no-op rather than an error.
-func togglePause(p player.Player) {
+func togglePause(p molo.Player) {
 	if p == nil {
 		return
 	}
 
 	switch p.Snapshot().State {
-	case player.Playing:
+	case molo.Playing:
 		_ = p.Pause()
-	case player.Paused:
+	case molo.Paused:
 		_ = p.Resume()
 	}
 }
@@ -105,7 +105,7 @@ func clampSeekTarget(base, delta, duration time.Duration) time.Duration {
 	return target
 }
 
-func volumeBy(p player.Player, delta float64) {
+func volumeBy(p molo.Player, delta float64) {
 	if p == nil {
 		return
 	}

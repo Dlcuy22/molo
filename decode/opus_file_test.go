@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // requireLibopusfile skips a test when the native library is unavailable, so a

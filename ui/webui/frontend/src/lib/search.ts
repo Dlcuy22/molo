@@ -3,8 +3,8 @@
 // view. The queue rows carry resolved tags, so matching never crosses the
 // bridge per keystroke.
 
-import type { QueueRow } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
-import type { YTMResult } from "../../bindings/github.com/dlcuy22/player/ui/webui/models";
+import type { QueueRow } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
+import type { YTMResult } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 import { baseName, subtitle } from "./format";
 
 /**

@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // Preview defaults: a 30 second window from the start of the track, with a
@@ -117,7 +117,7 @@ type previewAction struct {
 // heard before a non-zero start-at takes effect.
 type previewer struct {
 	svc    *PlayerService
-	player player.Player
+	player molo.Player
 
 	wake    chan struct{}
 	closing chan struct{}
@@ -161,7 +161,7 @@ func (p *previewer) setPhase(ph previewPhase) {
 	p.phase.Store(uint32(ph))
 }
 
-func newPreviewer(svc *PlayerService, p player.Player) *previewer {
+func newPreviewer(svc *PlayerService, p molo.Player) *previewer {
 	return &previewer{
 		svc:     svc,
 		player:  p,
@@ -181,7 +181,7 @@ func (p *previewer) start() {
 	go p.run()
 }
 
-// close stops the goroutine and releases the second player. It is idempotent
+// close stops the goroutine and releases the second molo. It is idempotent
 // from the caller's side because ServiceShutdown runs once.
 func (p *previewer) close() {
 	close(p.closing)
@@ -330,15 +330,15 @@ func (p *previewer) tick() {
 	switch p.phaseNow() {
 	case phaseLoading:
 		switch snap.State {
-		case player.Playing, player.Paused:
+		case molo.Playing, molo.Paused:
 			p.toPositioning()
-		case player.Stopped, player.Idle:
+		case molo.Stopped, molo.Idle:
 			if time.Since(p.playIssuedAt) > previewLoadTimeout {
 				p.abort()
 			}
 		}
 	case phasePositioning:
-		if snap.State != player.Playing && snap.State != player.Paused {
+		if snap.State != molo.Playing && snap.State != molo.Paused {
 			if time.Since(p.playIssuedAt) > previewLoadTimeout {
 				p.abort()
 			}
@@ -354,7 +354,7 @@ func (p *previewer) tick() {
 		}
 		p.toSounding()
 	case phaseSounding:
-		if snap.State == player.Stopped || snap.State == player.Idle {
+		if snap.State == molo.Stopped || snap.State == molo.Idle {
 			p.windowExhausted()
 
 			return
@@ -416,7 +416,7 @@ func (p *previewer) ensureMainPaused() {
 	if !p.sessionOn || p.svc == nil || p.svc.player == nil {
 		return
 	}
-	if p.svc.player.Snapshot().State == player.Playing {
+	if p.svc.player.Snapshot().State == molo.Playing {
 		_ = p.svc.player.Pause()
 		p.resumeMain = true
 	}
@@ -503,7 +503,7 @@ func (p *previewer) windowExhausted() {
 	p.seekTarget = cfg.StartMs
 	p.seekDeadline = time.Now().Add(previewSeekTimeout)
 
-	if snap := p.player.Snapshot(); snap.State == player.Playing || snap.State == player.Paused {
+	if snap := p.player.Snapshot(); snap.State == molo.Playing || snap.State == molo.Paused {
 		p.setPhase(phasePositioning)
 		_ = p.player.Seek(time.Duration(cfg.StartMs) * time.Millisecond)
 	} else {

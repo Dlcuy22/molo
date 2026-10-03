@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Param } from "../../bindings/github.com/dlcuy22/player/ui/webui/internal/spectrum/models";
+import type { Param } from "../../bindings/github.com/dlcuy22/molo/ui/webui/internal/spectrum/models";
 import { fftLabel } from "./spectrum-fft";
 
 // The dropdown renders fftLabel(c) verbatim, so the label is what tells two

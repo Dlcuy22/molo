@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // TestIntegrationQueuePlaysInOrder drives the fake backend over two real Opus

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/meta"
 )
 
 // pacedReader releases one byte at a time with a delay between them, so the
@@ -43,8 +43,8 @@ func (r *pacedReader) Read(p []byte) (int, error) {
 // terminal session.
 func TestScriptedRender(t *testing.T) {
 	f := newFakePlayer()
-	f.snap = player.Snapshot{
-		State:      player.Playing,
+	f.snap = molo.Snapshot{
+		State:      molo.Playing,
 		Path:       "/music/real_track.opus",
 		Meta:       meta.Meta{Tags: meta.Tags{Title: "Real Track", Artist: "Some Artist", Album: "Some Album"}},
 		Position:   31 * time.Second,
@@ -97,8 +97,8 @@ func TestScriptedRender(t *testing.T) {
 // clearest evidence of what a terminal session shows after each key.
 func TestFrameSequence(t *testing.T) {
 	f := newFakePlayer()
-	f.snap = player.Snapshot{
-		State:      player.Playing,
+	f.snap = molo.Snapshot{
+		State:      molo.Playing,
 		Path:       "/music/real_track.opus",
 		Meta:       meta.Meta{Tags: meta.Tags{Title: "Real Track", Artist: "Some Artist", Album: "Some Album"}},
 		Position:   31 * time.Second,
@@ -156,8 +156,8 @@ func logFrame(t *testing.T, name string, m model) {
 // program above produces mostly escape sequences.
 func TestScriptedRenderSnapshotFrame(t *testing.T) {
 	f := newFakePlayer()
-	f.snap = player.Snapshot{
-		State:      player.Playing,
+	f.snap = molo.Snapshot{
+		State:      molo.Playing,
 		Path:       "/music/real_track.opus",
 		Meta:       meta.Meta{Tags: meta.Tags{Title: "Real Track", Artist: "Some Artist", Album: "Some Album"}},
 		Position:   31 * time.Second,
@@ -192,8 +192,8 @@ func TestScriptedRenderSnapshotFrame(t *testing.T) {
 // direct render call.
 func TestScriptedDebugPanelRender(t *testing.T) {
 	f := newFakePlayer()
-	f.snap = player.Snapshot{
-		State:      player.Playing,
+	f.snap = molo.Snapshot{
+		State:      molo.Playing,
 		Path:       "/music/a.opus",
 		Meta:       meta.Meta{Tags: meta.Tags{Title: "Real Track"}, Source: "embedded-tags"},
 		Position:   0,
@@ -206,9 +206,9 @@ func TestScriptedDebugPanelRender(t *testing.T) {
 	}
 	// Queued before the program starts, so the event bridge drains them in
 	// order: a track, a pause, and a seek with its origin and timing.
-	f.events <- player.TrackChanged{Index: 0, Path: "/music/a.opus"}
-	f.events <- player.StateChanged{From: player.Playing, To: player.Paused}
-	f.events <- player.Seeked{Position: 42 * time.Second, From: 12 * time.Second, Elapsed: 3 * time.Millisecond}
+	f.events <- molo.TrackChanged{Index: 0, Path: "/music/a.opus"}
+	f.events <- molo.StateChanged{From: molo.Playing, To: molo.Paused}
+	f.events <- molo.Seeked{Position: 42 * time.Second, From: 12 * time.Second, Elapsed: 3 * time.Millisecond}
 
 	in := &pacedReader{data: []byte("q"), delay: 900 * time.Millisecond}
 	var out bytes.Buffer

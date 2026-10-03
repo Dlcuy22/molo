@@ -55,7 +55,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // Matroska/WebM element IDs, raw (marker bit kept, RFC 8794 section 5).

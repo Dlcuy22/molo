@@ -1,9 +1,9 @@
-// Package tui is a Bubble Tea model for the player engine. It draws the now
+// Package tui is a Bubble Tea model for the molo engine. It draws the now
 // playing panel, the progress bar and the queue, and turns keystrokes into
 // facade commands.
 //
 // The model is pure: Update is a function of the current model and one message,
-// it never touches a terminal, and the engine behind it is the player.Player
+// it never touches a terminal, and the engine behind it is the molo.Player
 // interface. That is what lets the whole UI be driven from a test with a fake
 // engine, and it is why the only engine package imported here is the facade.
 package tui
@@ -16,8 +16,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // tickInterval is the position refresh period. 4 Hz is smooth enough for a
@@ -77,18 +77,18 @@ var (
 // model is the whole UI state. Every field is a value the test can inspect, and
 // none of them is an engine handle except the Player itself.
 type model struct {
-	p player.Player
+	p molo.Player
 
 	width, height int
 	frame         int
 
-	snap   player.Snapshot
+	snap   molo.Snapshot
 	queue  []string
 	titles []string
 
-	events     <-chan player.Event
+	events     <-chan molo.Event
 	eventsDone bool
-	tap        player.Tap
+	tap        molo.Tap
 
 	meter meter
 	err   error
@@ -143,19 +143,19 @@ type model struct {
 
 // New builds the UI model over a Player. It is the entry point the command
 // uses; the program is run by the caller.
-func New(p player.Player) tea.Model { return newModel(p) }
+func New(p molo.Player) tea.Model { return newModel(p) }
 
 // NewWithWaveform is New plus a waveform. The caller supplies the producer, so
 // the model stays decoupled from the analysis package and a test can stub the
 // decode.
-func NewWithWaveform(p player.Player, fn WaveFunc) tea.Model {
+func NewWithWaveform(p molo.Player, fn WaveFunc) tea.Model {
 	m := newModel(p)
 	m.waveFn = fn
 
 	return m
 }
 
-func newModel(p player.Player) model {
+func newModel(p molo.Player) model {
 	m := model{
 		p:       p,
 		width:   defaultWidth,
@@ -271,7 +271,7 @@ func (m model) flushSeek(seq uint64) (tea.Model, tea.Cmd) {
 
 // readQueue asks the engine for the current queue. The call is cheap, but it is
 // still a Cmd: Update must never assume an engine call is instant.
-func readQueue(p player.Player) tea.Cmd {
+func readQueue(p molo.Player) tea.Cmd {
 	if p == nil {
 		return nil
 	}
@@ -288,7 +288,7 @@ func readQueue(p player.Player) tea.Cmd {
 // 50 ms while the device publishes in ~100 ms chunks, so a single read would
 // often return nothing and the meter would strobe; draining also keeps the
 // reader from skipping the frames a partial read would leave behind.
-func readTap(t player.Tap) tea.Cmd {
+func readTap(t molo.Tap) tea.Cmd {
 	if t == nil {
 		return nil
 	}
@@ -582,7 +582,7 @@ func (m model) renderBody() string {
 	b.WriteString(titleStyle.Render(clip(title, width)))
 	b.WriteString("\n")
 
-	if m.snap.State != player.Idle {
+	if m.snap.State != molo.Idle {
 		if line := trackSubtitle(m.snap.Meta.Tags.Artist, m.snap.Meta.Tags.Album); line != "" {
 			b.WriteString(dimStyle.Render(clip(line, width)))
 			b.WriteString("\n")

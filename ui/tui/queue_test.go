@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/molo/meta"
 )
 
 // ansiRE matches SGR colour sequences so a test can assert on the text a

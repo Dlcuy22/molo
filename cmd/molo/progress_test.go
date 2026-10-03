@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/meta"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/meta"
 )
 
 func TestFormatClock(t *testing.T) {
@@ -34,18 +34,18 @@ func TestFormatClock(t *testing.T) {
 func TestFormatProgressStates(t *testing.T) {
 	cases := []struct {
 		name string
-		snap player.Snapshot
+		snap molo.Snapshot
 		want string
 	}{
 		{
 			name: "idle",
-			snap: player.Snapshot{State: player.Idle},
+			snap: molo.Snapshot{State: molo.Idle},
 			want: "idle",
 		},
 		{
 			name: "playing known duration",
-			snap: player.Snapshot{
-				State:      player.Playing,
+			snap: molo.Snapshot{
+				State:      molo.Playing,
 				Path:       "/music/short_stereo.opus",
 				Position:   1500 * time.Millisecond,
 				Duration:   2 * time.Second,
@@ -57,8 +57,8 @@ func TestFormatProgressStates(t *testing.T) {
 		},
 		{
 			name: "playing unknown duration is indeterminate",
-			snap: player.Snapshot{
-				State:      player.Playing,
+			snap: molo.Snapshot{
+				State:      molo.Playing,
 				Path:       "/music/a.opus",
 				Position:   1500 * time.Millisecond,
 				Volume:     1,
@@ -69,8 +69,8 @@ func TestFormatProgressStates(t *testing.T) {
 		},
 		{
 			name: "paused",
-			snap: player.Snapshot{
-				State:      player.Paused,
+			snap: molo.Snapshot{
+				State:      molo.Paused,
 				Path:       "/music/a.opus",
 				Position:   0,
 				Duration:   2 * time.Second,
@@ -82,8 +82,8 @@ func TestFormatProgressStates(t *testing.T) {
 		},
 		{
 			name: "stopped",
-			snap: player.Snapshot{
-				State:      player.Stopped,
+			snap: molo.Snapshot{
+				State:      molo.Stopped,
 				Path:       "/music/a.opus",
 				Position:   2 * time.Second,
 				Duration:   2 * time.Second,
@@ -95,8 +95,8 @@ func TestFormatProgressStates(t *testing.T) {
 		},
 		{
 			name: "title beats file name",
-			snap: player.Snapshot{
-				State:    player.Playing,
+			snap: molo.Snapshot{
+				State:    molo.Playing,
 				Path:     "/music/track01.opus",
 				Meta:     meta.Meta{Tags: meta.Tags{Title: "Real Song"}},
 				Duration: time.Minute,
@@ -106,8 +106,8 @@ func TestFormatProgressStates(t *testing.T) {
 		},
 		{
 			name: "position past duration clamps",
-			snap: player.Snapshot{
-				State:    player.Playing,
+			snap: molo.Snapshot{
+				State:    molo.Playing,
 				Path:     "/music/a.opus",
 				Position: 5 * time.Second,
 				Duration: 2 * time.Second,
@@ -132,8 +132,8 @@ func TestFormatProgressStates(t *testing.T) {
 func TestFormatProgressUnknownDurationHasNoPercent(t *testing.T) {
 	const want = "playing  0:03 / --:--  vol 100%  a.opus"
 
-	line := formatProgress(player.Snapshot{
-		State:    player.Playing,
+	line := formatProgress(molo.Snapshot{
+		State:    molo.Playing,
 		Path:     "/music/a.opus",
 		Position: 3 * time.Second,
 		Volume:   1,
@@ -155,7 +155,7 @@ func TestFormatProgressUnknownDurationHasNoPercent(t *testing.T) {
 }
 
 func TestFormatProgressZeroVolume(t *testing.T) {
-	line := formatProgress(player.Snapshot{State: player.Playing, Path: "a.opus", Volume: 0})
+	line := formatProgress(molo.Snapshot{State: molo.Playing, Path: "a.opus", Volume: 0})
 	if !strings.Contains(line, "vol   0%") {
 		t.Fatalf("zero volume not padded: %q", line)
 	}

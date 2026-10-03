@@ -31,12 +31,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/provider"
-	"github.com/dlcuy22/player/stream"
-	"github.com/dlcuy22/player/ui/webui/internal/cover"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/provider"
+	"github.com/dlcuy22/molo/stream"
+	"github.com/dlcuy22/molo/ui/webui/internal/cover"
 	ytm "github.com/dlcuy22/ytm-go"
 )
 

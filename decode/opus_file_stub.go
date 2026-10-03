@@ -10,7 +10,7 @@ import (
 	"errors"
 	"runtime"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 var errLibopusfileUnsupported = errors.New("decode: libopusfile is not available on " + runtime.GOOS)

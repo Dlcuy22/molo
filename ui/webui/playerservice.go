@@ -1,5 +1,5 @@
-// Package main is the Wails v3 desktop front end for the player engine. The Go
-// side is a thin adapter: it owns one player.Player, turns its sealed event
+// Package main is the Wails v3 desktop front end for the molo engine. The Go
+// side is a thin adapter: it owns one molo.Player, turns its sealed event
 // stream into Wails events, and exposes the facade's cheap commands as bound
 // methods. No audio logic lives here; only the UI this package decides.
 package main
@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/provider"
-	"github.com/dlcuy22/player/ui/webui/internal/cover"
-	"github.com/dlcuy22/player/ui/webui/internal/spectrum"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/provider"
+	"github.com/dlcuy22/molo/ui/webui/internal/cover"
+	"github.com/dlcuy22/molo/ui/webui/internal/spectrum"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -32,12 +32,12 @@ const (
 	// on the display tick. It is the whole visible state in one payload,
 	// including the last error, so the UI has one subscription to reason about
 	// instead of one per field.
-	eventSnapshot = "player:snapshot"
+	eventSnapshot = "molo:snapshot"
 	// eventFrame carries one spectrum frame from the visualizer goroutine.
-	eventFrame = "player:spectrum"
+	eventFrame = "molo:spectrum"
 	// eventEffectMeters carries the lean effect meters on their own faster tick,
 	// so a gain-reduction needle moves without the full chain snapshot.
-	eventEffectMeters = "player:effect-meters"
+	eventEffectMeters = "molo:effect-meters"
 )
 
 // spectrumInterval is the visualizer analysis period: ~60 Hz, matching
@@ -68,7 +68,7 @@ const effectMeterInterval = 16 * time.Millisecond
 // mutable state is guarded. The engine itself is safe for concurrent use; what
 // needs protecting here is the UI's assembled view of it.
 type PlayerService struct {
-	player player.Player
+	player molo.Player
 
 	mu        sync.Mutex
 	lastError string
@@ -76,8 +76,8 @@ type PlayerService struct {
 	// the 4 Hz snapshot does not re-walk an unchanged queue.
 	indexedQueue []string
 
-	events  <-chan player.Event
-	tap     player.Tap
+	events  <-chan molo.Event
+	tap     molo.Tap
 	closing chan struct{}
 	wg      sync.WaitGroup
 
@@ -154,12 +154,12 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// logged and skipped, never fatal: a bad user script must not stop playback.
 	loadScripts()
 
-	p, err := player.New(
-		player.WithProviders(s.ytmProv, provider.LocalAudio{}),
+	p, err := molo.New(
+		molo.WithProviders(s.ytmProv, provider.LocalAudio{}),
 		// The same switch the provider was built with: the engine consumes the
 		// Upgrade only when this is set, and the provider offers it only when
 		// it is, so the two cannot drift.
-		player.WithExperimental(player.Experimental{SourceUpgrade: ytmSeamlessSwap}),
+		molo.WithExperimental(molo.Experimental{SourceUpgrade: ytmSeamlessSwap}),
 	)
 	if err != nil {
 		return fmt.Errorf("build player: %w", err)
@@ -174,7 +174,7 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// The preview player is a second instance over the same process-wide oto
 	// context, which oto mixes. It is built here so a failure to construct it
 	// surfaces at startup rather than on the first Ctrl+Alt+P.
-	pp, err := player.New()
+	pp, err := molo.New()
 	if err != nil {
 		return fmt.Errorf("build preview player: %w", err)
 	}
@@ -234,7 +234,7 @@ func (s *PlayerService) pumpEvents() {
 			if !ok {
 				return
 			}
-			if failed, isFail := ev.(player.Failed); isFail {
+			if failed, isFail := ev.(molo.Failed); isFail {
 				// The snapshot carries the error, so the failure needs no event
 				// of its own; recording it here keeps it until a command clears
 				// it.
@@ -706,7 +706,7 @@ func (s *PlayerService) InsertNextYTM(videoID string) error {
 
 	return s.command(func() error {
 		snap := s.player.Snapshot()
-		if snap.QueueIndex >= 0 && (snap.State == player.Playing || snap.State == player.Paused) {
+		if snap.QueueIndex >= 0 && (snap.State == molo.Playing || snap.State == molo.Paused) {
 			return s.player.InsertQueue(snap.QueueIndex+1, []string{ref})
 		}
 
@@ -918,9 +918,9 @@ func (s *PlayerService) TogglePause() error {
 	return s.command(func() error {
 		snap := s.player.Snapshot()
 		switch snap.State {
-		case player.Playing:
+		case molo.Playing:
 			return s.player.Pause()
-		case player.Paused:
+		case molo.Paused:
 			return s.player.Resume()
 		default:
 			if snap.QueueIndex >= 0 {
@@ -957,7 +957,7 @@ func (s *PlayerService) SeekTo(ms int64) error {
 // reopens it in place, which the UI confirms with the Swapped event.
 func (s *PlayerService) SetCodec(name string) error {
 	return s.command(func() error {
-		if err := player.ValidateDecoder(name); err != nil {
+		if err := molo.ValidateDecoder(name); err != nil {
 			return err
 		}
 
@@ -968,7 +968,7 @@ func (s *PlayerService) SetCodec(name string) error {
 // SetBackend changes the playback backend, reopening the device.
 func (s *PlayerService) SetBackend(name string) error {
 	return s.command(func() error {
-		if err := player.ValidateBackend(name); err != nil {
+		if err := molo.ValidateBackend(name); err != nil {
 			return err
 		}
 
@@ -1094,7 +1094,7 @@ func (s *PlayerService) commandID(fn func() (string, error)) (string, error) {
 // both front ends accept the same input.
 func (s *PlayerService) expand(paths []string) ([]string, error) {
 	supported := make(map[string]bool)
-	for _, ext := range player.SupportedExtensions() {
+	for _, ext := range molo.SupportedExtensions() {
 		supported[strings.ToLower(ext)] = true
 	}
 
@@ -1152,13 +1152,13 @@ func (s *PlayerService) emit(name string, data any) {
 
 // stateName maps the sealed state to the lowercase string the frontend switches
 // on, so the UI never depends on the engine's numeric ordering.
-func stateName(st player.State) string {
+func stateName(st molo.State) string {
 	switch st {
-	case player.Playing:
+	case molo.Playing:
 		return "playing"
-	case player.Paused:
+	case molo.Paused:
 		return "paused"
-	case player.Stopped:
+	case molo.Stopped:
 		return "stopped"
 	default:
 		return "idle"
@@ -1214,7 +1214,7 @@ func ytmQueueRow(i int, ref string, active int, index *ytmIndex) QueueRow {
 // registry family into the friendly name the way the TUI does, so "opus-pion"
 // reads "Opus Portable" rather than a bare registry key.
 func codecOptions() []CodecOption {
-	codecs := player.Codecs()
+	codecs := molo.Codecs()
 	out := make([]CodecOption, 0, len(codecs)+1)
 	out = append(out, CodecOption{Name: "", Label: "Auto"})
 	for _, c := range codecs {
@@ -1228,7 +1228,7 @@ func codecOptions() []CodecOption {
 // user-facing list, so a dev-only sink such as "fake" never appears in the
 // Output dropdown even though the engine can still open it by name.
 func backendOptions() []string {
-	return append([]string{""}, player.UserBackends()...)
+	return append([]string{""}, molo.UserBackends()...)
 }
 
 // collectDir walks root for playable files, sorted so the queue is

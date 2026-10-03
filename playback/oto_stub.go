@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 const otoBackendName = "oto"

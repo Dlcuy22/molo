@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -93,7 +93,7 @@ type EffectMetersInfo struct {
 
 // effects returns the editor surface, or an error when the engine was not built
 // yet. It mirrors the nil checks the other bound methods use.
-func (s *PlayerService) effects() (player.Effects, error) {
+func (s *PlayerService) effects() (molo.Effects, error) {
 	if s.player == nil {
 		return nil, fmt.Errorf("no player")
 	}
@@ -235,7 +235,7 @@ func (s *PlayerService) EffectWindowOpen() bool {
 }
 
 // effectStageInfo maps one engine stage to its wire shape.
-func effectStageInfo(st player.EffectStage) EffectStageInfo {
+func effectStageInfo(st molo.EffectStage) EffectStageInfo {
 	schema := make([]EffectParamInfo, 0, len(st.Schema))
 	for _, p := range st.Schema {
 		schema = append(schema, effectParamInfo(p))

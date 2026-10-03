@@ -17,7 +17,7 @@ package decode
 import (
 	"math"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // pcmConverter turns interleaved integer PCM from a codec library into

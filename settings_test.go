@@ -1,4 +1,4 @@
-package player_test
+package molo_test
 
 import (
 	"errors"
@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // newTestPlayer builds a facade backed by the passive device registered in this
 // package, so none of these tests touch an audio server.
-func newTestPlayer(t *testing.T, opts ...player.Option) player.Player {
+func newTestPlayer(t *testing.T, opts ...molo.Option) molo.Player {
 	t.Helper()
 
-	all := append([]player.Option{player.WithBackend("facade-test")}, opts...)
-	p, err := player.New(all...)
+	all := append([]molo.Option{molo.WithBackend("facade-test")}, opts...)
+	p, err := molo.New(all...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -29,7 +29,7 @@ func newTestPlayer(t *testing.T, opts ...player.Option) player.Player {
 // settingsEqual compares two Settings. Settings carries a Pipeline, whose
 // stage slices make the struct non-comparable, so a field-by-field comparison
 // is the only way to tell whether a rejected update really changed nothing.
-func settingsEqual(a, b player.Settings) bool {
+func settingsEqual(a, b molo.Settings) bool {
 	return a.Volume == b.Volume &&
 		a.Decoder == b.Decoder &&
 		a.Backend == b.Backend &&
@@ -42,7 +42,7 @@ func settingsEqual(a, b player.Settings) bool {
 // is in force before anything plays.
 func TestWithDecoderIsReflectedInSettings(t *testing.T) {
 	pipeline := dsp.Pipeline{Post: []dsp.Spec{{Kind: "crossfeed"}}}
-	p := newTestPlayer(t, player.WithDecoder("opus-pion"), player.WithPipeline(pipeline))
+	p := newTestPlayer(t, molo.WithDecoder("opus-pion"), molo.WithPipeline(pipeline))
 
 	if got := p.Settings().Decoder; got != "opus-pion" {
 		t.Fatalf("Settings().Decoder = %q, want opus-pion", got)
@@ -57,7 +57,7 @@ func TestWithDecoderIsReflectedInSettings(t *testing.T) {
 // the chain in force untouched.
 func TestApplyPipelineRejectsAnUnknownKindAndChangesNothing(t *testing.T) {
 	good := dsp.Pipeline{Post: []dsp.Spec{{Kind: "crossfeed"}}}
-	p := newTestPlayer(t, player.WithPipeline(good))
+	p := newTestPlayer(t, molo.WithPipeline(good))
 
 	err := p.ApplyPipeline(dsp.Pipeline{Post: []dsp.Spec{{Kind: "not-a-kind"}}})
 	if err == nil {
@@ -89,7 +89,7 @@ func TestApplyPipelineAcceptsAValidChain(t *testing.T) {
 	for {
 		select {
 		case ev := <-p.Events():
-			if changed, ok := ev.(player.PipelineChanged); ok {
+			if changed, ok := ev.(molo.PipelineChanged); ok {
 				if changed.Stages != 1 {
 					t.Fatalf("PipelineChanged.Stages = %d, want 1", changed.Stages)
 				}
@@ -157,13 +157,13 @@ func TestApplySettingsAcceptsAKnownDecoder(t *testing.T) {
 }
 
 func TestApplySettingsRejectsAnUnknownDecoderAndChangesNothing(t *testing.T) {
-	p := newTestPlayer(t, player.WithDecoder("opus-pion"))
+	p := newTestPlayer(t, molo.WithDecoder("opus-pion"))
 	before := p.Settings()
 
 	next := before
 	next.Decoder = "not-a-codec"
 	err := p.ApplySettings(next)
-	if !errors.Is(err, player.ErrInvalidSetting) {
+	if !errors.Is(err, molo.ErrInvalidSetting) {
 		t.Fatalf("ApplySettings error = %v, want ErrInvalidSetting", err)
 	}
 	if got := p.Settings(); !settingsEqual(got, before) {
@@ -177,7 +177,7 @@ func TestApplySettingsRejectsAnUnknownBackend(t *testing.T) {
 
 	next := before
 	next.Backend = "not-a-backend"
-	if err := p.ApplySettings(next); !errors.Is(err, player.ErrInvalidSetting) {
+	if err := p.ApplySettings(next); !errors.Is(err, molo.ErrInvalidSetting) {
 		t.Fatalf("ApplySettings error = %v, want ErrInvalidSetting", err)
 	}
 	if got := p.Settings(); !settingsEqual(got, before) {
@@ -191,7 +191,7 @@ func TestApplySettingsRejectsAnOutOfRangeVolume(t *testing.T) {
 
 	next := before
 	next.Volume = 2.5
-	if err := p.ApplySettings(next); !errors.Is(err, player.ErrInvalidSetting) {
+	if err := p.ApplySettings(next); !errors.Is(err, molo.ErrInvalidSetting) {
 		t.Fatalf("ApplySettings error = %v, want ErrInvalidSetting", err)
 	}
 	if got := p.Settings(); !settingsEqual(got, before) {
@@ -205,7 +205,7 @@ func TestApplySettingsRejectsAnUnknownProbeMode(t *testing.T) {
 
 	next := before
 	next.ProbeMode = core.DurationMode(99)
-	if err := p.ApplySettings(next); !errors.Is(err, player.ErrInvalidSetting) {
+	if err := p.ApplySettings(next); !errors.Is(err, molo.ErrInvalidSetting) {
 		t.Fatalf("ApplySettings error = %v, want ErrInvalidSetting", err)
 	}
 	if got := p.Settings(); !settingsEqual(got, before) {
@@ -216,7 +216,7 @@ func TestApplySettingsRejectsAnUnknownProbeMode(t *testing.T) {
 // TestApplySettingsVolumeTakesEffectImmediately pins the one field that is not
 // deferred: the gain is post-ring state, so it applies to the running audio.
 func TestApplySettingsVolumeTakesEffectImmediately(t *testing.T) {
-	p := newTestPlayer(t, player.WithVolume(1))
+	p := newTestPlayer(t, molo.WithVolume(1))
 
 	next := p.Settings()
 	next.Volume = 0.25
@@ -237,7 +237,7 @@ func TestApplySettingsVolumeTakesEffectImmediately(t *testing.T) {
 // the live-swap commands and validates their names synchronously, matching the
 // non-blocking command contract.
 func TestFacadeSwapDecoderAndBackendRejectBadNames(t *testing.T) {
-	p := newTestPlayer(t, player.WithDecoder("opus-pion"))
+	p := newTestPlayer(t, molo.WithDecoder("opus-pion"))
 
 	if err := p.SwapDecoder("not-a-codec"); err == nil {
 		t.Fatal("SwapDecoder(not-a-codec) returned nil, want a validation error")
@@ -290,11 +290,11 @@ func TestFacadeSwapDecoderDoesNotBlock(t *testing.T) {
 // completion event with the documented fields, so a UI can type-switch on it
 // without importing internal/session.
 func TestFacadeSwappedEventIsReExported(t *testing.T) {
-	var ev player.Event = player.Swapped{Kind: "backend", Name: "oto", Elapsed: time.Millisecond}
+	var ev molo.Event = molo.Swapped{Kind: "backend", Name: "oto", Elapsed: time.Millisecond}
 
-	s, ok := ev.(player.Swapped)
+	s, ok := ev.(molo.Swapped)
 	if !ok {
-		t.Fatalf("player.Swapped did not satisfy player.Event: %T", ev)
+		t.Fatalf("molo.Swapped did not satisfy molo.Event: %T", ev)
 	}
 	if s.Kind != "backend" || s.Name != "oto" || s.Elapsed != time.Millisecond {
 		t.Fatalf("Swapped = %+v, want the constructed value", s)

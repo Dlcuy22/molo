@@ -1,14 +1,14 @@
-module github.com/dlcuy22/player/ui/tui
+module github.com/dlcuy22/molo/ui/tui
 
 go 1.27.1
 
 require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/dlcuy22/player v0.0.0
+	github.com/dlcuy22/molo v0.0.0
 )
 
-replace github.com/dlcuy22/player => ../..
+replace github.com/dlcuy22/molo => ../..
 
 require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect

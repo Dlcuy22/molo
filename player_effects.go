@@ -1,7 +1,7 @@
-package player
+package molo
 
 import (
-	"github.com/dlcuy22/player/internal/session"
+	"github.com/dlcuy22/molo/internal/session"
 )
 
 // The editor errors are re-exported so a UI outside the module can tell a

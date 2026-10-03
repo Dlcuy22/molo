@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // seekGate is the latch a gated decoder parks a reposition on. A test uses it

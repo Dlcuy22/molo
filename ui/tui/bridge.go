@@ -4,7 +4,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // The messages the model reacts to. Engine events are translated into plain
@@ -15,7 +15,7 @@ type (
 	tickMsg time.Time
 
 	// stateMsg carries an accepted state transition.
-	stateMsg struct{ to player.State }
+	stateMsg struct{ to molo.State }
 
 	// trackMsg announces that a new track became current.
 	trackMsg struct {
@@ -83,7 +83,7 @@ type (
 //
 // Update re-issues it after every event, so the bridge keeps draining without a
 // dedicated goroutine.
-func waitForEvent(ch <-chan player.Event) tea.Cmd {
+func waitForEvent(ch <-chan molo.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
@@ -97,17 +97,17 @@ func waitForEvent(ch <-chan player.Event) tea.Cmd {
 // translateEvent maps the sealed event set to UI messages. The default arm is
 // unreachable for the current engine, because the interface cannot be
 // implemented outside internal/session.
-func translateEvent(ev player.Event) tea.Msg {
+func translateEvent(ev molo.Event) tea.Msg {
 	switch ev := ev.(type) {
-	case player.StateChanged:
+	case molo.StateChanged:
 		return stateMsg{to: ev.To}
-	case player.TrackChanged:
+	case molo.TrackChanged:
 		return trackMsg{index: ev.Index, path: ev.Path}
-	case player.Seeked:
+	case molo.Seeked:
 		return seekedMsg{position: ev.Position, from: ev.From, elapsed: ev.Elapsed}
-	case player.TrackEnded:
+	case molo.TrackEnded:
 		return endedMsg{}
-	case player.Failed:
+	case molo.Failed:
 		return failedMsg{err: ev.Err}
 	default:
 		return nil

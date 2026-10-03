@@ -6,7 +6,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // factory is what Load returns: a dsp.Factory that builds one scripted effect.

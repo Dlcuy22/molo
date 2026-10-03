@@ -27,7 +27,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 	"github.com/tphakala/go-aac/pcm"
 )
 

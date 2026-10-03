@@ -30,7 +30,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 	wav "github.com/tphakala/go-wav"
 	"github.com/tphakala/go-wav/pcm"
 )

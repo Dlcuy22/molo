@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/ui/webui/internal/cover"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/ui/webui/internal/cover"
 )
 
 // TestExpandSkipsUnplayableFiles is the queue-building contract: a folder yields
@@ -27,7 +27,7 @@ func TestExpandSkipsUnplayableFiles(t *testing.T) {
 	// One playable file per extension the engine advertises, plus files that
 	// must be skipped: cover art and a playlist are what an album folder holds.
 	var want []string
-	for _, ext := range player.SupportedExtensions() {
+	for _, ext := range molo.SupportedExtensions() {
 		want = append(want, write("track"+ext))
 	}
 	write("cover.jpg")
@@ -80,13 +80,13 @@ func TestExpandRejectsMissingPath(t *testing.T) {
 // TestStateNameCoversEveryState pins the wire strings the frontend switches on.
 func TestStateNameCoversEveryState(t *testing.T) {
 	cases := []struct {
-		state player.State
+		state molo.State
 		want  string
 	}{
-		{player.Idle, "idle"},
-		{player.Playing, "playing"},
-		{player.Paused, "paused"},
-		{player.Stopped, "stopped"},
+		{molo.Idle, "idle"},
+		{molo.Playing, "playing"},
+		{molo.Paused, "paused"},
+		{molo.Stopped, "stopped"},
 	}
 	for _, c := range cases {
 		if got := stateName(c.state); got != c.want {
@@ -142,9 +142,9 @@ func TestPositionIntervalIsFourHz(t *testing.T) {
 // through to the wrong track's bytes.
 func TestCoverIsEmptyWithoutArtwork(t *testing.T) {
 	svc := newPlayerService()
-	p, err := player.New()
+	p, err := molo.New()
 	if err != nil {
-		t.Fatalf("player.New: %v", err)
+		t.Fatalf("molo.New: %v", err)
 	}
 	defer p.Close()
 	svc.player = p

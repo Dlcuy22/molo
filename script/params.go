@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // paramDecl is one parameter a Lua script declared, in the shape the Lua front

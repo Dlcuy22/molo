@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 func writeFile(t *testing.T, dir, name string, body []byte) string {

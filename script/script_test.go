@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // The tests print numbers and assert on them; nothing here opens a device. A

@@ -13,8 +13,8 @@ import (
 	"io"
 	"math"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
 )
 
 // ErrBuckets means Options.Buckets was not positive. It is a caller bug rather

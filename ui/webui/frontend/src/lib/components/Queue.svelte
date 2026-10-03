@@ -2,7 +2,7 @@
   import { MusicNote } from "phosphor-svelte";
   import { commands } from "../store";
   import { baseName, isRemoteRef } from "../format";
-  import type { QueueRow } from "../../../bindings/github.com/dlcuy22/player/ui/webui/models";
+  import type { QueueRow } from "../../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 
   let { queue, queueIdx }: { queue: QueueRow[]; queueIdx: number } = $props();
 

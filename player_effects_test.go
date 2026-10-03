@@ -1,4 +1,4 @@
-package player_test
+package molo_test
 
 import (
 	"errors"
@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // newEffectsPlayer builds a facade over the "fake" playback backend, so the
 // editor tests run the real engine without opening a sound card. The fake paces
 // at real time, so a test that wants meters waits rather than assuming.
-func newEffectsPlayer(t *testing.T, opts ...player.Option) player.Player {
+func newEffectsPlayer(t *testing.T, opts ...molo.Option) molo.Player {
 	t.Helper()
 
-	all := append([]player.Option{player.WithBackend("fake")}, opts...)
-	p, err := player.New(all...)
+	all := append([]molo.Option{molo.WithBackend("fake")}, opts...)
+	p, err := molo.New(all...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -27,14 +27,14 @@ func newEffectsPlayer(t *testing.T, opts ...player.Option) player.Player {
 }
 
 // effectsView narrows a Player to the Effects surface the way a UI does.
-func effectsView(t *testing.T, p player.Player) player.Effects {
+func effectsView(t *testing.T, p molo.Player) molo.Effects {
 	t.Helper()
 
 	return p.Effects()
 }
 
 // stageIDs names the stages in order, for a readable failure.
-func stageIDs(stages []player.EffectStage) []string {
+func stageIDs(stages []molo.EffectStage) []string {
 	ids := make([]string, 0, len(stages))
 	for _, st := range stages {
 		ids = append(ids, st.ID)
@@ -199,7 +199,7 @@ func TestEffectsMetersAreFinite(t *testing.T) {
 
 // waitChainLen polls until the chain has the expected stage count, because the
 // install is enqueued to the control loop and is not synchronous.
-func waitChainLen(t *testing.T, e player.Effects, want int) {
+func waitChainLen(t *testing.T, e molo.Effects, want int) {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -215,7 +215,7 @@ func waitChainLen(t *testing.T, e player.Effects, want int) {
 // waitStageLive polls until the stage is paired with a live effect, which is
 // what makes a parameter change safe: a non-nil Meters map only comes from an
 // installed effect, so it is the signal that the enqueued install has landed.
-func waitStageLive(t *testing.T, e player.Effects, id string) {
+func waitStageLive(t *testing.T, e molo.Effects, id string) {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -231,7 +231,7 @@ func waitStageLive(t *testing.T, e player.Effects, id string) {
 }
 
 // stageByID finds one stage or fails.
-func stageByID(t *testing.T, e player.Effects, id string) player.EffectStage {
+func stageByID(t *testing.T, e molo.Effects, id string) molo.EffectStage {
 	t.Helper()
 
 	for _, st := range e.EffectChain().Stages {
@@ -241,5 +241,5 @@ func stageByID(t *testing.T, e player.Effects, id string) player.EffectStage {
 	}
 	t.Fatalf("stage %s missing from %v", id, stageIDs(e.EffectChain().Stages))
 
-	return player.EffectStage{}
+	return molo.EffectStage{}
 }

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo/playback"
 )
 
 func TestDeviceIsReusedAcrossATrackChange(t *testing.T) {

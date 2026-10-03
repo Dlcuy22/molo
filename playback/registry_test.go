@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // stubDevice is a second backend that exists only in this test. It proves a

@@ -1,8 +1,8 @@
 package playback_test
 
 import (
-	"github.com/dlcuy22/player/playback"
-	"github.com/dlcuy22/player/stream"
+	"github.com/dlcuy22/molo/playback"
+	"github.com/dlcuy22/molo/stream"
 )
 
 // The streamer is the only Provider in the tree today. Pinning the structural

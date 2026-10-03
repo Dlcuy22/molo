@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/decode"
+	"github.com/dlcuy22/molo/decode"
 )
 
 func TestWaveformCacheHitSkipsDecode(t *testing.T) {

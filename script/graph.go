@@ -17,7 +17,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // Resource limits. A script is untrusted input, so the compiler bounds what it

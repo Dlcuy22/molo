@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // TestScriptedEffectRunsThroughTheEditor is the no-audio end-to-end for the
@@ -18,7 +18,7 @@ import (
 func TestScriptedEffectRunsThroughTheEditor(t *testing.T) {
 	loadScripts()
 
-	p, err := player.New(player.WithBackend("fake"))
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("build player: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestScriptedEffectRunsThroughTheEditor(t *testing.T) {
 	// Run to the end, then read the meters. The effect measures in and out, so
 	// a non-floor reading proves audio crossed it.
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && p.Snapshot().State != player.Stopped {
+	for time.Now().Before(deadline) && p.Snapshot().State != molo.Stopped {
 		time.Sleep(25 * time.Millisecond)
 	}
 
@@ -103,7 +103,7 @@ func TestScriptedEffectRunsThroughTheEditor(t *testing.T) {
 func TestEq20IsExposedThroughTheEditor(t *testing.T) {
 	loadScripts()
 
-	p, err := player.New(player.WithBackend("fake"))
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("build player: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestEq20IsExposedThroughTheEditor(t *testing.T) {
 func TestEffectWindowBridgeMapsTheChain(t *testing.T) {
 	loadScripts()
 
-	p, err := player.New(player.WithBackend("fake"))
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("build player: %v", err)
 	}
@@ -225,7 +225,7 @@ func hasParamKey(schema []dsp.Param, key string) bool {
 func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
 	loadScripts()
 
-	p, err := player.New(player.WithBackend("fake"))
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("build player: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
 	var grLive float32
 	var sawGR bool
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && p.Snapshot().State != player.Stopped {
+	for time.Now().Before(deadline) && p.Snapshot().State != molo.Stopped {
 		if chain, err := svc.EffectChain(); err == nil && len(chain.Stages) == 1 {
 			if v, ok := chain.Stages[0].Meters["gr"]; ok && v < 0 {
 				grLive, sawGR = v, true

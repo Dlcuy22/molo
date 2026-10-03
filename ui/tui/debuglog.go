@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // maxDebugLines bounds the in-memory log. A session can run for hours, and the
@@ -45,7 +45,7 @@ func formatMetaLine(source string) string {
 	return "meta     " + source
 }
 
-func formatStateLine(state player.State) string {
+func formatStateLine(state molo.State) string {
 	return "state    " + stateName(state)
 }
 

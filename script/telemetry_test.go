@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/dsp"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/dsp"
 )
 
 // TestCompressorDeclaresReadingAndVisual loads the bundled compressor and pins

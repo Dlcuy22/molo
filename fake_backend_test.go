@@ -1,13 +1,13 @@
-package player_test
+package molo_test
 
 import (
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/playback"
+	"github.com/dlcuy22/molo"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/playback"
 )
 
 // TestFakeBackendRunsTheWholeEngine is the no-audio integration check: the
@@ -22,7 +22,7 @@ func TestFakeBackendRunsTheWholeEngine(t *testing.T) {
 		t.Fatalf("fake backend is not registered: %v", playback.Names())
 	}
 
-	p, err := player.New(player.WithBackend("fake"))
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestFakeBackendRunsTheWholeEngine(t *testing.T) {
 	// fixed amount.
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		if p.Snapshot().State == player.Stopped {
+		if p.Snapshot().State == molo.Stopped {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -59,7 +59,7 @@ func TestFakeBackendRunsTheWholeEngine(t *testing.T) {
 	if snap.Backend != "fake" {
 		t.Errorf("Backend = %q, want %q", snap.Backend, "fake")
 	}
-	if snap.State != player.Stopped {
+	if snap.State != molo.Stopped {
 		t.Errorf("State = %v, want Stopped after the fixture drained", snap.State)
 	}
 	if snap.Position <= 0 {

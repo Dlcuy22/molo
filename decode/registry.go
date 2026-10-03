@@ -16,7 +16,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // ErrUnsupported means no registered factory recognised the file, either by

@@ -4,7 +4,7 @@ import (
 	"math"
 	"sync/atomic"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // MinVolume and MaxVolume bound the gain. The range is closed on both ends:

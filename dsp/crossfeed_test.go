@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // crossfeedRef is an independent float64 implementation of the bs2b design,

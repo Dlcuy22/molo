@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // newTestFade builds a fade at the canonical format with the given duration and

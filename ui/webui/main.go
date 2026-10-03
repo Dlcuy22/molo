@@ -16,8 +16,8 @@ var assets embed.FS
 // window title, the about box and the dock, so they name the product rather
 // than the framework.
 const (
-	appName        = "Player"
-	appDescription = "A desktop audio player for the files on this machine"
+	appName        = "Molo"
+	appDescription = "A desktop audio player"
 )
 
 // Window names, so the service can find a window it did not create and the

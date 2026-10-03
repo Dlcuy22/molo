@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // unknownClock is what an unresolved duration shows. A UI that printed "0:00"
@@ -42,8 +42,8 @@ func formatClock(d time.Duration) string {
 // track shows "--:--" and omits the percentage field entirely rather than
 // inventing one, which is the difference between "still probing" and a wrong
 // number.
-func formatProgress(s player.Snapshot) string {
-	if s.State == player.Idle {
+func formatProgress(s molo.Snapshot) string {
+	if s.State == molo.Idle {
 		return "idle"
 	}
 
@@ -131,13 +131,13 @@ func displayName(title, path string) string {
 	return filepath.Base(path)
 }
 
-func stateName(s player.State) string {
+func stateName(s molo.State) string {
 	switch s {
-	case player.Playing:
+	case molo.Playing:
 		return "playing"
-	case player.Paused:
+	case molo.Paused:
 		return "paused"
-	case player.Stopped:
+	case molo.Stopped:
 		return "stopped"
 	default:
 		return "idle"

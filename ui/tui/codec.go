@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dlcuy22/player"
+	"github.com/dlcuy22/molo"
 )
 
 // The codec picker is a modal list over the now-playing panel. It exists
@@ -192,7 +192,7 @@ func (m model) handlePickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // applyCodec reads the current settings and applies the chosen decoder, leaving
 // the other fields untouched. It runs on the Cmd goroutine; the result comes
 // back as codecResultMsg so the marker only moves once the engine has accepted.
-func applyCodec(p player.Player, name string) tea.Cmd {
+func applyCodec(p molo.Player, name string) tea.Cmd {
 	return func() tea.Msg {
 		next := p.Settings()
 		next.Decoder = name

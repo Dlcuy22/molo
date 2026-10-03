@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/dlcuy22/player/core"
+	"github.com/dlcuy22/molo/core"
 )
 
 // thirdFactory is a stand-in for a future codec. It only has to implement the

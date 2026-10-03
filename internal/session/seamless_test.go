@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/dsp"
-	"github.com/dlcuy22/player/playback"
-	"github.com/dlcuy22/player/provider"
-	"github.com/dlcuy22/player/stream"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/dsp"
+	"github.com/dlcuy22/molo/playback"
+	"github.com/dlcuy22/molo/provider"
+	"github.com/dlcuy22/molo/stream"
 )
 
 // upgradedDecoderOpener builds a named, seekable decoder that reports distinct

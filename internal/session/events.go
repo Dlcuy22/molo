@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/stream"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/stream"
 )
 
 // Event is the sealed interface of everything the controller reports. The

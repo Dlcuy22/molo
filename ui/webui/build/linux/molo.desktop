@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=player
-Exec=player
-Icon=player
+Name=molo
+Exec=molo
+Icon=molo
 Categories=Development;
 Terminal=false
 Keywords=wails

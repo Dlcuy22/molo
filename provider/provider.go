@@ -8,10 +8,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/dlcuy22/player/core"
-	"github.com/dlcuy22/player/decode"
-	"github.com/dlcuy22/player/meta"
-	"github.com/dlcuy22/player/stream"
+	"github.com/dlcuy22/molo/core"
+	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/meta"
+	"github.com/dlcuy22/molo/stream"
 )
 
 // ErrNoProvider means a session with providers configured was handed a
