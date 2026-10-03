@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# The workflow only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    name: engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Pin the toolchain to the version the engine declares.
+          go-version-file: go.mod
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+      - run: go test -race ./...
+
+  cross-build:
+    name: cross-build (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One GOOS failing should not cancel the rest.
+      fail-fast: false
+      matrix:
+        # Only OSes that pass locally with
+        # GOOS=<os> GOARCH=amd64 CGO_ENABLED=0 go build ./...
+        # js/wasm works but needs GOARCH=wasm, so it is not in this matrix.
+        goos: [linux, darwin, windows, freebsd, netbsd, openbsd]
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go build ./...
+
+  tui:
+    name: ui/tui
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui/tui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ui/tui/go.mod
+          cache-dependency-path: ui/tui/go.sum
+
+      - run: go test ./...
+
+  webui:
+    name: ui/webui
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui/webui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ui/webui/go.mod
+          cache-dependency-path: ui/webui/go.sum
+
+      # Wails v3 reaches the webview through purego, so the backend compiles and
+      # tests on a runner with no GTK/WebKit development packages installed.
+      - run: go test ./...

@@ -1,32 +1,32 @@
 # player
 
-A ready-to-use audio engine for Go, batteries included: decoder, parser,
-streamer, ring buffer, spectrum analyzer, audio device, DSP, and metadata
-reader. Built with extendability and portability in mind.
+An audio engine and a DSP scripting engine for Go, batteries included: decoder,
+parser, streamer, ring buffer, audio device, DSP, and metadata reader. Built
+with extendability and portability in mind.
 
-It plays local files today and hands a UI everything it needs to draw them, so
-a consumer does not have to assemble the decoder-to-device stack itself.
-Playback is local-file only for now; a network source would need a new source
-layer, though the decoder side is already reader-friendly.
+It plays audio from local files or from a pluggable provider, and it hands a UI
+everything it needs to draw playback, so a consumer does not have to assemble
+the decoder-to-device stack itself. It is equally a scripting engine: DSP
+effects can be written in Lua and loaded at runtime, alongside the built-in
+effects.
 
 ## Status
 
-player is in early development. The core pieces are in place (decoders,
-streamer, ring buffer, device output, DSP, metadata, and the facade), but the
-project is not finished. Current gaps:
+player is at v1.0.0. The public surface is frozen and the core pieces are in
+place: decoders, streamer, ring buffer, device output, DSP, metadata, the Lua
+scripting engine, and the facade. The known limitations are listed here rather
+than hidden:
 
-- Some formats cannot seek. M4A and AAC have no native seek.
+- Some formats cannot seek natively. M4A and AAC have no native seek; the
+  streamer positions them with the reopen-and-discard fallback.
 - Some formats cannot report a duration up front. AAC (ADTS) stores no total in
   its header, so the length is learned while playing.
-- A non-48 kHz file reports an unknown duration when its sample count does not
-  divide evenly into the 48 kHz output. 44.1 kHz FLAC is the common trigger,
-  and the same conversion is used by the MP3, WAV, and M4A decoders. Audio and
+- A non-48 kHz source whose sample count does not divide evenly into the 48 kHz
+  output reports an unknown duration. 44.1 kHz FLAC is the common trigger, and
+  the same conversion is used by the MP3, WAV, and M4A decoders. Audio and
   seeking are unaffected (where the format supports seeking); only the length
   is unknown. A UI that gates its seek bar on a known duration disables it, so
   such a track plays without a scrubbable position or a percentage.
-- The effect set is small. Crossfeed and gain are the two that ship today.
-
-These are being worked on.
 
 ## Architecture and approach
 
@@ -35,10 +35,18 @@ audio devices implement interfaces owned by their own component, and player is
 the glue plus the components those libraries need to work: a streamer, a ring
 buffer, and so on.
 
-The pipeline is one path: a parser frames the file, a decoder turns it into PCM,
-the streamer feeds it through a ring buffer, and the device pulls it out.
+The pipeline is one path: a parser frames the source, a decoder turns it into
+PCM, the streamer feeds it through a ring buffer, and the device pulls it out.
 Volume and effects run after the ring, just before the device, so they never
 touch the decode side.
+
+A track reference does not have to be a path. The session hands each ref to the
+first configured provider whose `Match` claims it, and `provider.LocalAudio` is
+the catch-all that keeps the historic local-file behaviour, so it stays last in
+the list. A provider (`provider.AudioProvider` returning a `provider.Source`)
+only ever returns bytes and metadata, so the engine stays UI-agnostic and never
+imports a network library of its own. With no providers configured, the engine
+is local-file only.
 
 The code is layered so a UI never reaches past the facade. `core` holds only
 types and contracts. `internal/session` owns the queue, the state machine, and
@@ -54,6 +62,13 @@ effects, and metadata resolvers, so a new piece is one file plus one `init()`
 that calls `Register`. A decoder implements only what it needs: seeking,
 probing, and reader input are separate optional interfaces, not a wide base
 type.
+
+A DSP effect does not need a fork at all. Write it in Lua, load it with
+`script.Load` or `script.LoadDir`, and register the factory with `dsp.Register`
+(or `script.Register`, which refuses a duplicate name). The engine then treats
+it exactly like a built-in: the same pipeline, the same parameter schema, the
+same editor. Scripts run in a sandbox and describe a graph the Go side compiles,
+so no Lua runs on the audio thread.
 
 The engine does not depend on a large library such as ffmpeg. When a reference
 codec implementation is genuinely needed, the project reaches it through
@@ -72,18 +87,35 @@ codec implementation is genuinely needed, the project reaches it through
 
 ## Features
 
+- Two engines in one: a real-time audio engine and a DSP scripting engine.
+  Effects are either built-in Go stages or Lua scripts loaded at runtime.
 - Canonical format. Everything is normalized to 48 kHz stereo float32 before
   the ring, so the audio device opens once and is reused across tracks.
-- Decoders for Opus, FLAC, WAV, MP3, M4A, and AAC. Opus has three
-  implementations with different seek trade-offs.
+- Decoders for Opus, FLAC, WAV, MP3, M4A, AAC, and WebM/Matroska (Opus in WebM,
+  `.webm` and `.weba`). Opus has three implementations with different seek
+  trade-offs.
+- A provider seam. Play local files by default, or plug in sources with
+  `player.WithProviders`; a provider returns bytes and metadata, and
+  `Player.Providers()` lists what is in effect.
 - Codec selection by name, or automatic by weight. `player -codecs` lists what
   the build supports.
 - Streaming through a power-of-two SPSC ring (about 300 ms) with a decoder
   goroutine, high and low watermarks, and 100 ms chunks.
 - Seeking native where the format supports it, with latest-wins collapsing so a
-  burst of seeks resolves to the last target.
-- DSP with a post-ring gain stage, a bs2b crossfeed, an effect registry, and a
-  parameter schema a UI can render controls from.
+  burst of seeks resolves to the last target. Formats without a native seek fall
+  back to reopen-and-discard.
+- Live swap. `SwapDecoder` or `SwapBackend` changes the decoder or the device on
+  the track that is playing, reopening at the position playback has reached,
+  without stopping the stream.
+- DSP with a post-ring gain stage, a bs2b crossfeed, a fade, an effect registry,
+  and a parameter schema a UI can render controls from. An effect can also
+  publish live meters, described readings, and plots, and the engine exposes a
+  separate effect-chain editor surface (`player.Effects`) to add, remove, move,
+  parameterize, and bypass stages without rebuilding the chain.
+- A Lua DSP engine in the `script` package: effects are written in Lua, loaded
+  at runtime, and registered alongside the built-ins, so a new effect needs no
+  recompile. Scripts run in a sandbox and are compiled to a plan the real-time
+  path runs.
 - Metadata from embedded container tags first, filename fallback last, so a UI
   never shows an empty row. Embedded cover art rides along as raw bytes and a
   MIME type; a UI decodes and scales it.
@@ -102,16 +134,12 @@ codec implementation is genuinely needed, the project reaches it through
 | `flac` | Lossless | 90 | `.flac` | Bit-exact, normalized to 48 kHz |
 | `wav` | Wav | 90 | `.wav` | Uncompressed |
 | `mp3` | Mp3 | 90 | `.mp3` | Exact sample seek |
-| `m4a` | M4a | 90 | `.m4a`, `.mp4` | AAC-LC only, no seek |
-| `aac` | Aac | 90 | `.aac` | ADTS, duration unknown until played |
+| `m4a` | M4a | 90 | `.m4a`, `.mp4` | AAC-LC only, no native seek |
+| `aac` | Aac | 90 | `.aac` | ADTS, no native seek, duration unknown until played |
+| `webm-opus` | WebM | 90 | `.webm`, `.weba` | Opus in WebM/Matroska |
 
 Weight only breaks ties between decoders that claim the same extension, and it
 is ignored when a name is requested explicitly.
-
-A non-48 kHz source whose sample count does not divide evenly into the 48 kHz
-output is the case behind the unknown-duration gap in Status. 44.1 kHz FLAC is
-the common trigger. The decoder still plays and seeks correctly; only the length
-is reported as unknown.
 
 ## Using the library
 
@@ -145,26 +173,31 @@ for range time.Tick(250 * time.Millisecond) {
 }
 ```
 
-Options such as the backend, decoder, ring size, and probe mode are set at
-`New` and can be changed at runtime through `Settings`.
+Options such as the backend, decoder, ring size, probe mode, and providers are
+set at `New` (`WithBackend`, `WithDecoder`, `WithRingFrames`, `WithProbeMode`,
+`WithProviders`). Volume, decoder, backend, probe mode, and the effect pipeline
+can change at runtime through `Settings`, or with `SwapDecoder` and
+`SwapBackend` when the change must land on the track that is playing.
 
 ## Example UIs
 
-The repository ships three front ends, each in its own module, all talking to
-the same facade and sharing no UI code. They are the portability claim made
-concrete.
+The repository ships three front ends behind one facade, and they share no UI
+code. They are the portability claim made concrete.
 
-`cmd/player` is the headless CLI, plain Go. It plays the paths given on the
-command line as a queue and keeps single-key controls when stdin is a terminal.
+`cmd/player` is the headless CLI, plain Go. It lives in the engine module rather
+than in a module of its own, and imports only the public facade. It plays the
+paths given on the command line as a queue and keeps single-key controls when
+stdin is a terminal.
 
 `ui/tui` is a terminal UI built on Bubble Tea and Lip Gloss. It draws a
 now-playing panel, a progress bar, a level meter, an optional waveform, and the
 queue.
 
-`ui/webui` is a desktop app: a Wails v3 Go backend with a Svelte 5 frontend.
-It has transport controls, a clickable queue, decoder and backend selection,
-album artwork in the now-playing row, and a bar visualizer driven by the
-engine's `Tap`. It is the one front end that renders cover art today.
+`ui/webui` is a desktop app: a Wails v3 Go backend with a Svelte 5 frontend. It
+has transport controls, a clickable queue, decoder and backend selection, album
+artwork in the now-playing row, a bar visualizer driven by the engine's `Tap`,
+the effect editor, and YouTube Music search and queueing through the provider
+seam. It is the one front end that renders cover art today.
 
 The TUI and the desktop app keep their own `go.mod`, joined to the engine by a
 `go.work` at the root, so the engine stays free of UI dependencies.
@@ -181,7 +214,8 @@ go test ./...                    # engine
 ```
 
 A new codec is one file under `decode/` with an `init()` that registers its
-factory, plus a test. A new effect is the same shape under `dsp/`.
+factory, plus a test. A new effect is the same shape under `dsp/`, or a Lua file
+loaded through `script` with no recompile.
 
 ## License
 
