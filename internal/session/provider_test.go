@@ -12,6 +12,7 @@ import (
 	"github.com/dlcuy22/player/meta"
 	"github.com/dlcuy22/player/playback"
 	"github.com/dlcuy22/player/provider"
+	"github.com/dlcuy22/player/stream"
 )
 
 // fakeProvider is a remote-style provider driven by a scheme prefix. It records
@@ -25,6 +26,7 @@ type fakeProvider struct {
 	mu        sync.Mutex
 	opens     int
 	openCalls int
+	upgrades  int
 	matched   []string
 	// openBlock, when non-nil, parks Open until the channel closes or ctx is
 	// cancelled, which is how the shutdown test builds a provider mid-open.
@@ -36,6 +38,12 @@ type fakeProvider struct {
 	// local marks the Source local, so the session keeps its own opener,
 	// resolver and prober, as LocalAudio does.
 	local bool
+
+	// upgrade is the Source's Upgrade. When non-nil the session may call it on
+	// the experimental path; upgrades counts the calls so a test can prove the
+	// flag gates it. Both are read on the build worker and the upgrade worker,
+	// so they are guarded by mu, like the counters.
+	upgrade func(ctx context.Context) (stream.Opener, error)
 
 	// source describes what Open returns. probe and meta let a test check the
 	// description path; total sets the decoder's frame count.
@@ -77,8 +85,21 @@ func (p *fakeProvider) Open(ctx context.Context, ref string) (provider.Source, e
 	}
 
 	src := p.source
+	p.mu.Lock()
+	upgrade := p.upgrade
+	p.mu.Unlock()
+	var upgraded func(context.Context) (stream.Opener, error)
+	if upgrade != nil {
+		upgraded = func(ctx context.Context) (stream.Opener, error) {
+			p.mu.Lock()
+			p.upgrades++
+			p.mu.Unlock()
+
+			return upgrade(ctx)
+		}
+	}
 	if p.nilOpener {
-		return provider.Source{Local: p.local, Meta: src.meta, Probe: src.probe}, nil
+		return provider.Source{Local: p.local, Meta: src.meta, Probe: src.probe, Upgrade: upgraded}, nil
 	}
 	opener := func(<-chan struct{}) (decode.Decoder, error) {
 		p.mu.Lock()
@@ -92,7 +113,7 @@ func (p *fakeProvider) Open(ctx context.Context, ref string) (provider.Source, e
 		return &plainDecoder{dec: &toneDecoder{value: src.value, total: src.total}}, nil
 	}
 
-	return provider.Source{Opener: opener, Local: p.local, Meta: src.meta, Probe: src.probe}, nil
+	return provider.Source{Opener: opener, Local: p.local, Meta: src.meta, Probe: src.probe, Upgrade: upgraded}, nil
 }
 
 func (p *fakeProvider) openCount() int {
@@ -107,6 +128,13 @@ func (p *fakeProvider) sourceOpenCount() int {
 	defer p.mu.Unlock()
 
 	return p.opens
+}
+
+func (p *fakeProvider) upgradeCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.upgrades
 }
 
 // plainDecoder is a tone decoder without SeekFrame, so the streamer must use the

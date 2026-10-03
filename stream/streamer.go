@@ -31,6 +31,11 @@ var ErrEndOfStream = errors.New("stream: end of stream")
 // ErrSeekRange means a seek target lies outside the stream.
 var ErrSeekRange = errors.New("stream: seek target out of range")
 
+// ErrSeamlessNotSeekable means a seamless swap was handed a decoder that cannot
+// be positioned at an absolute frame, so the ring could not be kept without
+// risking a duplicated or dropped span. The stream is left untouched.
+var ErrSeamlessNotSeekable = errors.New("stream: seamless swap requires a seekable decoder")
+
 // DefaultRingFrames is the buffered-audio target at the 48 kHz output rate,
 // about 300 ms. The plan allows 150 to 500 ms.
 const DefaultRingFrames = 48000 * 300 / 1000
@@ -74,6 +79,14 @@ type Config struct {
 	// Modules are the pre-ring stages, applied in order after decode. They run
 	// in the producer goroutine and may allocate.
 	Modules []core.Module
+
+	// ForwardSeekFallback permits the reopen-and-discard fallback when a decoder
+	// advertises a native seek but refuses it, which is what a forward-only
+	// source does. Off by default: a streamer that never expects a forward-only
+	// decoder keeps its previous behaviour, where a refused seek surfaces
+	// instead of being silently re-opened. The experimental source-upgrade path
+	// turns it on because its starting decoder is forward-only.
+	ForwardSeekFallback bool
 }
 
 // Stats is a snapshot of the streamer's counters. Buffered is read at call
@@ -104,6 +117,10 @@ type Streamer struct {
 	low         int64
 	chunkFrames int
 
+	// forwardSeekFallback allows a refused native seek on a forward-only source
+	// to fall back to reopen-and-discard. See Config.ForwardSeekFallback.
+	forwardSeekFallback bool
+
 	// work is the single scratch buffer of the producer. pending aliases a
 	// slice of it and holds processed output not yet accepted by the ring.
 	work    []float32
@@ -122,6 +139,11 @@ type Streamer struct {
 	// them whole.
 	seekOpen Opener
 	seekSwap bool
+	// seekSeamless marks a swap that must not flush the ring: the new decoder
+	// is positioned at the frontier and the buffered audio keeps playing across
+	// the switch. It is carried with the rest of the request for the same
+	// reason as seekSwap.
+	seekSeamless bool
 
 	eos    bool
 	eosErr error
@@ -232,6 +254,7 @@ func (s *Streamer) configure(cfg Config) error {
 	if s.chunkFrames > int(capacity) {
 		s.chunkFrames = int(capacity)
 	}
+	s.forwardSeekFallback = cfg.ForwardSeekFallback
 
 	maxCh := 0
 	for _, f := range s.formats {
@@ -302,7 +325,7 @@ func (s *Streamer) Stats() Stats {
 // spins; once the decoder is exhausted it returns io.EOF (or the decoder's
 // error) after the buffered tail drains.
 //
-// The signature is exactly playback.Provider's, so Phase 3 can pass a Streamer
+// The signature is exactly playback.Provider's, so a Streamer can be passed
 // straight to a device; this package does not import playback to say so.
 func (s *Streamer) ReadFrames(dst []float32) (int, error) {
 	want := len(dst) / s.ch
@@ -385,7 +408,7 @@ func (s *Streamer) finishRead(n, want int, eos bool, err error) (int, error) {
 // has run: the ring is flushed, the decoder is repositioned, position is reset
 // and the ring is refilled. Concurrent seeks collapse to the latest target.
 func (s *Streamer) SeekFrame(frame int64) error {
-	return s.requestPosition(frame, nil, false)
+	return s.requestPosition(frame, nil, false, false)
 }
 
 // SwapDecoder reopens the stream with a different opener, repositions to
@@ -401,13 +424,37 @@ func (s *Streamer) SwapDecoder(target int64, open Opener) error {
 		return errors.New("stream: SwapDecoder requires an opener")
 	}
 
-	return s.requestPosition(target, open, true)
+	return s.requestPosition(target, open, true, false)
 }
 
-// requestPosition is the shared gate for SeekFrame and SwapDecoder. carrying an
-// optional opener and a swap flag through the same sequence is what serialises
-// the two: at most one reposition runs at a time, and the newest request wins.
-func (s *Streamer) requestPosition(target int64, open Opener, swap bool) error {
+// SwapDecoderSeamless installs the decoder built by open without flushing the
+// ring. The outgoing decoder keeps playing from the buffer while the new one is
+// opened and positioned at the frontier, the first frame the producer has not
+// yet emitted, so a consumer hears no gap when the new decoder is ready within
+// the buffered runway. The pre-modules are not reset: the samples continue, so
+// their state is still correct.
+//
+// It is the counterpart of SwapDecoder for the source-upgrade path, where a
+// forward-only stream is replaced by a seekable one over the same audio. The
+// new decoder must implement decode.Seeker so it can be placed on an exact
+// frame; otherwise the call fails with ErrSeamlessNotSeekable and the stream is
+// left untouched. Same gate and latest-wins discipline as SeekFrame: a caller
+// superseded by a newer request is released with that request's outcome, so a
+// caller that must know whether its own swap happened has to run under the
+// session's single-worker serialization (as the source-upgrade path does).
+func (s *Streamer) SwapDecoderSeamless(open Opener) error {
+	if open == nil {
+		return errors.New("stream: SwapDecoderSeamless requires an opener")
+	}
+
+	return s.requestPosition(0, open, true, true)
+}
+
+// requestPosition is the shared gate for SeekFrame, SwapDecoder and
+// SwapDecoderSeamless. carrying an optional opener, a swap flag and a seamless
+// flag through the same sequence is what serialises them: at most one
+// reposition runs at a time, and the newest request wins.
+func (s *Streamer) requestPosition(target int64, open Opener, swap, seamless bool) error {
 	if target < 0 {
 		return fmt.Errorf("%w: negative target %d", ErrSeekRange, target)
 	}
@@ -436,6 +483,7 @@ func (s *Streamer) requestPosition(target int64, open Opener, swap bool) error {
 	s.seekTarget = target
 	s.seekOpen = open
 	s.seekSwap = swap
+	s.seekSeamless = seamless
 	s.gate.cond.Broadcast()
 
 	for s.seekApplied < seq && !s.gate.closed && !s.finished.Load() {
@@ -577,10 +625,11 @@ func (s *Streamer) applyPendingSeek() bool {
 	target := s.seekTarget
 	open := s.seekOpen
 	swap := s.seekSwap
+	seamless := s.seekSeamless
 	seq := s.seekSeq
 	s.gate.mu.Unlock()
 
-	err := s.doSeek(target, open, swap)
+	err := s.doSeek(target, open, swap, seamless)
 
 	s.gate.mu.Lock()
 	s.seekApplied = seq
@@ -594,7 +643,13 @@ func (s *Streamer) applyPendingSeek() bool {
 // doSeek is the gated seek/swap sequence. Flushing first means no consumer can
 // be handed a pre-seek frame once the operation is under way; the refill at the
 // end means a consumer that wakes up after it finds data, not an empty ring.
-func (s *Streamer) doSeek(target int64, open Opener, swap bool) error {
+// A seamless swap takes the other branch: it keeps the ring and positions the
+// new decoder at the frontier instead.
+func (s *Streamer) doSeek(target int64, open Opener, swap, seamless bool) error {
+	if seamless {
+		return s.doSeamlessSwap(open)
+	}
+
 	s.gate.mu.Lock()
 	s.ring.Reset()
 	s.pending = s.pending[:0]
@@ -641,6 +696,56 @@ func (s *Streamer) doSeek(target int64, open Opener, swap bool) error {
 	return s.complete(target)
 }
 
+// doSeamlessSwap installs open without flushing the ring. The frontier is the
+// first frame the producer has not yet emitted: the frames delivered to the
+// consumer, plus the frames buffered in the ring, plus the processed frames
+// still held in pending. The new decoder is built and positioned on that exact
+// frame before the outgoing one is closed, so a failure leaves the stream
+// untouched and the buffered audio keeps playing throughout.
+//
+// The frontier is read under the gate lock, the same critical section the
+// consumer advances s.pos and drains the ring in, so the three terms are a
+// consistent snapshot and the sum cannot drift by a concurrent read. Opening
+// the decoder runs without the lock: the ring is the runway that covers it.
+func (s *Streamer) doSeamlessSwap(open Opener) error {
+	s.gate.mu.Lock()
+	frontier := s.pos.Load() + s.ring.Len() + int64(len(s.pending))/int64(s.ch)
+	s.gate.mu.Unlock()
+
+	dec, err := open(s.stopDec)
+	if err != nil {
+		return err
+	}
+	if got := dec.Info().Format; !got.Equal(s.formats[0]) {
+		dec.Close()
+
+		return fmt.Errorf("stream: decoder reports %+v, the stream takes %+v", got, s.formats[0])
+	}
+	seeker, ok := dec.(decode.Seeker)
+	if !ok {
+		dec.Close()
+
+		return ErrSeamlessNotSeekable
+	}
+	if err := seeker.SeekFrame(frontier); err != nil {
+		dec.Close()
+
+		return fmt.Errorf("stream: seamless swap seek to %d: %w", frontier, err)
+	}
+
+	// Commit: only now is the old decoder replaced, so every failure above has
+	// left the stream exactly as it was. The pre-modules are not reset because
+	// the audio is continuous, and the position is not touched because the
+	// consumer's next frame is unchanged.
+	s.dec.Close()
+	s.dec = dec
+	s.open = open
+	s.readErr = nil
+	s.gate.wake()
+
+	return nil
+}
+
 // complete finishes a reposition that landed at target: reset the pre-modules,
 // publish the new position and refill the ring. Pre-modules that carry filter
 // state must not blend across the jump, so they restart from a clean state.
@@ -662,7 +767,19 @@ func (s *Streamer) complete(target int64) error {
 
 func (s *Streamer) reposition(target int64) error {
 	if seeker, ok := s.dec.(decode.Seeker); ok {
-		return seeker.SeekFrame(target)
+		err := seeker.SeekFrame(target)
+		if err == nil {
+			return nil
+		}
+		// A decoder can advertise a native seek and still refuse it: a
+		// forward-only source (a network body) carries the method but has
+		// nothing to reposition. Fall back to reopen-and-discard only when the
+		// caller opted in and the error is exactly that capability gap; any
+		// other seek failure is real and must surface so the track is reported
+		// rather than silently restarted.
+		if !(s.forwardSeekFallback && errors.Is(err, decode.ErrNotSeekable)) {
+			return err
+		}
 	}
 
 	return s.reopenAndDiscard(target, s.open)
@@ -677,7 +794,13 @@ func (s *Streamer) repositionWith(target int64, open Opener) error {
 		return err
 	}
 	if seeker, ok := s.dec.(decode.Seeker); ok {
-		return seeker.SeekFrame(target)
+		err := seeker.SeekFrame(target)
+		if err == nil {
+			return nil
+		}
+		if !(s.forwardSeekFallback && errors.Is(err, decode.ErrNotSeekable)) {
+			return err
+		}
 	}
 
 	return s.discardTo(target)
@@ -786,8 +909,8 @@ func (s *Streamer) refill() {
 // decodeChunk reads one chunk from the decoder and runs the pre-module chain in
 // order. The chain is frame-preserving: core.Module.Process cannot report a
 // different frame count, so a module that changes the rate would need a richer
-// contract than Phase 2 defines. Each module gets one buffer holding its input
-// in front and wide enough for its declared output, which is what lets a
+// contract than core.Module defines. Each module gets one buffer holding its
+// input in front and wide enough for its declared output, which is what lets a
 // channel remap run in place.
 func (s *Streamer) decodeChunk() (int, error) {
 	if s.readErr != nil {
@@ -826,6 +949,13 @@ func (s *Streamer) decodeChunk() (int, error) {
 
 // finish records the terminal state once and closes Done. A later call is inert
 // so the seek fallback and the main loop cannot close Done twice.
+//
+// A pending reposition is resolved here, not only in applyPendingSeek. finish
+// runs inside doSeek, so a seek whose failure is the reason the stream ends
+// would otherwise wake a requestPosition waiter on the terminal state before
+// applyPendingSeek records that the request was applied; that waiter would
+// report ErrEndOfStream instead of the seek's own error. Recording the outcome
+// under the same lock closes that window.
 func (s *Streamer) finish(err error) {
 	if !s.finished.CompareAndSwap(false, true) {
 		return
@@ -835,6 +965,14 @@ func (s *Streamer) finish(err error) {
 	s.eos = true
 	if err != nil && !errors.Is(err, io.EOF) {
 		s.eosErr = err
+	}
+	if s.seekApplied < s.seekSeq {
+		s.seekApplied = s.seekSeq
+		if err != nil && !errors.Is(err, io.EOF) {
+			s.seekErr = err
+		} else {
+			s.seekErr = ErrEndOfStream
+		}
 	}
 	s.gate.mu.Unlock()
 

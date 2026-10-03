@@ -10,11 +10,18 @@
 // open to place seeks, so a streaming reader would walk the file anyway and
 // then fetch it a second time to play it. A music track is a few megabytes, so
 // one fetch is both simpler and faster, and it keeps native seek exact.
+//
+// The web UI opts into the experimental seamless path (ytmSeamlessSwap): a
+// forward-only decoder plays the download as it arrives, and Upgrade swaps in
+// the whole-track seekable decoder once the body is complete, so the first
+// sound no longer waits for the last byte. Flipping that one value off disables
+// the path everywhere in the UI and restores the whole-track fetch.
 package main
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -28,6 +35,7 @@ import (
 	"github.com/dlcuy22/player/decode"
 	"github.com/dlcuy22/player/meta"
 	"github.com/dlcuy22/player/provider"
+	"github.com/dlcuy22/player/stream"
 	"github.com/dlcuy22/player/ui/webui/internal/cover"
 	ytm "github.com/dlcuy22/ytm-go"
 )
@@ -57,6 +65,14 @@ const (
 	// ytmIndexMax bounds the catalogue metadata cache. Search results fill it,
 	// so without a bound a long session would grow it with every query.
 	ytmIndexMax = 512
+
+	// ytmSeamlessSwap is the one switch for the experimental fast-start path.
+	// The web UI is the consumer and opts in here, at initialization: this value
+	// is read by both the provider, which then offers the Upgrade, and the
+	// engine, which then consumes it, so the two cannot drift. Flipping this one
+	// value off disables the path everywhere in the UI and restores the
+	// whole-track fetch.
+	ytmSeamlessSwap = true
 )
 
 // ytmRef builds the queue reference for a video id. CleanSongID strips the
@@ -196,6 +212,13 @@ type ytmProvider struct {
 	index *ytmIndex
 	http  *http.Client
 
+	// seamless selects the experimental fast-start path: Open returns a
+	// forward-only Opener over a background download plus an Upgrade that wraps
+	// the completed body in a seekable decoder. The UI sets it from
+	// ytmSeamlessSwap, the single switch shared with the engine; with that off,
+	// Open keeps the whole-track fetch exactly as before.
+	seamless bool
+
 	// resolve and search are the network calls, indirected so a test can drive
 	// the provider and the service without touching YouTube. In production they
 	// are the client's own methods; the client itself is not kept, because
@@ -204,14 +227,15 @@ type ytmProvider struct {
 	search  func(context.Context, string, string, bool) (*ytm.SearchResults, error)
 }
 
-func newYTMProvider(index *ytmIndex) *ytmProvider {
+func newYTMProvider(index *ytmIndex, seamless bool) *ytmProvider {
 	client := ytm.NewClient()
 
 	return &ytmProvider{
-		index:   index,
-		http:    &http.Client{Timeout: ytmHTTPTimeout},
-		resolve: client.GetStream,
-		search:  client.Search,
+		index:    index,
+		http:     &http.Client{Timeout: ytmHTTPTimeout},
+		seamless: seamless,
+		resolve:  client.GetStream,
+		search:   client.Search,
 	}
 }
 
@@ -274,22 +298,74 @@ func (p *ytmProvider) Open(ctx context.Context, ref string) (provider.Source, er
 
 	url := best.URL
 	expires := best.ExpiresAt
-	src.Opener = func(stop <-chan struct{}) (decode.Decoder, error) {
-		// A signed URL is bound to this host and dies after a few hours, and
-		// the streamer calls the opener again on the reopen-and-discard seek
-		// fallback and on a decoder swap. Re-resolving on expiry is what keeps
-		// a long session seeking correctly.
-		if !expires.IsZero() && time.Now().After(expires) {
-			fresh, err := p.resolve(ctx, id)
+
+	// refresh re-resolves a signed URL that has expired. It is shared by the
+	// full-fetch opener and the streaming start: a signed URL is bound to this
+	// host and dies after a few hours, and the streamer calls the opener again
+	// on the reopen-and-discard seek fallback and on a decoder swap, so
+	// re-resolving on expiry is what keeps a long session seeking correctly.
+	refresh := func() error {
+		if expires.IsZero() || !time.Now().After(expires) {
+			return nil
+		}
+		fresh, err := p.resolve(ctx, id)
+		if err != nil {
+			return err
+		}
+		f, ok := fresh.Best()
+		if !ok {
+			return fmt.Errorf("ytm: no audio format for %s", id)
+		}
+		url = f.URL
+		expires = f.ExpiresAt
+
+		return nil
+	}
+
+	if p.seamless {
+		// Fast start: the body downloads once, in the background, while the
+		// forward-only decoder plays from the front, so audio begins before the
+		// whole track is here. Upgrade waits for the last byte and swaps in a
+		// seekable decoder over the same buffer, so a seek after the switch is
+		// exact and needs no second fetch.
+		buf := newYTMStreamBuffer()
+		var once sync.Once
+		start := func(stop <-chan struct{}) {
+			once.Do(func() {
+				if err := refresh(); err != nil {
+					buf.finish(err)
+
+					return
+				}
+				go p.download(ctx, stop, url, ytmMaxTrackBytes, buf)
+			})
+		}
+		src.Opener = func(stop <-chan struct{}) (decode.Decoder, error) {
+			start(stop)
+
+			return decode.NewWebMOpusFactory().OpenReader(buf.reader())
+		}
+		src.Upgrade = func(uctx context.Context) (stream.Opener, error) {
+			// The opener normally starts the download already; starting here
+			// too keeps a caller that upgrades first from waiting on a body
+			// nobody fetched.
+			start(nil)
+			data, err := buf.wait(uctx)
 			if err != nil {
 				return nil, err
 			}
-			f, ok := fresh.Best()
-			if !ok {
-				return nil, fmt.Errorf("ytm: no audio format for %s", id)
-			}
-			url = f.URL
-			expires = f.ExpiresAt
+
+			return func(<-chan struct{}) (decode.Decoder, error) {
+				return decode.NewWebMOpusFactory().OpenReader(bytes.NewReader(data))
+			}, nil
+		}
+
+		return src, nil
+	}
+
+	src.Opener = func(stop <-chan struct{}) (decode.Decoder, error) {
+		if err := refresh(); err != nil {
+			return nil, err
 		}
 
 		data, err := p.fetch(ctx, stop, url, ytmMaxTrackBytes)
@@ -333,14 +409,64 @@ func (p *ytmProvider) thumbFor(ctx context.Context, url string) []byte {
 	return data
 }
 
-// fetch reads one URL into memory with a ranged GET. The Range header is not an
+// fetch reads one URL whole into memory through the ranged GET that withBody
+// issues, bounded by limit.
+func (p *ytmProvider) fetch(parent context.Context, stop <-chan struct{}, url string, limit int64) ([]byte, error) {
+	var data []byte
+	err := p.withBody(parent, stop, url, func(body io.Reader) error {
+		var rerr error
+		data, rerr = io.ReadAll(io.LimitReader(body, limit+1))
+
+		return rerr
+	})
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("ytm: media body exceeds %d bytes", limit)
+	}
+
+	return data, nil
+}
+
+// download streams one URL into buf with the ranged GET, stopping at limit
+// bytes so an endless or lying body cannot exhaust memory. The terminal error
+// is published through buf, so a forward reader blocked mid-track sees the
+// failure instead of parking forever.
+func (p *ytmProvider) download(parent context.Context, stop <-chan struct{}, url string, limit int64, buf *ytmStreamBuffer) {
+	err := p.withBody(parent, stop, url, func(body io.Reader) error {
+		chunk := make([]byte, 64<<10)
+		var total int64
+		for {
+			n, rerr := body.Read(chunk)
+			if n > 0 {
+				total += int64(n)
+				if total > limit {
+					return fmt.Errorf("ytm: media body exceeds %d bytes", limit)
+				}
+				buf.append(chunk[:n])
+			}
+			if rerr != nil {
+				if errors.Is(rerr, io.EOF) {
+					return nil
+				}
+
+				return rerr
+			}
+		}
+	})
+	buf.finish(err)
+}
+
+// withBody issues the ranged GET the full fetch and the streaming download
+// share, and hands the live body to consume. The Range header is not an
 // optimisation: googlevideo throttles a GET without one to roughly 32 KiB/s,
 // measured at about eighty times slower on the same track.
 //
 // stop, when non-nil, cancels the request; the streamer closes it on shutdown
 // so an opener cannot strand a producer goroutine in a blocked read. parent, if
 // non-nil, is the session context, cancelled when the player closes.
-func (p *ytmProvider) fetch(parent context.Context, stop <-chan struct{}, url string, limit int64) ([]byte, error) {
+func (p *ytmProvider) withBody(parent context.Context, stop <-chan struct{}, url string, consume func(io.Reader) error) error {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -361,29 +487,130 @@ func (p *ytmProvider) fetch(parent context.Context, stop <-chan struct{}, url st
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Range", "bytes=0-")
 
 	resp, err := p.http.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return nil, fmt.Errorf("ytm: media request returned %s", resp.Status)
+		return fmt.Errorf("ytm: media request returned %s", resp.Status)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if err != nil {
-		return nil, err
+	return consume(resp.Body)
+}
+
+// ytmStreamBuffer holds one track body as it downloads. A single producer
+// appends chunks; each reader takes its own forward cursor, blocking on a
+// condition variable, rather than spinning, until the bytes it wants are here
+// or the download ends. The data is grow-only and shared, so the seekable
+// upgrade reuses it with no second fetch and a reopen starts clean.
+type ytmStreamBuffer struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	data []byte
+	done bool
+	err  error
+}
+
+func newYTMStreamBuffer() *ytmStreamBuffer {
+	b := &ytmStreamBuffer{}
+	b.cond = sync.NewCond(&b.mu)
+
+	return b
+}
+
+// append records one chunk and wakes any reader waiting on it.
+func (b *ytmStreamBuffer) append(p []byte) {
+	if len(p) == 0 {
+		return
 	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("ytm: media body exceeds %d bytes", limit)
+	b.mu.Lock()
+	b.data = append(b.data, p...)
+	b.cond.Broadcast()
+	b.mu.Unlock()
+}
+
+// finish marks the end of the download. err, when non-nil, is what a reader
+// gets once the buffered bytes are drained, so a truncated body surfaces as a
+// read error rather than as a silent short read.
+func (b *ytmStreamBuffer) finish(err error) {
+	b.mu.Lock()
+	b.done = true
+	b.err = err
+	b.cond.Broadcast()
+	b.mu.Unlock()
+}
+
+// reader returns a fresh forward reader over the body. It starts at the
+// beginning, so a reopen reads the track again instead of continuing from
+// wherever a previous reader stopped.
+func (b *ytmStreamBuffer) reader() io.Reader {
+	return &ytmStreamReader{buf: b}
+}
+
+// wait blocks until the download finishes or ctx is done, then returns the
+// complete body. Cancellation is an error rather than a partial result: a
+// truncated body cannot back a seekable decoder, so the swap must not happen.
+func (b *ytmStreamBuffer) wait(ctx context.Context) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Waking on cancellation takes the lock, so the wake cannot slip between
+	// the check in the loop and the park; Broadcast alone would race.
+	stop := context.AfterFunc(ctx, func() {
+		b.mu.Lock()
+		b.cond.Broadcast()
+		b.mu.Unlock()
+	})
+	defer stop()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for !b.done {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		b.cond.Wait()
+	}
+	if b.err != nil {
+		return nil, b.err
 	}
 
-	return data, nil
+	return b.data, nil
+}
+
+// ytmStreamReader is the forward-only view the WebM factory sees: it implements
+// Read but not io.Seeker, which makes the factory choose its forward-only
+// reader and is what lets playback start mid-download.
+type ytmStreamReader struct {
+	buf *ytmStreamBuffer
+	off int
+}
+
+func (r *ytmStreamReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	r.buf.mu.Lock()
+	defer r.buf.mu.Unlock()
+	for r.off >= len(r.buf.data) && !r.buf.done {
+		r.buf.cond.Wait()
+	}
+	n := copy(p, r.buf.data[r.off:])
+	r.off += n
+	if n > 0 {
+		return n, nil
+	}
+	if r.buf.err != nil {
+		return 0, r.buf.err
+	}
+
+	return 0, io.EOF
 }
 
 // fetchThumb fills in the artwork of a cached track, so a queue row can draw it

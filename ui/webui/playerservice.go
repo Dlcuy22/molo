@@ -138,7 +138,7 @@ func newPlayerService() *PlayerService {
 		coverCache:  make(map[string]string),
 		index:       newTagIndex(),
 		ytm:         ytmIndex,
-		ytmProv:     newYTMProvider(ytmIndex),
+		ytmProv:     newYTMProvider(ytmIndex, ytmSeamlessSwap),
 		searchCache: make(map[string][]YTMResult),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -154,7 +154,13 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// logged and skipped, never fatal: a bad user script must not stop playback.
 	loadScripts()
 
-	p, err := player.New(player.WithProviders(s.ytmProv, provider.LocalAudio{}))
+	p, err := player.New(
+		player.WithProviders(s.ytmProv, provider.LocalAudio{}),
+		// The same switch the provider was built with: the engine consumes the
+		// Upgrade only when this is set, and the provider offers it only when
+		// it is, so the two cannot drift.
+		player.WithExperimental(player.Experimental{SourceUpgrade: ytmSeamlessSwap}),
+	)
 	if err != nil {
 		return fmt.Errorf("build player: %w", err)
 	}

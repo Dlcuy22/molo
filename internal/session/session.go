@@ -137,6 +137,17 @@ func ValidateVolume(v float64) error {
 	return nil
 }
 
+// Experimental toggles features that are not yet stable. The zero value is the
+// current behaviour, so an empty Config changes nothing and no existing path is
+// affected unless a caller opts in.
+type Experimental struct {
+	// SourceUpgrade enables the source-upgrade path: a provider Source that
+	// offers Upgrade is started forward-only, and later swapped to the upgraded
+	// decoder without flushing the streamer ring, so playback begins before the
+	// whole track is available and the switch is inaudible.
+	SourceUpgrade bool
+}
+
 // Config tunes a Session. Zero fields take the documented default, so the
 // empty Config is the intended setup.
 type Config struct {
@@ -181,6 +192,10 @@ type Config struct {
 	// today's behaviour: only the master gain runs. The Pre half is the
 	// streamer's business and is ignored here.
 	Pipeline dsp.Pipeline
+
+	// Experimental toggles not-yet-stable features. Zero is today's behaviour,
+	// so leaving it unset keeps every existing path byte-for-byte.
+	Experimental Experimental
 
 	// validateDecoder overrides the decoder-name check. Tests that drive the
 	// session with fake codecs set it, so they do not have to register into the
@@ -468,6 +483,13 @@ type openResult struct {
 	// stays unknown for a provider ref, because the session's own prober only
 	// works on a local path.
 	probe func(mode core.DurationMode) (core.StreamInfo, error)
+
+	// upgrade optionally replaces the decoder once the source has more bytes
+	// available. It is carried only when the experimental seamless-swap path is
+	// on and the provider offered one, so with the flag off the build behaves
+	// exactly as before. It runs off the control loop after the track is
+	// playing, because waiting for a whole download must not delay audio.
+	upgrade func(context.Context) (stream.Opener, error)
 }
 
 type probeResult struct {
@@ -560,6 +582,9 @@ type Session struct {
 	probeCh chan probeResult
 	metaCh  chan metaResult
 	seekCh  chan seekResult
+	// seamlessCh carries a finished source upgrade from its worker to the
+	// control loop, which decides when the one engine worker can take it.
+	seamlessCh chan *seekRequest
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -615,6 +640,18 @@ type Session struct {
 	// worker only reports on seekCh.
 	seekBusy    bool
 	seekPending *seekRequest
+
+	// pendingSeamless holds a finished source upgrade that could not start
+	// because a seek or swap owned the worker slot. A user seek must never be
+	// clobbered by an optimisation, so the upgrade waits here and is promoted
+	// when the worker falls idle. It is bound to the same streamer and seq as
+	// any other request, so a track change drops it.
+	pendingSeamless *seekRequest
+
+	// upgradeCancel cancels the current track's source-upgrade download. It is
+	// owned by the control goroutine and called from retireLive, so a track the
+	// user left stops its upgrade instead of downloading until session Close.
+	upgradeCancel context.CancelFunc
 }
 
 // requestKind selects what a queued engine step does. A plain seek and a
@@ -627,6 +664,7 @@ const (
 	requestSeek requestKind = iota
 	requestSwapDecoder
 	requestSwapBackend
+	requestSwapSeamless
 )
 
 // seekRequest is one accepted seek, swap or device rebuild, either in flight or
@@ -648,6 +686,13 @@ type seekRequest struct {
 	// control loop, so the worker refuses a decoder swap on a provider ref even
 	// if the caller raced a track change.
 	providerRef bool
+
+	// open and labels drive a seamless swap: open builds the upgraded decoder
+	// and labels receives what that decoder reports about itself. The labels are
+	// written by the producer goroutine inside the streamer and read only once
+	// the swap has been acknowledged, exactly like decoderOpener's.
+	open   stream.Opener
+	labels *openerLabels
 }
 
 // New builds a session and starts its control goroutine. It does not touch the
@@ -714,6 +759,8 @@ func New(cfg Config) (*Session, error) {
 		probeCh: make(chan probeResult, 4),
 		metaCh:  make(chan metaResult, 4),
 		seekCh:  make(chan seekResult, 1),
+
+		seamlessCh: make(chan *seekRequest, 1),
 	}
 	s.runtime.set(cfg.Decoder, cfg.Backend, *cfg.ProbeMode)
 	s.runtime.setPipeline(cfg.Pipeline)
@@ -1354,6 +1401,8 @@ func (s *Session) run() {
 			s.handleMeta(res)
 		case res := <-s.seekCh:
 			s.handleSeek(res)
+		case req := <-s.seamlessCh:
+			s.requestSeamless(req)
 		case <-ticker.C:
 			s.pollDevice()
 		}
@@ -1628,8 +1677,15 @@ func (s *Session) retireLive() {
 	s.inFlight = false
 	// Any target that has not started belongs to the stream being retired, so
 	// it is dropped rather than applied to the next track. An in-flight worker
-	// is left alone; its stale result is discarded in handleSeek.
+	// is left alone; its stale result is discarded in handleSeek. A parked
+	// source upgrade is dropped for the same reason, and its download is
+	// cancelled because there is no track left to upgrade.
 	s.seekPending = nil
+	s.pendingSeamless = nil
+	if s.upgradeCancel != nil {
+		s.upgradeCancel()
+		s.upgradeCancel = nil
+	}
 	if s.live == nil {
 		return
 	}
@@ -1760,7 +1816,10 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 		return d, nil
 	}
 
-	st, err := stream.New(open, stream.Config{RingFrames: s.cfg.RingFrames})
+	st, err := stream.New(open, stream.Config{
+		RingFrames:          s.cfg.RingFrames,
+		ForwardSeekFallback: s.cfg.Experimental.SourceUpgrade,
+	})
 	if err != nil {
 		return openResult{seq: seq, index: index, path: path, err: err}
 	}
@@ -1779,6 +1838,11 @@ func (s *Session) build(seq uint64, index int, path string) openResult {
 		res.providerMeta = true
 		res.meta = src.Meta
 		res.probe = src.Probe
+		// The upgrade is opt-in. With the flag off nothing is carried and the
+		// source behaves exactly as it did before this path existed.
+		if s.cfg.Experimental.SourceUpgrade {
+			res.upgrade = src.Upgrade
+		}
 	}
 
 	return res
@@ -1881,6 +1945,50 @@ func (s *Session) activate(res openResult) {
 	s.setState(StatePlaying)
 	s.emit(TrackChanged{Index: res.index, Path: res.path})
 	s.enrich(res)
+
+	// Start the upgrade only after the track is actually playing: a build that
+	// failed to start the device must not launch a download for it. The context
+	// is scoped to this track rather than the session, so an upgrade that is
+	// still waiting when the track retires is cancelled instead of downloading
+	// until Close; retireLive owns the cancel.
+	if res.upgrade != nil {
+		upgradeCtx, cancel := context.WithCancel(s.ctx)
+		s.upgradeCancel = cancel
+		s.startUpgrade(upgradeCtx, res)
+	}
+}
+
+// startUpgrade runs a Source.Upgrade off the control loop and hands the result
+// back as a request. A failure is silent by design: the upgrade is a best-effort
+// optimisation over a stream that is already playing, so it is not a track
+// failure. It must not emit Failed and must not close the streamer; the track
+// keeps the decoder it was built with. workerWG tracks it so Close waits for a
+// download that is still running, and ctx is cancelled on Close and on a track
+// change.
+func (s *Session) startUpgrade(ctx context.Context, res openResult) {
+	s.workerWG.Add(1)
+
+	go func() {
+		defer s.workerWG.Done()
+
+		open, err := res.upgrade(ctx)
+		if err != nil || open == nil {
+			return
+		}
+		wrapped, labels := s.seamlessOpener(open)
+		req := &seekRequest{
+			seq:    res.seq,
+			stream: res.streamer,
+			kind:   requestSwapSeamless,
+			open:   wrapped,
+			labels: labels,
+		}
+
+		select {
+		case s.seamlessCh <- req:
+		case <-s.closing:
+		}
+	}()
 }
 
 // enrich starts the asynchronous metadata and duration lookups. Play never
@@ -2135,6 +2243,40 @@ func (s *Session) requestSwapBackend(name string) {
 	s.submit(req)
 }
 
+// requestSeamless accepts a finished source upgrade. The worker runs it without
+// parking the device or resetting the chain: the swap keeps the ring, so audio
+// is continuous, which is the reason the path exists. The user's seek or swap
+// owns the one worker slot, so when one is in flight or queued the upgrade is
+// parked in pendingSeamless rather than overwriting it, and promoted once the
+// worker falls idle.
+func (s *Session) requestSeamless(req *seekRequest) {
+	if !s.requestCurrent(req) {
+		return
+	}
+	if s.seekBusy || s.seekPending != nil {
+		s.pendingSeamless = req
+
+		return
+	}
+	s.startRequest(req)
+}
+
+// promoteSeamless starts a parked upgrade once the worker is idle and no seek
+// or swap is waiting. It runs after every finished request so an upgrade that
+// was preempted by a user seek is not stranded behind it. A request bound to a
+// track that has moved on is dropped.
+func (s *Session) promoteSeamless() {
+	req := s.pendingSeamless
+	if req == nil || s.seekBusy || s.seekPending != nil {
+		return
+	}
+	s.pendingSeamless = nil
+	if !s.requestCurrent(req) {
+		return
+	}
+	s.startRequest(req)
+}
+
 // submit queues a request, collapsing a burst to the newest one. The in-flight
 // worker is not disturbed; its completion starts the newest not-yet-started
 // request.
@@ -2190,6 +2332,35 @@ func (s *Session) decoderOpener(name, path string) (stream.Opener, *openerLabels
 	return open, labels
 }
 
+// seamlessOpener wraps an upgrade Opener so the labels of the decoder it builds
+// are recorded for the live view, mirroring decoderOpener. The opener runs in
+// the producer goroutine, so the labels are read only after the streamer has
+// acknowledged the swap that used them. A (nil, nil) result is turned into an
+// error here because the streamer would call Info on it and panic the producer.
+func (s *Session) seamlessOpener(open stream.Opener) (stream.Opener, *openerLabels) {
+	labels := &openerLabels{}
+	wrapped := func(stop <-chan struct{}) (decode.Decoder, error) {
+		select {
+		case <-s.closing:
+			return nil, ErrClosed
+		default:
+		}
+
+		d, err := open(stop)
+		if err != nil {
+			return nil, err
+		}
+		if d == nil {
+			return nil, fmt.Errorf("%w: upgrade opener returned a nil decoder", ErrProviderNoDecoder)
+		}
+		labels.decoder, labels.parser = decode.Describe(d)
+
+		return d, nil
+	}
+
+	return wrapped, labels
+}
+
 // startRequest hands one accepted request to a worker. At most one worker runs
 // at a time, so two engine steps never share a streamer or a device. The worker
 // owns the slow call and reports back on seekCh; it must not touch session
@@ -2228,6 +2399,16 @@ func (s *Session) startRequest(req *seekRequest) {
 			res.err = req.stream.SwapDecoder(req.frame, open)
 			if res.err == nil {
 				res.decoder, res.parser = labels.decoder, labels.parser
+			}
+		case requestSwapSeamless:
+			// The ring is kept, so this deliberately does not park the device
+			// or reset the chain: that is the whole point of the path. The
+			// streamer refuses a decoder that cannot be positioned, and every
+			// failure leaves the built decoder playing; handleSeamlessSwap
+			// treats it as a silent no-op rather than a Failed track.
+			res.err = req.stream.SwapDecoderSeamless(req.open)
+			if res.err == nil {
+				res.decoder, res.parser = req.labels.decoder, req.labels.parser
 			}
 		default:
 			res.err = req.stream.SeekFrame(framesFor(req.target))
@@ -2304,9 +2485,16 @@ func (s *Session) handleSeek(res seekResult) {
 		s.handleBackendSwap(res)
 	case requestSwapDecoder:
 		s.handleDecoderSwap(res)
+	case requestSwapSeamless:
+		s.handleSeamlessSwap(res)
 	default:
 		s.handleReposition(res)
 	}
+
+	// The worker is idle again, so a source upgrade parked behind whatever ran
+	// last can take the slot. A handler that already started a pending seek or
+	// swap leaves seekBusy true and this is a no-op.
+	s.promoteSeamless()
 }
 
 // handleReposition applies a finished seek. The device is resumed only when the
@@ -2387,6 +2575,29 @@ func (s *Session) handleDecoderSwap(res seekResult) {
 	}
 
 	s.emit(Swapped{Kind: "decoder", Name: res.name, Elapsed: res.elapsed})
+}
+
+// handleSeamlessSwap applies a finished source upgrade. Nothing is reported: no
+// event, no preference change. On success only the live decoder and parser
+// labels move; on failure they stand, because the streamer kept the old decoder
+// and the upgrade is an optimisation, not a track failure. Either way a seek or
+// swap queued behind the upgrade is started, since the upgrade never parked the
+// device the way a seek does.
+func (s *Session) handleSeamlessSwap(res seekResult) {
+	if res.stream != s.live || res.seq != s.seq {
+		s.startPendingRequest()
+
+		return
+	}
+
+	if res.err == nil {
+		s.updateView(func(v *view) {
+			v.decoder = res.decoder
+			v.parser = res.parser
+		})
+	}
+
+	s.startPendingRequest()
 }
 
 // handleBackendSwap installs a finished device rebuild. The old device is

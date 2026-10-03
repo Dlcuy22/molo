@@ -74,6 +74,15 @@ type Source struct {
 	// carried for the same reason as Meta: only the provider can reach the
 	// source.
 	Probe func(mode core.DurationMode) (core.StreamInfo, error)
+
+	// Upgrade optionally offers a replacement decoder for the seamless-swap
+	// path. When non-nil and the session has the experimental upgrade enabled,
+	// the session calls it once, off the control loop, after the track starts.
+	// It may block until the replacement is ready and must honour ctx. The
+	// returned Opener must build a decoder in the same format as Opener's, or
+	// the swap is refused and the original keeps playing. Nil means the source
+	// has no upgrade and the track uses the ordinary path.
+	Upgrade func(ctx context.Context) (stream.Opener, error)
 }
 
 // LocalAudio is the default provider: a filesystem path through the decode
