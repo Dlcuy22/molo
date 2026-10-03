@@ -1,6 +1,7 @@
 package player_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -84,6 +85,24 @@ func TestNewReturnsAPlayer(t *testing.T) {
 	}
 }
 
+// TestHandWrittenOption proves a consumer outside the module can author an
+// Option as a plain closure over the exported Config, with no access to the
+// internal session type.
+func TestHandWrittenOption(t *testing.T) {
+	p, err := player.New(
+		player.WithBackend("facade-test"),
+		func(c *player.Config) { c.Decoder = "opus-pion" },
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	if got := p.Settings().Decoder; got != "opus-pion" {
+		t.Fatalf("Settings().Decoder = %q, want opus-pion", got)
+	}
+}
+
 func TestFacadePlaysATrack(t *testing.T) {
 	p, err := player.New(player.WithBackend("facade-test"))
 	if err != nil {
@@ -135,6 +154,45 @@ func TestFacadeRejectsAnEmptyQueue(t *testing.T) {
 	}
 	if err := p.Seek(-time.Second); err == nil {
 		t.Fatal("Seek(negative) returned nil, want a validation error")
+	}
+}
+
+// TestFacadeReExportsCommandErrors proves the sentinels a synchronous command
+// returns or wraps are the same values the session owns, so a consumer outside
+// the module can match them with errors.Is.
+func TestFacadeReExportsCommandErrors(t *testing.T) {
+	p, err := player.New(player.WithBackend("facade-test"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	if err := p.PlayQueue(nil); !errors.Is(err, player.ErrEmptyQueue) {
+		t.Fatalf("PlayQueue(nil) = %v, want ErrEmptyQueue", err)
+	}
+
+	bad := p.Settings()
+	bad.Decoder = "not-a-codec"
+	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrUnknownDecoder) {
+		t.Fatalf("ApplySettings(bad decoder) = %v, want ErrUnknownDecoder", err)
+	}
+
+	bad = p.Settings()
+	bad.Backend = "not-a-backend"
+	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrUnknownBackend) {
+		t.Fatalf("ApplySettings(bad backend) = %v, want ErrUnknownBackend", err)
+	}
+
+	bad = p.Settings()
+	bad.Volume = 2.5
+	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrBadVolume) {
+		t.Fatalf("ApplySettings(bad volume) = %v, want ErrBadVolume", err)
+	}
+
+	bad = p.Settings()
+	bad.ProbeMode = core.DurationMode(99)
+	if err := p.ApplySettings(bad); !errors.Is(err, player.ErrBadProbeMode) {
+		t.Fatalf("ApplySettings(bad probe mode) = %v, want ErrBadProbeMode", err)
 	}
 }
 

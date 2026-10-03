@@ -38,16 +38,15 @@ type EffectChain struct {
 // for a UI that wants to drive a meter faster than the full snapshot.
 type EffectMeters = session.EffectMeters
 
-// Effects is the effect-chain editor surface. It is separate from Player so a
-// fake that only exercises transport need not implement an editor it never
-// uses, matching the engine's other capability interfaces (decode.Seeker,
-// dsp.Metered, dsp.Latent).
+// Effects is the effect-chain editor surface. Player embeds it, so every
+// Player offers these methods directly, and Effects returns the same view for
+// callers that want to name the surface.
 //
 // The kind accessor is named EffectKindList rather than EffectKinds because the
-// Player interface already owns EffectKinds for the plain []string list. One
-// type cannot carry two methods of the same name, and the plain list must keep
-// working for the existing chooser, so the detailed list gets its own name.
-// A UI that wants both reads Player.EffectKinds for the names and
+// Player interface also owns EffectKinds for the plain []string list. One type
+// cannot carry two methods of the same name, and the plain list must keep
+// working for the existing chooser, so the detailed list gets its own name. A
+// UI that wants both reads Player.EffectKinds for the names and
 // Effects.EffectKindList for the per-implementation detail.
 type Effects interface {
 	// EffectKindList lists every registered implementation, so a chooser can

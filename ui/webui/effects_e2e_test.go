@@ -24,10 +24,7 @@ func TestScriptedEffectRunsThroughTheEditor(t *testing.T) {
 	}
 	defer p.Close()
 
-	fx, ok := p.(player.Effects)
-	if !ok {
-		t.Fatal("player has no effect editor")
-	}
+	fx := p.Effects()
 
 	// The bundled Tremolo must be offered by the chooser.
 	var found bool
@@ -112,7 +109,7 @@ func TestEq20IsExposedThroughTheEditor(t *testing.T) {
 	}
 	defer p.Close()
 
-	fx := p.(player.Effects)
+	fx := p.Effects()
 
 	var found bool
 	for _, k := range fx.EffectKindList() {
@@ -178,7 +175,7 @@ func TestEffectWindowBridgeMapsTheChain(t *testing.T) {
 	}
 	defer p.Close()
 
-	fx := p.(player.Effects)
+	fx := p.Effects()
 	if _, err := fx.AddEffect("crossfeed", ""); err != nil {
 		t.Fatalf("AddEffect: %v", err)
 	}
@@ -234,10 +231,7 @@ func TestScriptedCompressorPublishesTelemetry(t *testing.T) {
 	}
 	defer p.Close()
 
-	fx, ok := p.(player.Effects)
-	if !ok {
-		t.Fatal("player has no effect editor")
-	}
+	fx := p.Effects()
 
 	// The bundled Compressor must be offered by the chooser, which is what
 	// proves the embedded effects/compressor.lua was picked up.

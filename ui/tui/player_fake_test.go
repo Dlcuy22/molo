@@ -369,4 +369,16 @@ func (f *fakePlayer) EffectSchema(kind string) ([]dsp.Param, error) {
 
 func (f *fakePlayer) EffectKinds() []string { return dsp.Default.Kinds() }
 
+// Effects satisfies the editor surface the Player interface embeds. The model
+// does not drive the editor yet, so these are inert and change no state.
+func (f *fakePlayer) Effects() player.Effects                        { return f }
+func (f *fakePlayer) EffectKindList() []player.EffectKind            { return nil }
+func (f *fakePlayer) EffectChain() player.EffectChain                { return player.EffectChain{} }
+func (f *fakePlayer) EffectMeters() []player.EffectMeters            { return nil }
+func (f *fakePlayer) AddEffect(kind, impl string) (string, error)    { return "", nil }
+func (f *fakePlayer) RemoveEffect(id string) error                   { return nil }
+func (f *fakePlayer) MoveEffect(id string, to int) error             { return nil }
+func (f *fakePlayer) SetEffectParam(id, key string, value any) error { return nil }
+func (f *fakePlayer) SetEffectBypass(id string, bypassed bool) error { return nil }
+
 var _ player.Player = (*fakePlayer)(nil)

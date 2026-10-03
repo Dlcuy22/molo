@@ -26,17 +26,11 @@ func newEffectsPlayer(t *testing.T, opts ...player.Option) player.Player {
 	return p
 }
 
-// effectsView narrows a Player to the Effects surface the way a UI does, and
-// fails if the concrete player stops implementing it.
+// effectsView narrows a Player to the Effects surface the way a UI does.
 func effectsView(t *testing.T, p player.Player) player.Effects {
 	t.Helper()
 
-	e, ok := p.(player.Effects)
-	if !ok {
-		t.Fatalf("%T does not implement player.Effects", p)
-	}
-
-	return e
+	return p.Effects()
 }
 
 // stageIDs names the stages in order, for a readable failure.

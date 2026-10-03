@@ -104,6 +104,32 @@ var ErrIndexOutOfRange = session.ErrIndexOutOfRange
 // behaviourally what the user meant. It is returned synchronously.
 var ErrNoLiveTrack = session.ErrNoLiveTrack
 
+// ErrEmptyQueue reports PlayQueue or InsertQueue handed nothing to play. Match
+// it with errors.Is.
+var ErrEmptyQueue = session.ErrEmptyQueue
+
+// ErrUnknownDecoder reports a decoder preference that named no registered
+// codec. ApplySettings wraps it, so a UI can tell a bad decoder from any other
+// rejected update. Match it with errors.Is.
+var ErrUnknownDecoder = session.ErrUnknownDecoder
+
+// ErrUnknownBackend reports a backend preference that named no registered
+// backend. ApplySettings wraps it. Match it with errors.Is.
+var ErrUnknownBackend = session.ErrUnknownBackend
+
+// ErrBadProbeMode reports a duration mode outside the known set. ApplySettings
+// wraps it. Match it with errors.Is.
+var ErrBadProbeMode = session.ErrBadProbeMode
+
+// ErrBadVolume reports a gain outside dsp's accepted range. ApplySettings wraps
+// it. Match it with errors.Is.
+var ErrBadVolume = session.ErrBadVolume
+
+// ErrNoProvider reports a configured provider list where none claimed the
+// reference, which WithProviders documents as a failed track rather than a
+// silent fallback to a file path. Match it with errors.Is.
+var ErrNoProvider = session.ErrNoProvider
+
 // ValidateDecoder reports whether name is a usable decoder preference: empty
 // means automatic selection. It is the same rule ApplySettings enforces, exposed
 // so a caller can check a value before offering it (a CLI flag, a settings
@@ -141,8 +167,23 @@ func UserBackends() []string { return playback.UserNames() }
 
 // Player is what a UI holds. Every command is non-blocking; the only errors a
 // command returns are immediate validation problems such as an empty queue.
+//
+// Concurrency: every method is safe to call from any goroutine. A command
+// appends to the engine's inbox under a short-lived mutex and wakes the control
+// loop without blocking, and every slow step runs on its own goroutine, so a UI
+// can drive the Player from whatever goroutine owns its event loop. Close is
+// idempotent and safe to call from any goroutine; it blocks until the engine has
+// stopped.
 type Player interface {
+	// Effects is the chain editor surface, embedded so every Player is
+	// directly usable as one. Effects returns the same view.
+	Effects
+
+	// Snapshot returns a cheap, read-only view of the player at one instant.
 	Snapshot() Snapshot
+	// Events returns the stream of player events. It never blocks the engine: a
+	// consumer that falls behind costs the oldest event, counted in
+	// Snapshot.DroppedEvents.
 	Events() <-chan Event
 
 	// Play replaces the queue with one track and starts it. ref is a track
@@ -157,7 +198,10 @@ type Player interface {
 	// a click on a row in a track list means. An index outside the queue is
 	// rejected synchronously and changes nothing.
 	PlayIndex(index int) error
+	// Next advances to the next queued track; past the last track it stops.
 	Next() error
+	// Prev goes back one track, restarting the current one when it is the
+	// first.
 	Prev() error
 	// InsertQueue inserts refs into the queue at index without touching the
 	// track that is playing, which is what "play next" means. An index at or
@@ -176,10 +220,19 @@ type Player interface {
 	// local-only setup.
 	Providers() []string
 
+	// Pause stops the device; it is ignored unless the player is playing.
 	Pause() error
+	// Resume restarts a paused device; it is ignored unless the player is
+	// paused.
 	Resume() error
+	// Stop ends playback and keeps the queue, so a later Play resumes from the
+	// same queue.
 	Stop() error
+	// Seek repositions the current track once the device has been paused, so
+	// the device never reads a half-flushed ring.
 	Seek(d time.Duration) error
+	// SetVolume changes the post-ring gain in [0, 1]. It takes effect on the
+	// next buffer and is safe to call while audio is running.
 	SetVolume(v float64)
 
 	// SwapDecoder forces the named decoder for the current track, reopening it
@@ -213,51 +266,114 @@ type Player interface {
 	EffectSchema(kind string) ([]dsp.Param, error)
 	// EffectKinds lists the registered effect kinds, sorted.
 	EffectKinds() []string
+	// Effects returns the chain editor over this player, the same value the
+	// embedded Effects methods act on.
+	Effects() Effects
 
 	// Tap returns the visualizer feed. The feed starts publishing on the first
 	// Read, so holding a Tap without reading it costs the audio path nothing.
 	Tap() Tap
 
+	// Close stops every goroutine and releases the device. It is idempotent
+	// and safe to call from any goroutine.
 	Close() error
 }
 
-// Option customises a Player. It is a function over the controller config, so
-// a new knob is one option and no new type.
-type Option func(*session.Config)
+// Option customises a Player. It is a function over Config, so a new knob is
+// one option and no new type, and a consumer outside the module can author one
+// as a plain closure.
+type Option func(*Config)
+
+// Config holds the public construction knobs an Option writes. Zero fields take
+// the documented default, and New maps a Config into the controller's own
+// config, so the empty Config is the intended setup.
+type Config struct {
+	// Backend is the playback backend name, default "oto".
+	Backend string
+
+	// EventBuffer is the event channel depth, default 64.
+	EventBuffer int
+
+	// RingFrames is the streamer ring size in output frames. Zero selects the
+	// streamer's own default of about 300 ms.
+	RingFrames int
+
+	// Volume is the initial gain in [0, 1]. Zero selects unity, because a
+	// muted-by-default player is never what a caller means.
+	Volume float64
+
+	// Resolver describes each track. Nil selects meta.Default().
+	Resolver meta.Resolver
+
+	// Providers resolves track references, highest priority first. See
+	// WithProviders for the ordering rule.
+	Providers []provider.AudioProvider
+
+	// ProbeMode selects how much work the asynchronous duration probe may do.
+	// Nil selects the cheap tail probe. A pointer, not a value, because
+	// core.DurationUnknown is the zero value and must stay distinguishable
+	// from "the caller did not choose".
+	ProbeMode *core.DurationMode
+
+	// Decoder is the initial decoder preference: a name from
+	// decode.Default.Codecs(), or empty for automatic selection.
+	Decoder string
+
+	// Pipeline is the post-ring effect chain. Zero is an empty chain, which
+	// means only the master gain runs. The Pre half is the streamer's business
+	// and is ignored here.
+	Pipeline dsp.Pipeline
+
+	// Experimental toggles not-yet-stable features. Zero is today's behaviour.
+	Experimental Experimental
+}
+
+// Experimental toggles features that are not yet stable, re-exported so a UI
+// can opt in without importing internal/session. The zero value is the current
+// behaviour.
+type Experimental = session.Experimental
+
+// WithExperimental enables or disables experimental features for this Player.
+// It is read once, at construction, like WithProviders: these knobs change how
+// a source is opened and swapped, so they cannot be a runtime setting. The zero
+// value leaves every path exactly as it behaves today.
+func WithExperimental(e Experimental) Option {
+	return func(c *Config) { c.Experimental = e }
+}
 
 // WithBackend selects the playback backend by registry name. The default is
 // "oto".
 func WithBackend(name string) Option {
-	return func(c *session.Config) { c.Backend = name }
+	return func(c *Config) { c.Backend = name }
 }
 
 // WithEventBuffer sets the event channel depth. A deeper buffer tolerates a
 // slower consumer before events are dropped.
 func WithEventBuffer(n int) Option {
-	return func(c *session.Config) { c.EventBuffer = n }
+	return func(c *Config) { c.EventBuffer = n }
 }
 
 // WithRingFrames sets the streamer ring size in output frames. Zero selects
 // the streamer default of about 300 ms.
 func WithRingFrames(n int) Option {
-	return func(c *session.Config) { c.RingFrames = n }
+	return func(c *Config) { c.RingFrames = n }
 }
 
 // WithVolume sets the initial gain in [0, 1]. Zero means unity.
 func WithVolume(v float64) Option {
-	return func(c *session.Config) { c.Volume = v }
+	return func(c *Config) { c.Volume = v }
 }
 
 // WithResolver supplies the metadata resolver. Nil selects meta.Default().
 func WithResolver(r meta.Resolver) Option {
-	return func(c *session.Config) { c.Resolver = r }
+	return func(c *Config) { c.Resolver = r }
 }
 
 // WithProbeMode selects how much work the asynchronous duration probe may do
 // when a track starts. It does not affect playback, only how quickly and how
 // accurately the reported duration becomes known.
 func WithProbeMode(mode core.DurationMode) Option {
-	return func(c *session.Config) { c.ProbeMode = &mode }
+	return func(c *Config) { c.ProbeMode = &mode }
 }
 
 // WithDecoder picks the decoder by registry name, for example "opus-pion" or
@@ -265,7 +381,7 @@ func WithProbeMode(mode core.DurationMode) Option {
 // highest weight wins. It is the starting value; ApplySettings can change it
 // while the player runs.
 func WithDecoder(name string) Option {
-	return func(c *session.Config) { c.Decoder = name }
+	return func(c *Config) { c.Decoder = name }
 }
 
 // WithPipeline sets the initial post-ring effect chain. Only the Post half is
@@ -273,7 +389,7 @@ func WithDecoder(name string) Option {
 // player is built, so a bad stage fails New rather than becoming a Failed event
 // on the first Play. ApplyPipeline can change the chain while the player runs.
 func WithPipeline(p dsp.Pipeline) Option {
-	return func(c *session.Config) { c.Pipeline = p }
+	return func(c *Config) { c.Pipeline = p }
 }
 
 // WithProviders sets the audio source providers, highest priority first. Each
@@ -284,7 +400,7 @@ func WithPipeline(p dsp.Pipeline) Option {
 // A non-empty list that claims nothing fails the track with ErrNoProvider
 // rather than silently treating the reference as a file path.
 func WithProviders(ps ...provider.AudioProvider) Option {
-	return func(c *session.Config) { c.Providers = append([]provider.AudioProvider(nil), ps...) }
+	return func(c *Config) { c.Providers = append([]provider.AudioProvider(nil), ps...) }
 }
 
 // player is the facade implementation. It adds nothing to the session: its
@@ -297,12 +413,23 @@ type player struct {
 // so it succeeds headless; a backend failure surfaces as a Failed event on the
 // first Play.
 func New(opts ...Option) (Player, error) {
-	var cfg session.Config
+	var cfg Config
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	s, err := session.New(cfg)
+	s, err := session.New(session.Config{
+		Backend:      cfg.Backend,
+		EventBuffer:  cfg.EventBuffer,
+		RingFrames:   cfg.RingFrames,
+		Volume:       cfg.Volume,
+		Resolver:     cfg.Resolver,
+		Providers:    cfg.Providers,
+		ProbeMode:    cfg.ProbeMode,
+		Decoder:      cfg.Decoder,
+		Pipeline:     cfg.Pipeline,
+		Experimental: cfg.Experimental,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +459,8 @@ func (p *player) InsertQueueAndPlay(index int, refs []string) error {
 	return p.session.InsertQueueAndPlay(index, refs)
 }
 
-// Providers lists the names of the providers in effect, in priority order, for// a UI that shows where audio can come from. It is empty for the default
+// Providers lists the names of the providers in effect, in priority order, for
+// a UI that shows where audio can come from. It is empty for the default
 // local-only setup.
 func (p *player) Providers() []string        { return p.session.Providers() }
 func (p *player) Pause() error               { return p.session.Pause() }

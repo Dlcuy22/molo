@@ -97,12 +97,8 @@ func (s *PlayerService) effects() (player.Effects, error) {
 	if s.player == nil {
 		return nil, fmt.Errorf("no player")
 	}
-	fx, ok := s.player.(player.Effects)
-	if !ok {
-		return nil, fmt.Errorf("player has no effect editor")
-	}
 
-	return fx, nil
+	return s.player, nil
 }
 
 // EffectKinds lists every registered effect implementation, so the registry tab
