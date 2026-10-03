@@ -17,16 +17,16 @@ place: decoders, streamer, ring buffer, device output, DSP, metadata, the Lua
 scripting engine, and the facade. The known limitations are listed here rather
 than hidden:
 
-- Some formats cannot seek natively. M4A and AAC have no native seek; the
-  streamer positions them with the reopen-and-discard fallback.
-- Some formats cannot report a duration up front. AAC (ADTS) stores no total in
-  its header, so the length is learned while playing.
-- A non-48 kHz source whose sample count does not divide evenly into the 48 kHz
-  output reports an unknown duration. 44.1 kHz FLAC is the common trigger, and
-  the same conversion is used by the MP3, WAV, and M4A decoders. Audio and
-  seeking are unaffected (where the format supports seeking); only the length
-  is unknown. A UI that gates its seek bar on a known duration disables it, so
-  such a track plays without a scrubbable position or a percentage.
+- The AAC paths decode AAC-LC only; an HE-AAC (SBR or PS) stream is rejected at
+  open rather than decoded wrong.
+- A forward-only source, such as a network body or a pipe, has no native seek,
+  so the streamer reopens and discards to position it. Every local file format
+  seeks natively, including the AAC and M4A paths, which index the stream.
+- The duration is exact once the asynchronous probe completes. Until it does,
+  the length is reported as unknown, so a UI that gates its seek bar on the
+  duration shows no position for the first moment of a track. A 44.1 kHz source
+  whose samples do not divide evenly into 48 kHz frames now reports its exact
+  length too, because the length is kept in the source domain.
 
 ## Architecture and approach
 
@@ -134,8 +134,8 @@ codec implementation is genuinely needed, the project reaches it through
 | `flac` | Lossless | 90 | `.flac` | Bit-exact, normalized to 48 kHz |
 | `wav` | Wav | 90 | `.wav` | Uncompressed |
 | `mp3` | Mp3 | 90 | `.mp3` | Exact sample seek |
-| `m4a` | M4a | 90 | `.m4a`, `.mp4` | AAC-LC only, no native seek |
-| `aac` | Aac | 90 | `.aac` | ADTS, no native seek, duration unknown until played |
+| `m4a` | M4a | 90 | `.m4a`, `.mp4` | AAC-LC only, native seek from the sample table |
+| `aac` | Aac | 90 | `.aac` | ADTS, native seek and exact duration from a header index |
 | `webm-opus` | WebM | 90 | `.webm`, `.weba` | Opus in WebM/Matroska |
 
 Weight only breaks ties between decoders that claim the same extension, and it
