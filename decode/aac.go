@@ -37,6 +37,7 @@ func init() {
 // AacFactory decodes AAC-LC in ADTS without cgo.
 type AacFactory struct{}
 
+// NewAacFactory returns a factory for the AAC-LC in ADTS decoder.
 func NewAacFactory() *AacFactory { return &AacFactory{} }
 
 func (f *AacFactory) Name() string { return "aac" }

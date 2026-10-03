@@ -23,6 +23,12 @@ import (
 // extension or by content sniffing.
 var ErrUnsupported = errors.New("decode: unsupported format")
 
+// ErrNotSeekable means the decoder cannot reposition on this source. A decoder
+// returns it from SeekFrame for a forward-only stream (a network body or a
+// pipe), so the streamer can fall back to reopening and discarding instead of
+// failing the track.
+var ErrNotSeekable = errors.New("decode: source is not seekable")
+
 // ErrUnknownCodec means OpenNamed was given a name no factory registered.
 var ErrUnknownCodec = errors.New("decode: unknown codec")
 

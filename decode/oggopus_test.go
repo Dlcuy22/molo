@@ -69,7 +69,7 @@ type oggPacketRead struct {
 	granule int64
 }
 
-func mustNewOggOpusReader(t *testing.T, path string) *OggOpusReader {
+func mustNewOggOpusReader(t *testing.T, path string) *oggOpusReader {
 	t.Helper()
 
 	f, err := os.Open(path)
@@ -78,15 +78,15 @@ func mustNewOggOpusReader(t *testing.T, path string) *OggOpusReader {
 	}
 	t.Cleanup(func() { f.Close() })
 
-	r, err := NewOggOpusReader(f)
+	r, err := newOggOpusReader(f)
 	if err != nil {
-		t.Fatalf("NewOggOpusReader(%s): %v", path, err)
+		t.Fatalf("newOggOpusReader(%s): %v", path, err)
 	}
 
 	return r
 }
 
-func readOggOpusPackets(t *testing.T, r *OggOpusReader) []oggPacketRead {
+func readOggOpusPackets(t *testing.T, r *oggOpusReader) []oggPacketRead {
 	t.Helper()
 
 	var out []oggPacketRead
@@ -242,10 +242,10 @@ func TestOggOpusReaderRejectsNonOpus(t *testing.T) {
 		if err != nil {
 			t.Fatalf("open %s: %v", path, err)
 		}
-		_, err = NewOggOpusReader(f)
+		_, err = newOggOpusReader(f)
 		f.Close()
-		if !errors.Is(err, ErrOggOpusNotOpus) {
-			t.Fatalf("%s: err = %v, want ErrOggOpusNotOpus", filepath.Base(path), err)
+		if !errors.Is(err, errOggOpusNotOpus) {
+			t.Fatalf("%s: err = %v, want errOggOpusNotOpus", filepath.Base(path), err)
 		}
 	}
 
@@ -254,7 +254,7 @@ func TestOggOpusReaderRejectsNonOpus(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer f.Close()
-	if _, err := NewOggOpusReader(f); err == nil {
+	if _, err := newOggOpusReader(f); err == nil {
 		t.Fatal("reader accepted a file that is not Ogg at all")
 	}
 }
@@ -271,8 +271,8 @@ func TestOggOpusReaderRejectsUnsupportedMappingFamily(t *testing.T) {
 	}
 	defer f.Close()
 
-	if _, err := NewOggOpusReader(f); !errors.Is(err, ErrOggOpusUnsupportedMapping) {
-		t.Fatalf("err = %v, want ErrOggOpusUnsupportedMapping", err)
+	if _, err := newOggOpusReader(f); !errors.Is(err, errOggOpusUnsupportedMapping) {
+		t.Fatalf("err = %v, want errOggOpusUnsupportedMapping", err)
 	}
 }
 
@@ -539,8 +539,8 @@ func TestOggOpusReaderRejectsDroppedContinuation(t *testing.T) {
 	)
 
 	r := mustNewOggOpusReader(t, path)
-	if _, _, err := r.ReadPacket(); !errors.Is(err, ErrOggOpusBadPage) {
-		t.Fatalf("err = %v, want ErrOggOpusBadPage", err)
+	if _, _, err := r.ReadPacket(); !errors.Is(err, errOggOpusBadPage) {
+		t.Fatalf("err = %v, want errOggOpusBadPage", err)
 	}
 }
 
@@ -712,7 +712,7 @@ func expectedSeekIndex(index []oggOpusPageEntry, target, preroll int64) int {
 	return best
 }
 
-func readN(t *testing.T, r *OggOpusReader, n int) []oggPacketRead {
+func readN(t *testing.T, r *oggOpusReader, n int) []oggPacketRead {
 	t.Helper()
 
 	var out []oggPacketRead
@@ -805,8 +805,8 @@ func TestOggOpusReaderReportsChecksumMismatch(t *testing.T) {
 	)
 
 	r := mustNewOggOpusReader(t, path)
-	if _, _, err := r.ReadPacket(); !errors.Is(err, ErrOggOpusChecksum) {
-		t.Fatalf("err = %v, want ErrOggOpusChecksum", err)
+	if _, _, err := r.ReadPacket(); !errors.Is(err, errOggOpusChecksum) {
+		t.Fatalf("err = %v, want errOggOpusChecksum", err)
 	}
 }
 
@@ -821,8 +821,8 @@ func TestOggOpusReaderRejectsCorruptHeadPage(t *testing.T) {
 	}
 	defer f.Close()
 
-	if _, err := NewOggOpusReader(f); !errors.Is(err, ErrOggOpusChecksum) {
-		t.Fatalf("err = %v, want ErrOggOpusChecksum", err)
+	if _, err := newOggOpusReader(f); !errors.Is(err, errOggOpusChecksum) {
+		t.Fatalf("err = %v, want errOggOpusChecksum", err)
 	}
 }
 
@@ -854,10 +854,10 @@ func TestOggOpusReaderDoesNotOwnOrLeakInput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("open fixture: %v", err)
 		}
-		r, err := NewOggOpusReader(f)
+		r, err := newOggOpusReader(f)
 		if err != nil {
 			f.Close()
-			t.Fatalf("NewOggOpusReader: %v", err)
+			t.Fatalf("newOggOpusReader: %v", err)
 		}
 		readOggOpusPackets(t, r)
 
@@ -893,7 +893,7 @@ func TestOggOpusReaderSeekCost(t *testing.T) {
 	buildStart := time.Now()
 	r := mustNewOggOpusReader(t, path)
 	build := time.Since(buildStart)
-	t.Logf("NewOggOpusReader: %v for %d indexed pages", build, len(r.index))
+	t.Logf("newOggOpusReader: %v for %d indexed pages", build, len(r.index))
 
 	d, err := NewPionOpusFactory().Open(path)
 	if err != nil {
@@ -965,9 +965,9 @@ func BenchmarkOggOpusReaderSeek(b *testing.B) {
 	}
 	defer f.Close()
 
-	r, err := NewOggOpusReader(f)
+	r, err := newOggOpusReader(f)
 	if err != nil {
-		b.Fatalf("NewOggOpusReader: %v", err)
+		b.Fatalf("newOggOpusReader: %v", err)
 	}
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {

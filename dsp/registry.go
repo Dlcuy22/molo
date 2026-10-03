@@ -87,9 +87,10 @@ var Default = NewRegistry()
 // Register adds a factory to the process-wide Default registry.
 func Register(f Factory) { Default.Register(f) }
 
-// Register appends a factory. It panics on an empty kind or impl and on a
-// duplicate pair: a shadowed implementation is a bug that would otherwise only
-// surface as the wrong sound, the same reasoning decode.Register uses.
+// Register appends a factory. It panics only on a nil factory or on an empty
+// kind or impl. A duplicate (kind, impl) pair is not a panic: the pair is
+// appended, and byImpl resolves the last registration, so a later registration
+// overrides the earlier one for lookups.
 func (r *registry) Register(f Factory) {
 	if f == nil {
 		panic("dsp: Register requires a factory")

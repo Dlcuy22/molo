@@ -63,8 +63,8 @@ const (
 // Errors from the EBML layer. They are wrapped by the reader with the element
 // name it was expecting so a message identifies the field, not just the byte.
 var (
-	ErrEBMLBadVint   = errors.New("decode: invalid EBML variable-length integer")
-	ErrEBMLTruncated = errors.New("decode: truncated EBML element")
+	errEBMLBadVint   = errors.New("decode: invalid EBML variable-length integer")
+	errEBMLTruncated = errors.New("decode: truncated EBML element")
 )
 
 // ebmlID reads the Element ID at off. The returned id keeps its marker bit, so
@@ -76,11 +76,11 @@ var (
 // other 1-byte ID, including 0x80, is valid.
 func ebmlID(b []byte, off int) (id uint32, width int, err error) {
 	if off >= len(b) {
-		return 0, 0, fmt.Errorf("%w: id past end at %d", ErrEBMLTruncated, off)
+		return 0, 0, fmt.Errorf("%w: id past end at %d", errEBMLTruncated, off)
 	}
 	first := b[off]
 	if first == 0 {
-		return 0, 0, fmt.Errorf("%w: zero leading byte at %d", ErrEBMLBadVint, off)
+		return 0, 0, fmt.Errorf("%w: zero leading byte at %d", errEBMLBadVint, off)
 	}
 
 	width = 1
@@ -89,15 +89,15 @@ func ebmlID(b []byte, off int) (id uint32, width int, err error) {
 		mask >>= 1
 		width++
 		if width > ebmlMaxIDLen {
-			return 0, 0, fmt.Errorf("%w: id longer than %d bytes at %d", ErrEBMLBadVint, ebmlMaxIDLen, off)
+			return 0, 0, fmt.Errorf("%w: id longer than %d bytes at %d", errEBMLBadVint, ebmlMaxIDLen, off)
 		}
 	}
 	// The all-ones 1-byte ID is the reserved value; Matroska does not use it.
 	if width == 1 && first == 0xFF {
-		return 0, 0, fmt.Errorf("%w: reserved id 0xFF at %d", ErrEBMLBadVint, off)
+		return 0, 0, fmt.Errorf("%w: reserved id 0xFF at %d", errEBMLBadVint, off)
 	}
 	if off+width > len(b) {
-		return 0, 0, fmt.Errorf("%w: id needs %d bytes at %d", ErrEBMLTruncated, width, off)
+		return 0, 0, fmt.Errorf("%w: id needs %d bytes at %d", errEBMLTruncated, width, off)
 	}
 
 	id = 0
@@ -113,11 +113,11 @@ func ebmlID(b []byte, off int) (id uint32, width int, err error) {
 // which a master element uses to mean "size not known here".
 func ebmlVint(b []byte, off int) (val uint64, width int, unknown bool, err error) {
 	if off >= len(b) {
-		return 0, 0, false, fmt.Errorf("%w: vint past end at %d", ErrEBMLTruncated, off)
+		return 0, 0, false, fmt.Errorf("%w: vint past end at %d", errEBMLTruncated, off)
 	}
 	first := b[off]
 	if first == 0 {
-		return 0, 0, false, fmt.Errorf("%w: zero leading byte at %d", ErrEBMLBadVint, off)
+		return 0, 0, false, fmt.Errorf("%w: zero leading byte at %d", errEBMLBadVint, off)
 	}
 
 	width = 1
@@ -126,11 +126,11 @@ func ebmlVint(b []byte, off int) (val uint64, width int, unknown bool, err error
 		mask >>= 1
 		width++
 		if width > ebmlMaxSizeLen {
-			return 0, 0, false, fmt.Errorf("%w: size longer than %d bytes at %d", ErrEBMLBadVint, ebmlMaxSizeLen, off)
+			return 0, 0, false, fmt.Errorf("%w: size longer than %d bytes at %d", errEBMLBadVint, ebmlMaxSizeLen, off)
 		}
 	}
 	if off+width > len(b) {
-		return 0, 0, false, fmt.Errorf("%w: size needs %d bytes at %d", ErrEBMLTruncated, width, off)
+		return 0, 0, false, fmt.Errorf("%w: size needs %d bytes at %d", errEBMLTruncated, width, off)
 	}
 
 	val = uint64(first & (mask - 1))
@@ -196,7 +196,7 @@ func readEBMLHeader(b []byte, off int64) (ebmlElement, error) {
 // rather than reading past the parent.
 func ebmlChildren(b []byte, start, end int64, fn func(ebmlElement) error) error {
 	if start > end || end > int64(len(b)) {
-		return fmt.Errorf("%w: child range [%d, %d) outside %d bytes", ErrEBMLTruncated, start, end, len(b))
+		return fmt.Errorf("%w: child range [%d, %d) outside %d bytes", errEBMLTruncated, start, end, len(b))
 	}
 
 	off := start
@@ -210,7 +210,7 @@ func ebmlChildren(b []byte, start, end int64, fn func(ebmlElement) error) error 
 			// last child the walker can see.
 			e.Next = end
 		} else if e.Next > end {
-			return fmt.Errorf("%w: element %#x ends at %d past %d", ErrEBMLTruncated, e.ID, e.Next, end)
+			return fmt.Errorf("%w: element %#x ends at %d past %d", errEBMLTruncated, e.ID, e.Next, end)
 		}
 
 		if e.ID != ebmlIDVoid && e.ID != ebmlIDCRC32 {
@@ -222,7 +222,7 @@ func ebmlChildren(b []byte, start, end int64, fn func(ebmlElement) error) error 
 		if e.Next <= off {
 			// A zero-length element must still advance the cursor; anything
 			// that fails to is a loop, not data.
-			return fmt.Errorf("%w: element %#x at %d did not advance", ErrEBMLBadVint, e.ID, off)
+			return fmt.Errorf("%w: element %#x at %d did not advance", errEBMLBadVint, e.ID, off)
 		}
 		off = e.Next
 	}
@@ -234,10 +234,10 @@ func ebmlChildren(b []byte, start, end int64, fn func(ebmlElement) error) error 
 // big-endian integer of 0 to 8 bytes, where 0 bytes is the value zero.
 func ebmlUint(b []byte, off, size int64) (uint64, error) {
 	if size < 0 || size > 8 {
-		return 0, fmt.Errorf("%w: uinteger size %d", ErrEBMLBadVint, size)
+		return 0, fmt.Errorf("%w: uinteger size %d", errEBMLBadVint, size)
 	}
 	if off < 0 || off+size > int64(len(b)) {
-		return 0, fmt.Errorf("%w: uinteger at %d size %d", ErrEBMLTruncated, off, size)
+		return 0, fmt.Errorf("%w: uinteger at %d size %d", errEBMLTruncated, off, size)
 	}
 
 	var v uint64
@@ -254,7 +254,7 @@ func ebmlUint(b []byte, off, size int64) (uint64, error) {
 // reading it as an integer yields garbage.
 func ebmlFloat(b []byte, off, size int64) (float64, error) {
 	if off < 0 || off+size > int64(len(b)) {
-		return 0, fmt.Errorf("%w: float at %d size %d", ErrEBMLTruncated, off, size)
+		return 0, fmt.Errorf("%w: float at %d size %d", errEBMLTruncated, off, size)
 	}
 	switch size {
 	case 4:
@@ -262,25 +262,25 @@ func ebmlFloat(b []byte, off, size int64) (float64, error) {
 	case 8:
 		return math.Float64frombits(binary.BigEndian.Uint64(b[off : off+8])), nil
 	default:
-		return 0, fmt.Errorf("%w: float size %d", ErrEBMLBadVint, size)
+		return 0, fmt.Errorf("%w: float size %d", errEBMLBadVint, size)
 	}
 }
 
 // readFullAt reads size bytes at off into a fresh slice, bounded by limit: the
 // exclusive end of the extent the caller knows is readable. It gives the
 // walkers a single place to turn a short read or an oversized element into
-// ErrEBMLTruncated instead of leaking io.ErrUnexpectedEOF, and it is the one
+// errEBMLTruncated instead of leaking io.ErrUnexpectedEOF, and it is the one
 // guard that stops a corrupt size VINT from reaching make() and panicking.
 func readFullAt(r io.ReaderAt, off int64, size int64, limit int64) ([]byte, error) {
 	if size < 0 || off < 0 {
-		return nil, fmt.Errorf("%w: negative read off %d size %d", ErrEBMLTruncated, off, size)
+		return nil, fmt.Errorf("%w: negative read off %d size %d", errEBMLTruncated, off, size)
 	}
 	if limit < off || off+size > limit {
-		return nil, fmt.Errorf("%w: read of %d bytes at %d exceeds limit %d", ErrEBMLTruncated, size, off, limit)
+		return nil, fmt.Errorf("%w: read of %d bytes at %d exceeds limit %d", errEBMLTruncated, size, off, limit)
 	}
 	buf := make([]byte, size)
 	if _, err := r.ReadAt(buf, off); err != nil {
-		return nil, fmt.Errorf("%w: read %d bytes at %d: %w", ErrEBMLTruncated, size, off, err)
+		return nil, fmt.Errorf("%w: read %d bytes at %d: %w", errEBMLTruncated, size, off, err)
 	}
 
 	return buf, nil

@@ -163,9 +163,9 @@ func BenchmarkPionDecodePacket(b *testing.B) {
 		b.Fatalf("open: %v", err)
 	}
 	defer f.Close()
-	r, err := NewOggOpusReader(f)
+	r, err := newOggOpusReader(f)
 	if err != nil {
-		b.Fatalf("NewOggOpusReader: %v", err)
+		b.Fatalf("newOggOpusReader: %v", err)
 	}
 	pkt, _, err := r.ReadPacket()
 	if err != nil {

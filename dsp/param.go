@@ -17,9 +17,13 @@ var ErrUnknownParam = errors.New("dsp: unknown parameter")
 type Kind uint8
 
 const (
+	// Float is a continuous number, clamped to its range.
 	Float Kind = iota
+	// Int is a whole number, rounded and clamped to its range.
 	Int
+	// Bool is a two-state value.
 	Bool
+	// Enum is one of a fixed list of Options; a value outside it is rejected.
 	Enum
 )
 

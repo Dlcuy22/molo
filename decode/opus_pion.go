@@ -71,6 +71,8 @@ func init() {
 // PionOpusFactory decodes Ogg Opus without cgo, using the fast warm-up window.
 type PionOpusFactory struct{}
 
+// NewPionOpusFactory returns a factory for the pure-Go Ogg Opus decoder that
+// uses the fast warm-up window.
 func NewPionOpusFactory() *PionOpusFactory { return &PionOpusFactory{} }
 
 func (f *PionOpusFactory) Name() string { return "opus-pion" }
@@ -110,6 +112,8 @@ func (f *PionOpusFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo
 // below PionOpusFactory's, so it is never chosen automatically.
 type PionOpusExactFactory struct{}
 
+// NewPionOpusExactFactory returns a factory for the pure-Go Ogg Opus decoder
+// whose large warm-up window makes a seek bit-exact.
 func NewPionOpusExactFactory() *PionOpusExactFactory { return &PionOpusExactFactory{} }
 
 func (f *PionOpusExactFactory) Name() string { return "opus-pion-exact" }
@@ -181,7 +185,7 @@ func (s pionReaderSource) rewindable() bool {
 }
 
 // opusPacketSource is the container surface the decoder drives. Both the
-// seekable OggOpusReader and the forward-only fallback satisfy it; the fallback
+// seekable oggOpusReader and the forward-only fallback satisfy it; the fallback
 // reports an unknown total and refuses SeekGranule.
 type opusPacketSource interface {
 	PreSkip() int
@@ -198,7 +202,7 @@ type opusPacketSource interface {
 // that never buffers the stream.
 func openOpusPackets(r io.Reader) (opusPacketSource, error) {
 	if rs, ok := r.(io.ReadSeeker); ok {
-		return NewOggOpusReader(rs)
+		return newOggOpusReader(rs)
 	}
 
 	return newForwardOggOpus(r)
@@ -470,7 +474,7 @@ func (d *pionOpusDecoder) SeekFrame(frame int64) error {
 		return fmt.Errorf("decode: negative seek target %d", frame)
 	}
 	if !d.src.rewindable() {
-		return errors.New("decode: source is not seekable")
+		return ErrNotSeekable
 	}
 
 	preSkip := int64(d.reader.PreSkip())
@@ -613,7 +617,7 @@ func (d *pionOpusDecoder) Close() error {
 }
 
 // forwardOggOpus reads Opus audio packets from a stream that cannot seek. It
-// offers the same operations as OggOpusReader but holds no index: a
+// offers the same operations as oggOpusReader but holds no index: a
 // forward-only source cannot know its length, and the decoder refuses to seek
 // before this type is ever asked to reposition.
 type forwardOggOpus struct {
@@ -627,7 +631,7 @@ type forwardOggOpus struct {
 	pendingHandoff []byte
 	pendingGranule int64
 
-	// Streaming state, mirroring OggOpusReader's page walk.
+	// Streaming state, mirroring oggOpusReader's page walk.
 	lacing     []byte
 	body       []byte
 	segIndex   int
@@ -644,7 +648,7 @@ func newForwardOggOpus(r io.Reader) (*forwardOggOpus, error) {
 	head, _, err := f.nextPacket()
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("%w: stream has no packets", ErrOggOpusNotOpus)
+			return nil, fmt.Errorf("%w: stream has no packets", errOggOpusNotOpus)
 		}
 
 		return nil, err
@@ -690,10 +694,11 @@ func (f *forwardOggOpus) Position() int64 { return f.pos }
 // only ever a lower bound.
 func (f *forwardOggOpus) PositionExact() bool { return false }
 
-// SeekGranule always fails: a forward-only stream cannot be repositioned. The
-// decoder checks rewindable before calling this, so it is a backstop.
+// SeekGranule always fails with ErrNotSeekable: a forward-only stream cannot be
+// repositioned. The decoder checks rewindable before calling this, so it is a
+// backstop.
 func (f *forwardOggOpus) SeekGranule(int64, int64) error {
-	return errors.New("decode: source is not seekable")
+	return ErrNotSeekable
 }
 
 // loadPage reads and verifies one page straight from the stream.
@@ -704,17 +709,17 @@ func (f *forwardOggOpus) loadPage() error {
 			return io.EOF
 		}
 
-		return fmt.Errorf("%w: truncated page header: %w", ErrOggOpusBadPage, err)
+		return fmt.Errorf("%w: truncated page header: %w", errOggOpusBadPage, err)
 	}
 	if string(page[:4]) != oggCapture {
-		return fmt.Errorf("%w: no Ogg capture pattern", ErrOggOpusBadPage)
+		return fmt.Errorf("%w: no Ogg capture pattern", errOggOpusBadPage)
 	}
 
 	segments := int(page[oggSegmentOff])
 	lacingOff := len(page)
 	page = append(page, make([]byte, segments)...)
 	if _, err := io.ReadFull(f.src, page[lacingOff:]); err != nil {
-		return fmt.Errorf("%w: truncated page lacing: %w", ErrOggOpusBadPage, err)
+		return fmt.Errorf("%w: truncated page lacing: %w", errOggOpusBadPage, err)
 	}
 
 	body := 0
@@ -724,13 +729,13 @@ func (f *forwardOggOpus) loadPage() error {
 	bodyOff := len(page)
 	page = append(page, make([]byte, body)...)
 	if _, err := io.ReadFull(f.src, page[bodyOff:]); err != nil {
-		return fmt.Errorf("%w: truncated page body: %w", ErrOggOpusBadPage, err)
+		return fmt.Errorf("%w: truncated page body: %w", errOggOpusBadPage, err)
 	}
 
 	stored := binary.LittleEndian.Uint32(page[22:26])
 	binary.LittleEndian.PutUint32(page[22:26], 0)
 	if got := oggOpusChecksum(page); got != stored {
-		return fmt.Errorf("%w: page has %08x, want %08x", ErrOggOpusChecksum, got, stored)
+		return fmt.Errorf("%w: page has %08x, want %08x", errOggOpusChecksum, got, stored)
 	}
 
 	f.lacing = page[lacingOff : lacingOff+segments]
@@ -744,7 +749,7 @@ func (f *forwardOggOpus) loadPage() error {
 }
 
 // nextPacket reassembles one packet across lacing values and pages, exactly
-// like OggOpusReader but without ever seeking backwards. The stream starts at a
+// like oggOpusReader but without ever seeking backwards. The stream starts at a
 // packet boundary, so the mid-packet skip the seekable reader needs for a
 // post-seek start never applies here.
 func (f *forwardOggOpus) nextPacket() ([]byte, int64, error) {

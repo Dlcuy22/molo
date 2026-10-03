@@ -7,10 +7,6 @@ import (
 	"github.com/dlcuy22/player/dsp"
 )
 
-// ErrUnknownParam mirrors dsp.ErrUnknownParam so a caller can test one sentinel
-// for both the built-in and the scripted parameter paths.
-var ErrUnknownParam = dsp.ErrUnknownParam
-
 // numericKind reports whether a declared kind word names a number. It is the
 // one place the float/int aliases live, so a build-time check that reads a kind
 // before the schema exists cannot drift from buildParam's switch.

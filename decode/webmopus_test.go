@@ -352,7 +352,7 @@ func writeWebM(t *testing.T, name string, body []byte) string {
 }
 
 // mustWebMReader opens a built file.
-func mustWebMReader(t *testing.T, path string) *WebMOpusReader {
+func mustWebMReader(t *testing.T, path string) *webMOpusReader {
 	t.Helper()
 
 	f, err := os.Open(path)
@@ -361,9 +361,9 @@ func mustWebMReader(t *testing.T, path string) *WebMOpusReader {
 	}
 	t.Cleanup(func() { f.Close() })
 
-	r, err := NewWebMOpusReader(f)
+	r, err := newWebMOpusReader(f)
 	if err != nil {
-		t.Fatalf("NewWebMOpusReader(%s): %v", path, err)
+		t.Fatalf("newWebMOpusReader(%s): %v", path, err)
 	}
 
 	return r
@@ -983,7 +983,7 @@ func TestWebMOpusRejectsBadStreams(t *testing.T) {
 				t.Fatalf("open: %v", err)
 			}
 			defer f.Close()
-			if _, err := NewWebMOpusReader(f); err == nil {
+			if _, err := newWebMOpusReader(f); err == nil {
 				t.Fatal("reader accepted a malformed stream")
 			}
 		})
@@ -1008,7 +1008,7 @@ func TestWebMOpusRejectsBadIDAndPanicFree(t *testing.T) {
 				t.Fatalf("open: %v", err)
 			}
 			defer f.Close()
-			if _, err := NewWebMOpusReader(f); err == nil {
+			if _, err := newWebMOpusReader(f); err == nil {
 				t.Fatal("reader accepted corrupt input")
 			}
 		})
@@ -1127,7 +1127,7 @@ func TestWebMOpusRejectsHugeElementSize(t *testing.T) {
 
 			// Opening is allowed to succeed for a corrupt cluster (the index is
 			// built from headers), so the read path must also be panic-free.
-			r, err := NewWebMOpusReader(f)
+			r, err := newWebMOpusReader(f)
 			if err != nil {
 				return
 			}
@@ -1350,7 +1350,7 @@ func TestWebMOpusSkipsUnknownSizeVoid(t *testing.T) {
 	}
 	defer f.Close()
 
-	if _, err := NewWebMOpusReader(f); err == nil {
+	if _, err := newWebMOpusReader(f); err == nil {
 		t.Fatal("reader silently accepted an unknown-size Void and dropped its clusters")
 	}
 }
@@ -1397,7 +1397,7 @@ func TestWebMOpusLacingNegativeDeltaAndEmptyFrames(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer bf.Close()
-	if _, err := NewWebMOpusReader(bf); err == nil {
+	if _, err := newWebMOpusReader(bf); err == nil {
 		t.Fatal("reader accepted a zero-length laced frame")
 	}
 }
@@ -1453,7 +1453,7 @@ func decodeWebMFixture(t *testing.T, name string) []float32 {
 	return decodeAll(t, d)
 }
 
-func readWebMPackets(t *testing.T, r *WebMOpusReader) []webmPacketRead {
+func readWebMPackets(t *testing.T, r *webMOpusReader) []webmPacketRead {
 	t.Helper()
 
 	var out []webmPacketRead

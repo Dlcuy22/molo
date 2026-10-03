@@ -35,6 +35,7 @@ func init() {
 // Mp3Factory decodes MPEG audio without cgo.
 type Mp3Factory struct{}
 
+// NewMp3Factory returns a factory for the MPEG audio decoder.
 func NewMp3Factory() *Mp3Factory { return &Mp3Factory{} }
 
 func (f *Mp3Factory) Name() string { return "mp3" }

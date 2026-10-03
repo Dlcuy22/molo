@@ -8,9 +8,9 @@
 //   reused unchanged and only the container differs.
 //
 // Key Components:
-//   - NewWebMOpusReader(): parses EBML, Info, Tracks and Cues, indexes clusters
-//   - WebMOpusReader.ReadPacket(): one Opus packet from a SimpleBlock or Block
-//   - WebMOpusReader.SeekGranule(): Cues lookup, falling back to a cluster scan
+//   - newWebMOpusReader(): parses EBML, Info, Tracks and Cues, indexes clusters
+//   - webMOpusReader.ReadPacket(): one Opus packet from a SimpleBlock or Block
+//   - webMOpusReader.SeekGranule(): Cues lookup, falling back to a cluster scan
 //   - forwardWebMOpus: the forward-only variant for a non-seekable stream
 //   - WebMOpusFactory: registry entry, probe, and decoding from a path or reader
 //
@@ -104,12 +104,11 @@ const webmTrackTypeAudio = 2
 
 // Errors returned by the reader. Callers can test them with errors.Is.
 var (
-	ErrWebMOpusNotWebM           = errors.New("decode: not a WebM/Matroska stream")
-	ErrWebMOpusNotOpus           = errors.New("decode: no A_OPUS audio track")
-	ErrWebMOpusMissingCodecPriv  = errors.New("decode: A_OPUS track has no CodecPrivate")
-	ErrWebMOpusEncrypted         = errors.New("decode: WebM ContentEncodings are unsupported")
-	ErrWebMOpusNoClusters        = errors.New("decode: WebM stream has no clusters")
-	ErrWebMOpusUnseekableForward = errors.New("decode: source is not seekable")
+	errWebMOpusNotWebM          = errors.New("decode: not a WebM/Matroska stream")
+	errWebMOpusNotOpus          = errors.New("decode: no A_OPUS audio track")
+	errWebMOpusMissingCodecPriv = errors.New("decode: A_OPUS track has no CodecPrivate")
+	errWebMOpusEncrypted        = errors.New("decode: WebM ContentEncodings are unsupported")
+	errWebMOpusNoClusters       = errors.New("decode: WebM stream has no clusters")
 )
 
 // level1IDs are the element IDs that may appear directly under Segment. An
@@ -149,10 +148,11 @@ type webmCluster struct {
 	startGranule int64
 }
 
-// WebMOpusReader reads Opus packets from a WebM/Matroska stream and can seek
-// with the file's Cues index. It satisfies opusPacketSource. It is not safe for
-// concurrent use.
-type WebMOpusReader struct {
+// webMOpusReader reads Opus packets from a WebM/Matroska stream and can seek
+// with the file's Cues index. It satisfies opusPacketSource. It is unexported
+// because it is engine plumbing: only the Decoder contract is public, and the
+// reader exists to feed it. It is not safe for concurrent use.
+type webMOpusReader struct {
 	src      io.ReaderAt
 	fileSize int64
 
@@ -210,14 +210,14 @@ type webmBlock struct {
 	discardPad int64
 }
 
-// NewWebMOpusReader parses the stream headers and indexes its clusters.
+// newWebMOpusReader parses the stream headers and indexes its clusters.
 //
 // The EBML header is validated (DocType "webm"), Info supplies the timestamp
 // scale and duration, Tracks must hold an A_OPUS audio track with a valid
 // OpusHead CodecPrivate, and Cues is used when present. The returned reader is
 // positioned at the first audio packet. The input is read but not owned: the
 // caller closes it.
-func NewWebMOpusReader(r io.ReadSeeker) (*WebMOpusReader, error) {
+func newWebMOpusReader(r io.ReadSeeker) (*webMOpusReader, error) {
 	if r == nil {
 		return nil, errors.New("decode: nil WebM Opus source")
 	}
@@ -226,7 +226,7 @@ func NewWebMOpusReader(r io.ReadSeeker) (*WebMOpusReader, error) {
 		return nil, fmt.Errorf("decode: measure WebM Opus source: %w", err)
 	}
 
-	w := &WebMOpusReader{src: readerAtOf(r), fileSize: size, total: -1, posExact: true}
+	w := &webMOpusReader{src: readerAtOf(r), fileSize: size, total: -1, posExact: true}
 	if err := w.parseHeaders(); err != nil {
 		return nil, err
 	}
@@ -259,14 +259,14 @@ func (s seekReaderAt) ReadAt(p []byte, off int64) (int, error) {
 }
 
 // headerAt reads one element header at off and resolves its absolute extent.
-func (w *WebMOpusReader) headerAt(off int64) (ebmlElement, error) {
+func (w *webMOpusReader) headerAt(off int64) (ebmlElement, error) {
 	var buf [ebmlMaxIDLen + ebmlMaxSizeLen]byte
 	n, err := w.src.ReadAt(buf[:], off)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return ebmlElement{}, fmt.Errorf("decode: read element header at %d: %w", off, err)
 	}
 	if n == 0 {
-		return ebmlElement{}, fmt.Errorf("%w: no element header at %d", ErrEBMLTruncated, off)
+		return ebmlElement{}, fmt.Errorf("%w: no element header at %d", errEBMLTruncated, off)
 	}
 
 	e, err := readEBMLHeader(buf[:n], 0)
@@ -284,19 +284,19 @@ func (w *WebMOpusReader) headerAt(off int64) (ebmlElement, error) {
 // readBytes reads size bytes at off, bounded by the file's extent. Every
 // allocation in this reader goes through here so an element size from the file
 // can never exceed the bytes that actually exist.
-func (w *WebMOpusReader) readBytes(off, size int64) ([]byte, error) {
+func (w *webMOpusReader) readBytes(off, size int64) ([]byte, error) {
 	return readFullAt(w.src, off, size, w.fileSize)
 }
 
 // parseHeaders reads EBML, Info and Tracks, and validates the audio track. It
 // stops before the clusters; buildIndex walks those.
-func (w *WebMOpusReader) parseHeaders() error {
+func (w *webMOpusReader) parseHeaders() error {
 	ebml, err := w.headerAt(0)
 	if err != nil {
 		return err
 	}
 	if ebml.ID != idEBML {
-		return fmt.Errorf("%w: leading element is %#x, not EBML", ErrWebMOpusNotWebM, ebml.ID)
+		return fmt.Errorf("%w: leading element is %#x, not EBML", errWebMOpusNotWebM, ebml.ID)
 	}
 	if err := w.parseEBMLHeader(ebml); err != nil {
 		return err
@@ -307,7 +307,7 @@ func (w *WebMOpusReader) parseHeaders() error {
 		return err
 	}
 	if seg.ID != idSegment {
-		return fmt.Errorf("%w: element after EBML is %#x, not Segment", ErrWebMOpusNotWebM, seg.ID)
+		return fmt.Errorf("%w: element after EBML is %#x, not Segment", errWebMOpusNotWebM, seg.ID)
 	}
 	w.segmentDataOff = seg.DataOff
 	if seg.Unknown {
@@ -341,7 +341,7 @@ func (w *WebMOpusReader) parseHeaders() error {
 		}
 
 		if e.Next <= off {
-			return fmt.Errorf("%w: level-1 element %#x at %d did not advance", ErrEBMLBadVint, e.ID, off)
+			return fmt.Errorf("%w: level-1 element %#x at %d did not advance", errEBMLBadVint, e.ID, off)
 		}
 		off = e.Next
 		if e.ID == idCluster {
@@ -354,7 +354,7 @@ func (w *WebMOpusReader) parseHeaders() error {
 		w.timestampScale = webmDefaultTimestampScale
 	}
 	if w.trackNumber == 0 {
-		return fmt.Errorf("%w: no audio track entry in Tracks", ErrWebMOpusNotOpus)
+		return fmt.Errorf("%w: no audio track entry in Tracks", errWebMOpusNotOpus)
 	}
 
 	return nil
@@ -362,9 +362,9 @@ func (w *WebMOpusReader) parseHeaders() error {
 
 // parseEBMLHeader checks the document is WebM and the ID length bound is one
 // this reader can honour.
-func (w *WebMOpusReader) parseEBMLHeader(e ebmlElement) error {
+func (w *webMOpusReader) parseEBMLHeader(e ebmlElement) error {
 	if e.Unknown || e.DataOff+int64(e.Size) > int64(w.fileSize) {
-		return fmt.Errorf("%w: EBML header does not fit the file", ErrEBMLTruncated)
+		return fmt.Errorf("%w: EBML header does not fit the file", errEBMLTruncated)
 	}
 	body, err := w.readBytes(e.DataOff, int64(e.Size))
 	if err != nil {
@@ -391,10 +391,10 @@ func (w *WebMOpusReader) parseEBMLHeader(e ebmlElement) error {
 		return err
 	}
 	if docType != "webm" {
-		return fmt.Errorf("%w: DocType is %q", ErrWebMOpusNotWebM, docType)
+		return fmt.Errorf("%w: DocType is %q", errWebMOpusNotWebM, docType)
 	}
 	if maxID > ebmlMaxIDLen {
-		return fmt.Errorf("%w: EBMLMaxIDLength %d exceeds %d", ErrWebMOpusNotWebM, maxID, ebmlMaxIDLen)
+		return fmt.Errorf("%w: EBMLMaxIDLength %d exceeds %d", errWebMOpusNotWebM, maxID, ebmlMaxIDLen)
 	}
 
 	return nil
@@ -402,9 +402,9 @@ func (w *WebMOpusReader) parseEBMLHeader(e ebmlElement) error {
 
 // parseInfo reads TimestampScale and Duration. Duration is a float in segment
 // ticks (RFC 8794 section 7.2), which is why it is not read as an integer.
-func (w *WebMOpusReader) parseInfo(e ebmlElement) error {
+func (w *webMOpusReader) parseInfo(e ebmlElement) error {
 	if e.Unknown || e.DataOff+int64(e.Size) > int64(w.fileSize) {
-		return fmt.Errorf("%w: Info does not fit the file", ErrEBMLTruncated)
+		return fmt.Errorf("%w: Info does not fit the file", errEBMLTruncated)
 	}
 	body, err := w.readBytes(e.DataOff, int64(e.Size))
 	if err != nil {
@@ -448,16 +448,16 @@ func (w *WebMOpusReader) parseInfo(e ebmlElement) error {
 // at the end of the playable audio. Duration is in seconds after the scale is
 // applied and already spans the pre-skip, so it is the granule domain directly;
 // the playable frame count is this minus PreSkip.
-func (w *WebMOpusReader) durationToGranule(ticks float64) int64 {
+func (w *webMOpusReader) durationToGranule(ticks float64) int64 {
 	seconds := ticks * float64(w.timestampScale) / 1e9
 
 	return int64(math.Round(seconds * webmOpusSampleRate))
 }
 
 // parseTracks finds the A_OPUS audio TrackEntry and reads its codec fields.
-func (w *WebMOpusReader) parseTracks(e ebmlElement) error {
+func (w *webMOpusReader) parseTracks(e ebmlElement) error {
 	if e.Unknown || e.DataOff+int64(e.Size) > int64(w.fileSize) {
-		return fmt.Errorf("%w: Tracks does not fit the file", ErrEBMLTruncated)
+		return fmt.Errorf("%w: Tracks does not fit the file", errEBMLTruncated)
 	}
 	body, err := w.readBytes(e.DataOff, int64(e.Size))
 	if err != nil {
@@ -476,7 +476,7 @@ func (w *WebMOpusReader) parseTracks(e ebmlElement) error {
 // adopts its fields. A non-audio or non-Opus entry is ignored so a muxed file
 // with a video track still plays its audio. CodecDelay is authoritative for the
 // pre-skip; the OpusHead pre_skip is the fallback when CodecDelay is absent.
-func (w *WebMOpusReader) parseTrackEntry(body []byte) error {
+func (w *webMOpusReader) parseTrackEntry(body []byte) error {
 	return webmTrackParser{}.parse(body, func(fields webmTrackFields) {
 		if w.trackNumber != 0 {
 			// First audio track wins; a second one is not this reader's
@@ -496,7 +496,7 @@ func (w *WebMOpusReader) parseTrackEntry(body []byte) error {
 // derives the total when Duration was absent. Only element headers and the
 // small first child of each cluster are read, so the walk stays proportional to
 // the cluster count, not the file size.
-func (w *WebMOpusReader) buildIndex() error {
+func (w *webMOpusReader) buildIndex() error {
 	for off := w.segmentDataOff; off < w.segmentEnd; {
 		e, err := w.headerAt(off)
 		if err != nil {
@@ -508,10 +508,10 @@ func (w *WebMOpusReader) buildIndex() error {
 			// Treating an unknown-size one as zero-length would silently drop
 			// everything that follows.
 			if e.Unknown {
-				return fmt.Errorf("%w: unknown-size %#x at %d", ErrEBMLTruncated, e.ID, off)
+				return fmt.Errorf("%w: unknown-size %#x at %d", errEBMLTruncated, e.ID, off)
 			}
 			if e.Next <= off {
-				return fmt.Errorf("%w: %#x at %d did not advance", ErrEBMLBadVint, e.ID, off)
+				return fmt.Errorf("%w: %#x at %d did not advance", errEBMLBadVint, e.ID, off)
 			}
 			off = e.Next
 
@@ -551,13 +551,13 @@ func (w *WebMOpusReader) buildIndex() error {
 		}
 
 		if e.Next <= off {
-			return fmt.Errorf("%w: element %#x at %d did not advance", ErrEBMLBadVint, e.ID, off)
+			return fmt.Errorf("%w: element %#x at %d did not advance", errEBMLBadVint, e.ID, off)
 		}
 		off = e.Next
 	}
 
 	if len(w.clusters) == 0 {
-		return ErrWebMOpusNoClusters
+		return errWebMOpusNoClusters
 	}
 	sort.SliceStable(w.cues, func(i, j int) bool { return w.cues[i].timeNs < w.cues[j].timeNs })
 
@@ -588,7 +588,7 @@ func (w *WebMOpusReader) buildIndex() error {
 
 // readClusterTime reads a cluster's leading Timestamp so an index can be built
 // without touching its blocks.
-func (w *WebMOpusReader) readClusterTime(cl *webmCluster) error {
+func (w *webMOpusReader) readClusterTime(cl *webmCluster) error {
 	off := cl.dataOff
 	for off < cl.end {
 		e, err := w.headerAt(off)
@@ -625,7 +625,7 @@ func (w *WebMOpusReader) readClusterTime(cl *webmCluster) error {
 
 // scanUnknownMasterEnd walks the children of an unknown-size master and returns
 // the offset of the first level-1 element after its data, or limit.
-func (w *WebMOpusReader) scanUnknownMasterEnd(start, limit int64) (int64, error) {
+func (w *webMOpusReader) scanUnknownMasterEnd(start, limit int64) (int64, error) {
 	off := start
 	for off < limit {
 		e, err := w.headerAt(off)
@@ -641,7 +641,7 @@ func (w *WebMOpusReader) scanUnknownMasterEnd(start, limit int64) (int64, error)
 			return limit, nil
 		}
 		if e.Next <= off {
-			return 0, fmt.Errorf("%w: element %#x at %d did not advance", ErrEBMLBadVint, e.ID, off)
+			return 0, fmt.Errorf("%w: element %#x at %d did not advance", errEBMLBadVint, e.ID, off)
 		}
 		off = e.Next
 	}
@@ -651,9 +651,9 @@ func (w *WebMOpusReader) scanUnknownMasterEnd(start, limit int64) (int64, error)
 
 // parseCues reads every CuePoint and records the cluster offsets, shifted into
 // the file's offset domain. CueBlockNumber is optional and only a hint.
-func (w *WebMOpusReader) parseCues(e ebmlElement) error {
+func (w *webMOpusReader) parseCues(e ebmlElement) error {
 	if e.Unknown || e.DataOff+int64(e.Size) > int64(w.fileSize) {
-		return fmt.Errorf("%w: Cues does not fit the file", ErrEBMLTruncated)
+		return fmt.Errorf("%w: Cues does not fit the file", errEBMLTruncated)
 	}
 	body, err := w.readBytes(e.DataOff, int64(e.Size))
 	if err != nil {
@@ -669,7 +669,7 @@ func (w *WebMOpusReader) parseCues(e ebmlElement) error {
 }
 
 // parseCuePoint reads CueTime and the first CueTrackPositions' cluster offset.
-func (w *WebMOpusReader) parseCuePoint(body []byte) error {
+func (w *webMOpusReader) parseCuePoint(body []byte) error {
 	cue := webmCue{blockNumber: -1}
 	err := ebmlChildren(body, 0, int64(len(body)), func(c ebmlElement) error {
 		switch c.ID {
@@ -697,7 +697,7 @@ func (w *WebMOpusReader) parseCuePoint(body []byte) error {
 	return nil
 }
 
-func (w *WebMOpusReader) parseCueTrackPos(body []byte, cue *webmCue) error {
+func (w *webMOpusReader) parseCueTrackPos(body []byte, cue *webmCue) error {
 	return ebmlChildren(body, 0, int64(len(body)), func(c ebmlElement) error {
 		switch c.ID {
 		case idCueClusterPos:
@@ -724,7 +724,7 @@ func (w *WebMOpusReader) parseCueTrackPos(body []byte, cue *webmCue) error {
 // carries no Duration (a live or streaming file). The last cluster's decoded
 // end is the best available end-of-stream position. A failure leaves the total
 // at -1, exactly like Ogg's unreadable tail.
-func (w *WebMOpusReader) scanTotal() (int64, error) {
+func (w *webMOpusReader) scanTotal() (int64, error) {
 	last := w.clusters[len(w.clusters)-1]
 
 	end, err := w.lastBlockEndGranule(last)
@@ -739,7 +739,7 @@ func (w *WebMOpusReader) scanTotal() (int64, error) {
 // one cluster, by reading each block's payload and summing its packets' TOC
 // durations. It is the running-sum step that turns the block-timestamp index
 // into the decoded-domain index a seek needs.
-func (w *WebMOpusReader) clusterBlockSamples(cl webmCluster) (int64, error) {
+func (w *webMOpusReader) clusterBlockSamples(cl webmCluster) (int64, error) {
 	var (
 		off   = cl.dataOff
 		total int64
@@ -775,7 +775,7 @@ func (w *WebMOpusReader) clusterBlockSamples(cl webmCluster) (int64, error) {
 // cluster's last audio block, from the running sum the index already holds plus
 // that cluster's own block durations. It is used for the total when Info has no
 // Duration.
-func (w *WebMOpusReader) lastBlockEndGranule(cl webmCluster) (int64, error) {
+func (w *webMOpusReader) lastBlockEndGranule(cl webmCluster) (int64, error) {
 	durations, err := w.clusterBlockSamples(cl)
 	if err != nil {
 		return -1, err
@@ -816,10 +816,10 @@ func packetTotalSamples(blk webmBlock) int {
 
 // readBlock reads and parses the element at e: a SimpleBlock directly, or a
 // BlockGroup whose Block and DiscardPadding are read together.
-func (w *WebMOpusReader) readBlock(e ebmlElement) (webmBlock, error) {
+func (w *webMOpusReader) readBlock(e ebmlElement) (webmBlock, error) {
 	if e.ID == idSimpleBlock {
 		if e.Unknown {
-			return webmBlock{}, fmt.Errorf("%w: unknown-size SimpleBlock", ErrEBMLTruncated)
+			return webmBlock{}, fmt.Errorf("%w: unknown-size SimpleBlock", errEBMLTruncated)
 		}
 		body, err := w.readBytes(e.DataOff, int64(e.Size))
 		if err != nil {
@@ -831,7 +831,7 @@ func (w *WebMOpusReader) readBlock(e ebmlElement) (webmBlock, error) {
 
 	// BlockGroup. Its size is required; unknown-size here is malformed.
 	if e.Unknown || e.DataOff+int64(e.Size) > int64(w.fileSize) {
-		return webmBlock{}, fmt.Errorf("%w: BlockGroup does not fit the file", ErrEBMLTruncated)
+		return webmBlock{}, fmt.Errorf("%w: BlockGroup does not fit the file", errEBMLTruncated)
 	}
 	body, err := w.readBytes(e.DataOff, int64(e.Size))
 	if err != nil {
@@ -872,7 +872,7 @@ func (w *WebMOpusReader) readBlock(e ebmlElement) (webmBlock, error) {
 // Position is exact from the first packet. The granule comes from the cluster's
 // decoded-domain index, not its timestamp, so it matches the domain the decoder
 // advances in.
-func (w *WebMOpusReader) resetToBlock(cl webmCluster) error {
+func (w *webMOpusReader) resetToBlock(cl webmCluster) error {
 	// Find the cluster's index so forward reads can advance to the next one.
 	idx := sort.Search(len(w.clusters), func(i int) bool { return w.clusters[i].offset >= cl.offset })
 	if idx >= len(w.clusters) || w.clusters[idx].offset != cl.offset {
@@ -897,7 +897,7 @@ func (w *WebMOpusReader) resetToBlock(cl webmCluster) error {
 // loadBlock advances the read cursor to the next SimpleBlock or BlockGroup of
 // the audio track and buffers it. It is called directly by resetToBlock so a
 // seek leaves the reader ready with an exact position.
-func (w *WebMOpusReader) loadBlock() error {
+func (w *webMOpusReader) loadBlock() error {
 	for {
 		if w.childOff >= w.clusterEnd {
 			if !w.nextCluster() {
@@ -915,7 +915,7 @@ func (w *WebMOpusReader) loadBlock() error {
 			e.Next = w.clusterEnd
 		}
 		if e.Next <= w.childOff {
-			return fmt.Errorf("%w: cluster child %#x did not advance", ErrEBMLBadVint, e.ID)
+			return fmt.Errorf("%w: cluster child %#x did not advance", errEBMLBadVint, e.ID)
 		}
 		w.childOff = e.Next
 
@@ -944,7 +944,7 @@ func (w *WebMOpusReader) loadBlock() error {
 
 // nextCluster advances to the following cluster in the index, reporting false
 // at the end of the stream.
-func (w *WebMOpusReader) nextCluster() bool {
+func (w *webMOpusReader) nextCluster() bool {
 	if w.clusterIdx+1 >= len(w.clusters) {
 		return false
 	}
@@ -964,7 +964,7 @@ func (w *WebMOpusReader) nextCluster() bool {
 // Every block is a whole packet boundary, so the returned granule is exact. The
 // granule advances by decoded packet durations, the same domain the decoder
 // counts in.
-func (w *WebMOpusReader) ReadPacket() ([]byte, int64, error) {
+func (w *webMOpusReader) ReadPacket() ([]byte, int64, error) {
 	for {
 		if w.blockLoaded && w.blockPacket < len(w.block.packets) {
 			pkt := w.block.packets[w.blockPacket]
@@ -990,29 +990,29 @@ func (w *WebMOpusReader) ReadPacket() ([]byte, int64, error) {
 
 // PreSkip is the CodecDelay in 48 kHz samples, the amount discarded from the
 // start and the offset between a granule and a playable frame.
-func (w *WebMOpusReader) PreSkip() int { return w.preSkip }
+func (w *webMOpusReader) PreSkip() int { return w.preSkip }
 
 // OutputGainQ78 is the signed Q7.8 dB output gain from the OpusHead CodecPrivate.
-func (w *WebMOpusReader) OutputGainQ78() int16 { return w.gainQ78 }
+func (w *webMOpusReader) OutputGainQ78() int16 { return w.gainQ78 }
 
 // Channels is the output channel count declared by the OpusHead CodecPrivate.
-func (w *WebMOpusReader) Channels() int { return w.channels }
+func (w *webMOpusReader) Channels() int { return w.channels }
 
 // SampleRate is always 48000: Opus decoding is defined at 48 kHz regardless of
 // the SamplingFrequency recorded in the track.
-func (w *WebMOpusReader) SampleRate() int { return webmOpusSampleRate }
+func (w *webMOpusReader) SampleRate() int { return webmOpusSampleRate }
 
 // TotalGranule is the granule at the end of the playable audio, or -1 when it
 // could not be derived from Duration or a cluster scan.
-func (w *WebMOpusReader) TotalGranule() int64 { return w.total }
+func (w *webMOpusReader) TotalGranule() int64 { return w.total }
 
 // Position is the granule at which the next packet starts. It is exact at every
 // block boundary.
-func (w *WebMOpusReader) Position() int64 { return w.pos }
+func (w *webMOpusReader) Position() int64 { return w.pos }
 
 // PositionExact is always true: WebM blocks are packet-aligned, so a position
 // never falls mid-packet the way an Ogg page after a seek can.
-func (w *WebMOpusReader) PositionExact() bool { return w.posExact }
+func (w *webMOpusReader) PositionExact() bool { return w.posExact }
 
 // SeekGranule repositions so the next packet starts at or before target, backing
 // off by up to preroll samples for the decoder's warm-up.
@@ -1023,7 +1023,7 @@ func (w *WebMOpusReader) PositionExact() bool { return w.posExact }
 // chosen cluster's first packet already starts past the target, it steps back to
 // the previous cluster. The decoder's warm-up skip advances from there without
 // decoding, because Position is exact.
-func (w *WebMOpusReader) SeekGranule(target int64, preroll int64) error {
+func (w *webMOpusReader) SeekGranule(target int64, preroll int64) error {
 	if target < 0 {
 		return fmt.Errorf("decode: negative granule seek target %d", target)
 	}
@@ -1061,7 +1061,7 @@ func (w *WebMOpusReader) SeekGranule(target int64, preroll int64) error {
 // want, falling back to the first cluster. Cues are used when present because
 // they carry the muxer's own cluster offsets; otherwise the cluster index is
 // binary-searched on its running granule.
-func (w *WebMOpusReader) clusterFor(want int64) webmCluster {
+func (w *webMOpusReader) clusterFor(want int64) webmCluster {
 	if len(w.cues) > 0 {
 		i := sort.Search(len(w.cues), func(i int) bool { return w.cues[i].timeNs > w.decodeFromGranule(want) }) - 1
 		if i < 0 {
@@ -1084,12 +1084,12 @@ func (w *WebMOpusReader) clusterFor(want int64) webmCluster {
 // timestamp domain, so a CueTime can be compared against it. The two domains
 // agree except for the muxer's millisecond-grid rounding, which is small enough
 // for choosing a cue.
-func (w *WebMOpusReader) decodeFromGranule(granule int64) int64 {
+func (w *webMOpusReader) decodeFromGranule(granule int64) int64 {
 	return granule * 1_000_000_000 / webmOpusSampleRate
 }
 
 // clusterAt finds the cluster whose element offset matches off.
-func (w *WebMOpusReader) clusterAt(off int64) (webmCluster, bool) {
+func (w *webMOpusReader) clusterAt(off int64) (webmCluster, bool) {
 	i := sort.Search(len(w.clusters), func(i int) bool { return w.clusters[i].offset >= off })
 	if i < len(w.clusters) && w.clusters[i].offset == off {
 		return w.clusters[i], true
@@ -1108,7 +1108,7 @@ func parseWebMBlock(data []byte, timestampScale uint64, baseNs int64) (webmBlock
 		return webmBlock{}, fmt.Errorf("decode: block track number: %w", err)
 	}
 	if trackW+3 > len(data) {
-		return webmBlock{}, fmt.Errorf("%w: block header truncated", ErrEBMLTruncated)
+		return webmBlock{}, fmt.Errorf("%w: block header truncated", errEBMLTruncated)
 	}
 	rel := int16(binary.BigEndian.Uint16(data[trackW : trackW+2]))
 	flags := data[trackW+2]
@@ -1142,7 +1142,7 @@ func splitWebMLacing(lacing byte, body []byte) ([][]byte, error) {
 		return [][]byte{body}, nil
 	}
 	if len(body) < 1 {
-		return nil, fmt.Errorf("%w: laced block has no frame count", ErrEBMLTruncated)
+		return nil, fmt.Errorf("%w: laced block has no frame count", errEBMLTruncated)
 	}
 
 	frames := int(body[0]) + 1
@@ -1155,7 +1155,7 @@ func splitWebMLacing(lacing byte, body []byte) ([][]byte, error) {
 			size := 0
 			for {
 				if len(rest) == 0 {
-					return nil, fmt.Errorf("%w: Xiph lacing ran out", ErrEBMLTruncated)
+					return nil, fmt.Errorf("%w: Xiph lacing ran out", errEBMLTruncated)
 				}
 				b := rest[0]
 				rest = rest[1:]
@@ -1215,13 +1215,13 @@ func sliceWebMPackets(body []byte, sizes []int) ([][]byte, error) {
 	off := 0
 	for _, size := range sizes {
 		if size <= 0 || off+size > len(body) {
-			return nil, fmt.Errorf("%w: lacing frame of %d bytes in a %d-byte block", ErrEBMLTruncated, size, len(body))
+			return nil, fmt.Errorf("%w: lacing frame of %d bytes in a %d-byte block", errEBMLTruncated, size, len(body))
 		}
 		packets = append(packets, body[off:off+size])
 		off += size
 	}
 	if off >= len(body) {
-		return nil, fmt.Errorf("%w: lacing leaves a zero-length final packet", ErrEBMLTruncated)
+		return nil, fmt.Errorf("%w: lacing leaves a zero-length final packet", errEBMLTruncated)
 	}
 	packets = append(packets, body[off:])
 
@@ -1308,34 +1308,34 @@ func (f *forwardWebMOpus) readHeader() (ebmlElement, error) {
 			return ebmlElement{}, io.EOF
 		}
 
-		return ebmlElement{}, fmt.Errorf("%w: read element id: %w", ErrEBMLTruncated, err)
+		return ebmlElement{}, fmt.Errorf("%w: read element id: %w", errEBMLTruncated, err)
 	}
 	f.off++
 	idw := vintWidth(buf[0])
 	if idw < 1 || idw > ebmlMaxIDLen {
-		return ebmlElement{}, fmt.Errorf("%w: id width %d", ErrEBMLBadVint, idw)
+		return ebmlElement{}, fmt.Errorf("%w: id width %d", errEBMLBadVint, idw)
 	}
 	// The all-ones 1-byte ID is reserved (RFC 8794 section 5 plus the Matroska
 	// errata); the seekable path rejects it in ebmlID, so this one must too.
 	if idw == 1 && buf[0] == 0xFF {
-		return ebmlElement{}, fmt.Errorf("%w: reserved id 0xFF", ErrEBMLBadVint)
+		return ebmlElement{}, fmt.Errorf("%w: reserved id 0xFF", errEBMLBadVint)
 	}
 	if _, err := io.ReadFull(f.src, buf[1:idw]); err != nil {
-		return ebmlElement{}, fmt.Errorf("%w: read element id: %w", ErrEBMLTruncated, err)
+		return ebmlElement{}, fmt.Errorf("%w: read element id: %w", errEBMLTruncated, err)
 	}
 	f.off += int64(idw - 1)
 
 	// Size: same discovery, starting after the ID.
 	if _, err := io.ReadFull(f.src, buf[idw:idw+1]); err != nil {
-		return ebmlElement{}, fmt.Errorf("%w: read element size: %w", ErrEBMLTruncated, err)
+		return ebmlElement{}, fmt.Errorf("%w: read element size: %w", errEBMLTruncated, err)
 	}
 	f.off++
 	szw := vintWidth(buf[idw])
 	if szw < 1 || szw > ebmlMaxSizeLen {
-		return ebmlElement{}, fmt.Errorf("%w: size width %d", ErrEBMLBadVint, szw)
+		return ebmlElement{}, fmt.Errorf("%w: size width %d", errEBMLBadVint, szw)
 	}
 	if _, err := io.ReadFull(f.src, buf[idw+1:idw+szw]); err != nil {
-		return ebmlElement{}, fmt.Errorf("%w: read element size: %w", ErrEBMLTruncated, err)
+		return ebmlElement{}, fmt.Errorf("%w: read element size: %w", errEBMLTruncated, err)
 	}
 	f.off += int64(szw - 1)
 
@@ -1374,7 +1374,7 @@ func (f *forwardWebMOpus) parseHeaders() error {
 		return err
 	}
 	if ebml.ID != idEBML {
-		return fmt.Errorf("%w: leading element is %#x", ErrWebMOpusNotWebM, ebml.ID)
+		return fmt.Errorf("%w: leading element is %#x", errWebMOpusNotWebM, ebml.ID)
 	}
 	body, err := f.readN(int64(ebml.Size))
 	if err != nil {
@@ -1389,7 +1389,7 @@ func (f *forwardWebMOpus) parseHeaders() error {
 		return err
 	}
 	if seg.ID != idSegment {
-		return fmt.Errorf("%w: element after EBML is %#x, not Segment", ErrWebMOpusNotWebM, seg.ID)
+		return fmt.Errorf("%w: element after EBML is %#x, not Segment", errWebMOpusNotWebM, seg.ID)
 	}
 	if !seg.Unknown {
 		f.segmentEnd = seg.Next
@@ -1439,7 +1439,7 @@ func (f *forwardWebMOpus) parseHeaders() error {
 				f.timestampScale = webmDefaultTimestampScale
 			}
 			if f.trackNumber == 0 {
-				return fmt.Errorf("%w: no audio track entry in Tracks", ErrWebMOpusNotOpus)
+				return fmt.Errorf("%w: no audio track entry in Tracks", errWebMOpusNotOpus)
 			}
 
 			return nil
@@ -1450,16 +1450,16 @@ func (f *forwardWebMOpus) parseHeaders() error {
 		}
 	}
 
-	return ErrWebMOpusNoClusters
+	return errWebMOpusNoClusters
 }
 
 func (f *forwardWebMOpus) readN(size int64) ([]byte, error) {
 	if size < 0 || size > 1<<30 {
-		return nil, fmt.Errorf("%w: element size %d", ErrEBMLBadVint, size)
+		return nil, fmt.Errorf("%w: element size %d", errEBMLBadVint, size)
 	}
 	buf := make([]byte, size)
 	if _, err := io.ReadFull(f.src, buf); err != nil {
-		return nil, fmt.Errorf("%w: read %d bytes: %w", ErrEBMLTruncated, size, err)
+		return nil, fmt.Errorf("%w: read %d bytes: %w", errEBMLTruncated, size, err)
 	}
 	f.off += size
 
@@ -1468,10 +1468,10 @@ func (f *forwardWebMOpus) readN(size int64) ([]byte, error) {
 
 func (f *forwardWebMOpus) skipN(size int64) error {
 	if size < 0 {
-		return fmt.Errorf("%w: element size %d", ErrEBMLBadVint, size)
+		return fmt.Errorf("%w: element size %d", errEBMLBadVint, size)
 	}
 	if _, err := io.CopyN(io.Discard, f.src, size); err != nil {
-		return fmt.Errorf("%w: skip %d bytes: %w", ErrEBMLTruncated, size, err)
+		return fmt.Errorf("%w: skip %d bytes: %w", errEBMLTruncated, size, err)
 	}
 	f.off += size
 
@@ -1524,8 +1524,9 @@ func (f *forwardWebMOpus) Position() int64 { return f.pos }
 // only a lower bound.
 func (f *forwardWebMOpus) PositionExact() bool { return false }
 
-// SeekGranule always fails: a forward-only stream cannot be repositioned.
-func (f *forwardWebMOpus) SeekGranule(int64, int64) error { return ErrWebMOpusUnseekableForward }
+// SeekGranule always fails with ErrNotSeekable: a forward-only stream cannot be
+// repositioned, and the streamer's fallback matches that sentinel.
+func (f *forwardWebMOpus) SeekGranule(int64, int64) error { return ErrNotSeekable }
 
 // ReadPacket returns the next audio packet from the sequential block walk.
 func (f *forwardWebMOpus) ReadPacket() ([]byte, int64, error) {
@@ -1604,7 +1605,7 @@ func (f *forwardWebMOpus) nextBlock() (webmBlock, error) {
 		}
 		if e.ID != idSimpleBlock && e.ID != idBlockGroup {
 			if e.Unknown {
-				return webmBlock{}, fmt.Errorf("%w: unexpected unknown-size element %#x", ErrEBMLTruncated, e.ID)
+				return webmBlock{}, fmt.Errorf("%w: unexpected unknown-size element %#x", errEBMLTruncated, e.ID)
 			}
 			if err := f.skipN(int64(e.Size)); err != nil {
 				return webmBlock{}, err
@@ -1688,10 +1689,10 @@ func validateWebMEBMLHeader(body []byte) error {
 		return err
 	}
 	if docType != "webm" {
-		return fmt.Errorf("%w: DocType is %q", ErrWebMOpusNotWebM, docType)
+		return fmt.Errorf("%w: DocType is %q", errWebMOpusNotWebM, docType)
 	}
 	if maxID > ebmlMaxIDLen {
-		return fmt.Errorf("%w: EBMLMaxIDLength %d exceeds %d", ErrWebMOpusNotWebM, maxID, ebmlMaxIDLen)
+		return fmt.Errorf("%w: EBMLMaxIDLength %d exceeds %d", errWebMOpusNotWebM, maxID, ebmlMaxIDLen)
 	}
 
 	return nil
@@ -1766,10 +1767,10 @@ func (webmTrackParser) parse(body []byte, adopt func(webmTrackFields)) error {
 		return nil
 	}
 	if encrypted {
-		return ErrWebMOpusEncrypted
+		return errWebMOpusEncrypted
 	}
 	if len(codecPriv) == 0 {
-		return fmt.Errorf("%w: track %d", ErrWebMOpusMissingCodecPriv, fields.trackNumber)
+		return fmt.Errorf("%w: track %d", errWebMOpusMissingCodecPriv, fields.trackNumber)
 	}
 	info, err := parseOggOpusHead(codecPriv)
 	if err != nil {
@@ -1794,6 +1795,7 @@ func init() { Register(NewWebMOpusFactory()) }
 // WebMOpusFactory reads Opus audio out of a WebM/Matroska container.
 type WebMOpusFactory struct{}
 
+// NewWebMOpusFactory returns a factory for the WebM/Matroska Opus decoder.
 func NewWebMOpusFactory() *WebMOpusFactory { return &WebMOpusFactory{} }
 
 func (f *WebMOpusFactory) Name() string { return "webm-opus" }
@@ -1859,7 +1861,7 @@ func newWebMOpusDecoder(r io.Reader, closer io.Closer, warmup int64, seekable bo
 // else the forward-only one.
 func openWebMOpusPackets(r io.Reader) (opusPacketSource, error) {
 	if rs, ok := r.(io.ReadSeeker); ok {
-		return NewWebMOpusReader(rs)
+		return newWebMOpusReader(rs)
 	}
 
 	return newForwardWebMOpus(r)
@@ -1902,7 +1904,7 @@ func probeWebMOpus(path string, mode core.DurationMode) (core.StreamInfo, error)
 		TotalFrames: -1,
 	}
 
-	w := &WebMOpusReader{src: f, fileSize: size, total: -1}
+	w := &webMOpusReader{src: f, fileSize: size, total: -1}
 	if err := w.parseHeaders(); err != nil {
 		return core.StreamInfo{}, err
 	}

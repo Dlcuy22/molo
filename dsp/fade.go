@@ -42,6 +42,7 @@ const (
 // FadeFactory registers this implementation.
 type FadeFactory struct{}
 
+// NewFadeFactory returns a factory for the fade effect.
 func NewFadeFactory() *FadeFactory { return &FadeFactory{} }
 
 func (f *FadeFactory) Kind() string { return "fade" }

@@ -9,7 +9,7 @@
 // stereo float32 for the life of the program: one context can only carry one
 // format anyway.
 
-//go:build !freebsd && !android && !ios
+//go:build !freebsd && !android && !ios && !js && !wasip1 && !plan9
 
 package playback
 

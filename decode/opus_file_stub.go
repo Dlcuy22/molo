@@ -19,6 +19,8 @@ func loadLibopusfile() error { return errLibopusfileUnsupported }
 
 type LibopusfileFactory struct{}
 
+// NewLibopusfileFactory returns the stub used where the native library cannot
+// be reached, so the registry shape is identical on every platform.
 func NewLibopusfileFactory() *LibopusfileFactory { return &LibopusfileFactory{} }
 
 func (f *LibopusfileFactory) Name() string { return "opus-libopusfile" }

@@ -43,6 +43,7 @@ func init() {
 // WavFactory decodes RIFF, RF64 and BW64 WAVE streams without cgo.
 type WavFactory struct{}
 
+// NewWavFactory returns a factory for the uncompressed WAV decoder.
 func NewWavFactory() *WavFactory { return &WavFactory{} }
 
 func (f *WavFactory) Name() string { return "wav" }

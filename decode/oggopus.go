@@ -9,10 +9,10 @@
 //   straight to one page per seek.
 //
 // Key Components:
-//   - NewOggOpusReader(): parses OpusHead, skips OpusTags, builds the page index
-//   - OggOpusReader.ReadPacket(): reassembles one packet over pages
-//   - OggOpusReader.SeekGranule(): binary search, then repositions for reading
-//   - OggOpusReader.Position(): granule lower bound for the next packet
+//   - newOggOpusReader(): parses OpusHead, skips OpusTags, builds the page index
+//   - oggOpusReader.ReadPacket(): reassembles one packet over pages
+//   - oggOpusReader.SeekGranule(): binary search, then repositions for reading
+//   - oggOpusReader.Position(): granule lower bound for the next packet
 //
 // Granule domain (RFC 7845 section 4):
 //   The granule counts decoded samples at 48 kHz and includes the pre-skip, so
@@ -27,10 +27,10 @@
 //     not change or duplicate that probe path.
 //
 // Error Types:
-//   - ErrOggOpusNotOpus: the first packet is not an OpusHead
-//   - ErrOggOpusChecksum: a page consumed for reading failed its CRC
-//   - ErrOggOpusBadPage: Ogg framing is malformed
-//   - ErrOggOpusUnsupportedMapping: a channel mapping family other than 0
+//   - errOggOpusNotOpus: the first packet is not an OpusHead
+//   - errOggOpusChecksum: a page consumed for reading failed its CRC
+//   - errOggOpusBadPage: Ogg framing is malformed
+//   - errOggOpusUnsupportedMapping: a channel mapping family other than 0
 //
 // Ownership:
 //   The reader never owns, closes, or spawns goroutines around the io.ReadSeeker
@@ -63,10 +63,10 @@ const (
 
 // Errors returned by the reader. Callers can test them with errors.Is.
 var (
-	ErrOggOpusNotOpus            = errors.New("decode: first packet is not OpusHead")
-	ErrOggOpusChecksum           = errors.New("decode: Ogg page checksum mismatch")
-	ErrOggOpusBadPage            = errors.New("decode: malformed Ogg page")
-	ErrOggOpusUnsupportedMapping = errors.New("decode: unsupported Opus channel mapping family")
+	errOggOpusNotOpus            = errors.New("decode: first packet is not OpusHead")
+	errOggOpusChecksum           = errors.New("decode: Ogg page checksum mismatch")
+	errOggOpusBadPage            = errors.New("decode: malformed Ogg page")
+	errOggOpusUnsupportedMapping = errors.New("decode: unsupported Opus channel mapping family")
 )
 
 // oggOpusPageEntry is one seekable page. start is the granule at which the
@@ -94,9 +94,11 @@ type oggOpusPage struct {
 
 func (p oggOpusPage) continued() bool { return p.flags&oggFlagContinued != 0 }
 
-// OggOpusReader reads Opus audio packets from an Ogg bitstream and can seek to
-// a granule position. It is not safe for concurrent use.
-type OggOpusReader struct {
+// oggOpusReader reads Opus audio packets from an Ogg bitstream and can seek to
+// a granule position. It is unexported because it is engine plumbing: only the
+// Decoder contract is public, and the reader exists to feed it. It is not safe
+// for concurrent use.
+type oggOpusReader struct {
 	src      io.ReadSeeker
 	fileSize int64
 
@@ -141,18 +143,18 @@ type OggOpusReader struct {
 	posExact bool
 }
 
-// NewOggOpusReader parses the stream headers and indexes its audio pages.
+// newOggOpusReader parses the stream headers and indexes its audio pages.
 //
 // The ID header is validated (magic, version, channel count, mapping family)
 // and the comment header is skipped. The returned reader is positioned just
 // before the first audio packet. The input is read but not retained as owned:
 // the caller closes it.
 //
-// Errors: ErrOggOpusNotOpus for a non-Opus first packet,
-// ErrOggOpusUnsupportedMapping for a mapping family other than 0,
-// ErrOggOpusChecksum when a header page fails its CRC, and ErrOggOpusBadPage
+// Errors: errOggOpusNotOpus for a non-Opus first packet,
+// errOggOpusUnsupportedMapping for a mapping family other than 0,
+// errOggOpusChecksum when a header page fails its CRC, and errOggOpusBadPage
 // for malformed framing.
-func NewOggOpusReader(r io.ReadSeeker) (*OggOpusReader, error) {
+func newOggOpusReader(r io.ReadSeeker) (*oggOpusReader, error) {
 	if r == nil {
 		return nil, errors.New("decode: nil Ogg Opus source")
 	}
@@ -161,7 +163,7 @@ func NewOggOpusReader(r io.ReadSeeker) (*OggOpusReader, error) {
 		return nil, fmt.Errorf("decode: measure Ogg Opus source: %w", err)
 	}
 
-	o := &OggOpusReader{src: r, fileSize: size, total: -1}
+	o := &oggOpusReader{src: r, fileSize: size, total: -1}
 	if err := o.resetTo(0); err != nil {
 		return nil, err
 	}
@@ -169,7 +171,7 @@ func NewOggOpusReader(r io.ReadSeeker) (*OggOpusReader, error) {
 	head, _, err := o.nextPacket()
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("%w: stream has no packets", ErrOggOpusNotOpus)
+			return nil, fmt.Errorf("%w: stream has no packets", errOggOpusNotOpus)
 		}
 
 		return nil, err
@@ -213,7 +215,7 @@ func NewOggOpusReader(r io.ReadSeeker) (*OggOpusReader, error) {
 // whether the reader's streaming state must be reset to that offset. When the
 // comment header is skipped by lacing the body is never read, which keeps open
 // proportional to page count rather than tag size.
-func (o *OggOpusReader) skipCommentPacket() (audioStart int64, pending []byte, pendingGranule int64, reset bool, err error) {
+func (o *oggOpusReader) skipCommentPacket() (audioStart int64, pending []byte, pendingGranule int64, reset bool, err error) {
 	// A stream that ends after the ID header has no comment header and no
 	// audio. Report EOF so the index stays empty and reads return io.EOF.
 	if o.pageOffset >= o.fileSize {
@@ -264,7 +266,7 @@ func (o *OggOpusReader) skipCommentPacket() (audioStart int64, pending []byte, p
 }
 
 // audioStartAfterComment is the read point just past a consumed comment header.
-func (o *OggOpusReader) audioStartAfterComment() int64 {
+func (o *oggOpusReader) audioStartAfterComment() int64 {
 	if o.pageLoaded && o.segIndex < len(o.page.lacing) {
 		return o.page.offset
 	}
@@ -277,7 +279,7 @@ func (o *OggOpusReader) audioStartAfterComment() int64 {
 // to find where it completes. It returns the packet's leading bytes, whether
 // the packet ended on the page's final lacing value, whether the first page
 // carried the continued flag, and the offset of the page after it completes.
-func (o *OggOpusReader) peekPacketPrefix(offset int64) (prefix []byte, atPageEnd, continuedFirst bool, next int64, err error) {
+func (o *oggOpusReader) peekPacketPrefix(offset int64) (prefix []byte, atPageEnd, continuedFirst bool, next int64, err error) {
 	const identifyLen = 8
 
 	var header [oggHeaderLen]byte
@@ -287,16 +289,16 @@ func (o *OggOpusReader) peekPacketPrefix(offset int64) (prefix []byte, atPageEnd
 			return nil, false, false, 0, fmt.Errorf("decode: peek Ogg page at %d: %w", offset, err)
 		}
 		if _, err := io.ReadFull(o.src, header[:]); err != nil {
-			return nil, false, false, 0, fmt.Errorf("%w: truncated page header at %d: %w", ErrOggOpusBadPage, offset, err)
+			return nil, false, false, 0, fmt.Errorf("%w: truncated page header at %d: %w", errOggOpusBadPage, offset, err)
 		}
 		if string(header[:4]) != oggCapture {
-			return nil, false, false, 0, fmt.Errorf("%w: no Ogg capture pattern at %d", ErrOggOpusBadPage, offset)
+			return nil, false, false, 0, fmt.Errorf("%w: no Ogg capture pattern at %d", errOggOpusBadPage, offset)
 		}
 
 		segments := int(header[oggSegmentOff])
 		lacing := make([]byte, segments)
 		if _, err := io.ReadFull(o.src, lacing); err != nil {
-			return nil, false, false, 0, fmt.Errorf("%w: truncated page lacing at %d: %w", ErrOggOpusBadPage, offset, err)
+			return nil, false, false, 0, fmt.Errorf("%w: truncated page lacing at %d: %w", errOggOpusBadPage, offset, err)
 		}
 		bodyLen := 0
 		for _, l := range lacing {
@@ -308,7 +310,7 @@ func (o *OggOpusReader) peekPacketPrefix(offset int64) (prefix []byte, atPageEnd
 			n := min(identifyLen, bodyLen)
 			prefix = make([]byte, n)
 			if _, err := io.ReadFull(o.src, prefix); err != nil {
-				return nil, false, false, 0, fmt.Errorf("%w: truncated page body at %d: %w", ErrOggOpusBadPage, offset, err)
+				return nil, false, false, 0, fmt.Errorf("%w: truncated page body at %d: %w", errOggOpusBadPage, offset, err)
 			}
 			first = false
 		}
@@ -371,10 +373,10 @@ func oggOpusChecksum(page []byte) uint32 {
 // rather than reported with a channel count that would not hold.
 func parseOggOpusHead(packet []byte) (oggOpusHeadInfo, error) {
 	if len(packet) < oggOpusHeadMinLen {
-		return oggOpusHeadInfo{}, fmt.Errorf("%w: OpusHead is %d bytes", ErrOggOpusNotOpus, len(packet))
+		return oggOpusHeadInfo{}, fmt.Errorf("%w: OpusHead is %d bytes", errOggOpusNotOpus, len(packet))
 	}
 	if string(packet[:8]) != "OpusHead" {
-		return oggOpusHeadInfo{}, ErrOggOpusNotOpus
+		return oggOpusHeadInfo{}, errOggOpusNotOpus
 	}
 	// RFC 7845 section 5.1: the upper four version bits are the major version;
 	// anything beyond 0 is not a compatible encapsulation.
@@ -386,10 +388,10 @@ func parseOggOpusHead(packet []byte) (oggOpusHeadInfo, error) {
 		return oggOpusHeadInfo{}, errors.New("decode: OpusHead declares zero channels")
 	}
 	if family := packet[18]; family != 0 {
-		return oggOpusHeadInfo{}, fmt.Errorf("%w: family %d", ErrOggOpusUnsupportedMapping, family)
+		return oggOpusHeadInfo{}, fmt.Errorf("%w: family %d", errOggOpusUnsupportedMapping, family)
 	}
 	if channels != 1 && channels != 2 {
-		return oggOpusHeadInfo{}, fmt.Errorf("%w: family 0 with %d channels", ErrOggOpusUnsupportedMapping, channels)
+		return oggOpusHeadInfo{}, fmt.Errorf("%w: family 0 with %d channels", errOggOpusUnsupportedMapping, channels)
 	}
 
 	return oggOpusHeadInfo{
@@ -400,7 +402,7 @@ func parseOggOpusHead(packet []byte) (oggOpusHeadInfo, error) {
 }
 
 // resetTo clears the streaming state and seeks to offset.
-func (o *OggOpusReader) resetTo(offset int64) error {
+func (o *oggOpusReader) resetTo(offset int64) error {
 	if _, err := o.src.Seek(offset, io.SeekStart); err != nil {
 		return fmt.Errorf("decode: seek Ogg Opus source to %d: %w", offset, err)
 	}
@@ -427,7 +429,7 @@ func (o *OggOpusReader) resetTo(offset int64) error {
 // rather than file size; CRC is verified only for pages actually read into the
 // packet stream. A truncated tail stops the walk and leaves total at -1 rather
 // than reporting the last complete page as the end.
-func (o *OggOpusReader) buildIndex(start int64) error {
+func (o *oggOpusReader) buildIndex(start int64) error {
 	var (
 		offset      = start
 		lastGranule int64
@@ -502,7 +504,7 @@ func (o *OggOpusReader) buildIndex(start int64) error {
 
 // loadNextPage reads and verifies the page at the current offset. It rejects a
 // page that silently drops or misrepresents a continued packet.
-func (o *OggOpusReader) loadNextPage() error {
+func (o *oggOpusReader) loadNextPage() error {
 	if o.pageOffset >= o.fileSize {
 		return io.EOF
 	}
@@ -513,7 +515,7 @@ func (o *OggOpusReader) loadNextPage() error {
 	}
 
 	if len(o.partial) > 0 && !page.continued() {
-		return fmt.Errorf("%w: page at %d drops a continued packet", ErrOggOpusBadPage, page.offset)
+		return fmt.Errorf("%w: page at %d drops a continued packet", errOggOpusBadPage, page.offset)
 	}
 
 	o.page = page
@@ -531,24 +533,24 @@ func (o *OggOpusReader) loadNextPage() error {
 }
 
 // readPage reads the complete page at offset and verifies its CRC.
-func (o *OggOpusReader) readPage(offset int64) (oggOpusPage, error) {
+func (o *oggOpusReader) readPage(offset int64) (oggOpusPage, error) {
 	if _, err := o.src.Seek(offset, io.SeekStart); err != nil {
 		return oggOpusPage{}, fmt.Errorf("decode: seek to Ogg page %d: %w", offset, err)
 	}
 
 	raw := make([]byte, oggHeaderLen)
 	if _, err := io.ReadFull(o.src, raw); err != nil {
-		return oggOpusPage{}, fmt.Errorf("%w: truncated page header at %d: %w", ErrOggOpusBadPage, offset, err)
+		return oggOpusPage{}, fmt.Errorf("%w: truncated page header at %d: %w", errOggOpusBadPage, offset, err)
 	}
 	if string(raw[:4]) != oggCapture {
-		return oggOpusPage{}, fmt.Errorf("%w: no Ogg capture pattern at %d", ErrOggOpusBadPage, offset)
+		return oggOpusPage{}, fmt.Errorf("%w: no Ogg capture pattern at %d", errOggOpusBadPage, offset)
 	}
 
 	segments := int(raw[oggSegmentOff])
 	lacingOff := len(raw)
 	raw = append(raw, make([]byte, segments)...)
 	if _, err := io.ReadFull(o.src, raw[lacingOff:]); err != nil {
-		return oggOpusPage{}, fmt.Errorf("%w: truncated page lacing at %d: %w", ErrOggOpusBadPage, offset, err)
+		return oggOpusPage{}, fmt.Errorf("%w: truncated page lacing at %d: %w", errOggOpusBadPage, offset, err)
 	}
 
 	body := 0
@@ -558,13 +560,13 @@ func (o *OggOpusReader) readPage(offset int64) (oggOpusPage, error) {
 	bodyOff := len(raw)
 	raw = append(raw, make([]byte, body)...)
 	if _, err := io.ReadFull(o.src, raw[bodyOff:]); err != nil {
-		return oggOpusPage{}, fmt.Errorf("%w: truncated page body at %d: %w", ErrOggOpusBadPage, offset, err)
+		return oggOpusPage{}, fmt.Errorf("%w: truncated page body at %d: %w", errOggOpusBadPage, offset, err)
 	}
 
 	stored := binary.LittleEndian.Uint32(raw[22:26])
 	binary.LittleEndian.PutUint32(raw[22:26], 0)
 	if got := oggOpusChecksum(raw); got != stored {
-		return oggOpusPage{}, fmt.Errorf("%w: page at %d has %08x, want %08x", ErrOggOpusChecksum, offset, got, stored)
+		return oggOpusPage{}, fmt.Errorf("%w: page at %d has %08x, want %08x", errOggOpusChecksum, offset, got, stored)
 	}
 
 	return oggOpusPage{
@@ -580,7 +582,7 @@ func (o *OggOpusReader) readPage(offset int64) (oggOpusPage, error) {
 // nextPacket returns the next packet, reassembling it across lacing values and
 // pages. The granule is the one on the page the packet completed on, or -1
 // when that page carries none.
-func (o *OggOpusReader) nextPacket() ([]byte, int64, error) {
+func (o *oggOpusReader) nextPacket() ([]byte, int64, error) {
 	if o.pending != nil {
 		packet, granule := o.pending, o.pendingGranule
 		o.pending = nil
@@ -639,23 +641,23 @@ func (o *OggOpusReader) nextPacket() ([]byte, int64, error) {
 // PreSkip is the number of decoded samples to discard from the start, and the
 // amount subtracted from a granule to get a PCM sample position (RFC 7845
 // section 4.2).
-func (o *OggOpusReader) PreSkip() int { return o.preSkip }
+func (o *oggOpusReader) PreSkip() int { return o.preSkip }
 
 // OutputGainQ78 is the signed Q7.8 dB output gain from the ID header (RFC 7845
 // section 5.1). Apply it as 10^(gain/(20*256)).
-func (o *OggOpusReader) OutputGainQ78() int16 { return o.gainQ78 }
+func (o *oggOpusReader) OutputGainQ78() int16 { return o.gainQ78 }
 
 // Channels is the output channel count declared by the ID header,
 // 1 or 2.
-func (o *OggOpusReader) Channels() int { return o.channels }
+func (o *oggOpusReader) Channels() int { return o.channels }
 
 // SampleRate is always 48000: Opus granule positions and decoding are defined
 // at 48 kHz regardless of the input rate recorded in the header.
-func (o *OggOpusReader) SampleRate() int { return oggOpusSampleRate }
+func (o *oggOpusReader) SampleRate() int { return oggOpusSampleRate }
 
 // TotalGranule is the granule of the final audio page, or -1 when the stream
 // is truncated and the true end could not be established.
-func (o *OggOpusReader) TotalGranule() int64 { return o.total }
+func (o *oggOpusReader) TotalGranule() int64 { return o.total }
 
 // ReadPacket returns the next audio packet and the granule position of the page
 // it completed on. The granule is -1 when that page has no usable position. The
@@ -663,7 +665,7 @@ func (o *OggOpusReader) TotalGranule() int64 { return o.total }
 //
 // A continued packet whose start is missing (a seek that landed mid-packet) is
 // skipped rather than returned, per RFC 7845 section 3.
-func (o *OggOpusReader) ReadPacket() (packet []byte, granule int64, err error) {
+func (o *oggOpusReader) ReadPacket() (packet []byte, granule int64, err error) {
 	return o.nextPacket()
 }
 
@@ -679,7 +681,7 @@ func (o *OggOpusReader) ReadPacket() (packet []byte, granule int64, err error) {
 //
 // Errors: a negative target, a target past the last known granule, or a stream
 // with no indexed audio pages.
-func (o *OggOpusReader) SeekGranule(target int64, preroll int64) error {
+func (o *oggOpusReader) SeekGranule(target int64, preroll int64) error {
 	if target < 0 {
 		return fmt.Errorf("decode: negative granule seek target %d", target)
 	}
@@ -714,9 +716,9 @@ func (o *OggOpusReader) SeekGranule(target int64, preroll int64) error {
 // Position is the granule position at which the next packet read starts, as a
 // lower bound. It is exact at page boundaries and never exceeds the true value,
 // so a caller can use it as the point from which to discard forward.
-func (o *OggOpusReader) Position() int64 { return o.pos }
+func (o *oggOpusReader) Position() int64 { return o.pos }
 
 // PositionExact reports whether Position is the exact granule at which the next
 // packet starts rather than a lower bound. It is false when a seek lands on a
 // page whose first packet continues an unread one, where the prefix is unknown.
-func (o *OggOpusReader) PositionExact() bool { return o.posExact }
+func (o *oggOpusReader) PositionExact() bool { return o.posExact }

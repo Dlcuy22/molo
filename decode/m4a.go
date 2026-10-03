@@ -31,6 +31,7 @@ func init() {
 // M4aFactory decodes AAC-LC audio from an MP4/M4A container.
 type M4aFactory struct{}
 
+// NewM4aFactory returns a factory for the AAC-in-MP4 decoder.
 func NewM4aFactory() *M4aFactory { return &M4aFactory{} }
 
 func (f *M4aFactory) Name() string { return "m4a" }

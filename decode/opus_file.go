@@ -141,6 +141,7 @@ func init() {
 // LibopusfileFactory decodes Ogg Opus through the native library.
 type LibopusfileFactory struct{}
 
+// NewLibopusfileFactory returns a factory for the native Ogg Opus decoder.
 func NewLibopusfileFactory() *LibopusfileFactory { return &LibopusfileFactory{} }
 
 func (f *LibopusfileFactory) Name() string { return "opus-libopusfile" }

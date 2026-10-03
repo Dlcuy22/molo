@@ -63,6 +63,7 @@ const (
 // CrossfeedFactory registers this implementation.
 type CrossfeedFactory struct{}
 
+// NewCrossfeedFactory returns a factory for the crossfeed effect.
 func NewCrossfeedFactory() *CrossfeedFactory { return &CrossfeedFactory{} }
 
 func (f *CrossfeedFactory) Kind() string { return "crossfeed" }

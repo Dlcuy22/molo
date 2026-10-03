@@ -276,8 +276,8 @@ func TestForwardOggOpusReadsMissingCommentHeader(t *testing.T) {
 	if r.TotalGranule() != -1 {
 		t.Fatalf("TotalGranule = %d, want -1", r.TotalGranule())
 	}
-	if err := r.SeekGranule(0, 0); err == nil {
-		t.Fatal("SeekGranule succeeded on a forward-only reader")
+	if err := r.SeekGranule(0, 0); !errors.Is(err, ErrNotSeekable) {
+		t.Fatalf("SeekGranule on a forward-only reader = %v, want ErrNotSeekable", err)
 	}
 
 	pkt, granule, err := r.ReadPacket()
@@ -310,8 +310,8 @@ func TestForwardOggOpusReportsChecksumMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newForwardOggOpus: %v", err)
 	}
-	if _, _, err := r.ReadPacket(); !errors.Is(err, ErrOggOpusChecksum) {
-		t.Fatalf("err = %v, want ErrOggOpusChecksum", err)
+	if _, _, err := r.ReadPacket(); !errors.Is(err, errOggOpusChecksum) {
+		t.Fatalf("err = %v, want errOggOpusChecksum", err)
 	}
 }
 

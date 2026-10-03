@@ -1,4 +1,4 @@
-//go:build freebsd || android || ios
+//go:build freebsd || android || ios || js || wasip1 || plan9
 
 // oto cannot be built on this platform with cgo disabled, so the backend is
 // replaced by one that fails loudly. It is still registered under the same

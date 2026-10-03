@@ -35,6 +35,7 @@ func init() {
 // FlacFactory decodes native FLAC without cgo.
 type FlacFactory struct{}
 
+// NewFlacFactory returns a factory for the lossless FLAC decoder.
 func NewFlacFactory() *FlacFactory { return &FlacFactory{} }
 
 func (f *FlacFactory) Name() string { return "flac" }

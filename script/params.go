@@ -64,7 +64,7 @@ func newStore(schema []dsp.Param, values map[string]any) (*store, error) {
 	}
 	for key := range values {
 		if _, ok := s.index[key]; !ok {
-			return nil, fmt.Errorf("%w: %q", ErrUnknownParam, key)
+			return nil, fmt.Errorf("%w: %q", dsp.ErrUnknownParam, key)
 		}
 	}
 	for _, p := range s.schema {
@@ -93,7 +93,7 @@ func (s *store) Get(key string) (any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.index[key]; !ok {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownParam, key)
+		return nil, fmt.Errorf("%w: %q", dsp.ErrUnknownParam, key)
 	}
 
 	return s.values[key], nil
@@ -104,7 +104,7 @@ func (s *store) Set(key string, value any) error {
 	defer s.mu.Unlock()
 	i, ok := s.index[key]
 	if !ok {
-		return fmt.Errorf("%w: %q", ErrUnknownParam, key)
+		return fmt.Errorf("%w: %q", dsp.ErrUnknownParam, key)
 	}
 	coerced, err := coerce(s.schema[i], value)
 	if err != nil {
@@ -184,13 +184,13 @@ func coerce(p dsp.Param, value any) (any, error) {
 			return nil, badValue(p, value, "string")
 		}
 		if !slices.Contains(p.Options, s) {
-			return nil, fmt.Errorf("%w: %q is not one of %v for %q", ErrUnknownParam, s, p.Options, p.Key)
+			return nil, fmt.Errorf("%w: %q is not one of %v for %q", dsp.ErrUnknownParam, s, p.Options, p.Key)
 		}
 
 		return s, nil
 
 	default:
-		return nil, fmt.Errorf("%w: %q has no usable kind", ErrUnknownParam, p.Key)
+		return nil, fmt.Errorf("%w: %q has no usable kind", dsp.ErrUnknownParam, p.Key)
 	}
 }
 
@@ -237,7 +237,7 @@ func isFinite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
 func clamp(f, lo, hi float64) float64 { return math.Min(math.Max(f, lo), hi) }
 
 func badValue(p dsp.Param, value any, want string) error {
-	return fmt.Errorf("%w: %q wants a %s, got %T", ErrUnknownParam, p.Key, want, value)
+	return fmt.Errorf("%w: %q wants a %s, got %T", dsp.ErrUnknownParam, p.Key, want, value)
 }
 
 // cloneSchema copies a schema so a caller cannot mutate the one the effect

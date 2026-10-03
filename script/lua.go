@@ -204,7 +204,7 @@ const loadDeadline = 500 * time.Millisecond
 // that loops forever reads as a timeout rather than an interpreter error.
 func loadError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
-		return fmt.Errorf("script did not finish within %s and was interrupted", loadDeadline)
+		return fmt.Errorf("script: did not finish within %s and was interrupted", loadDeadline)
 	}
 
 	return err

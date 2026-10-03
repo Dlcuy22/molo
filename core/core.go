@@ -14,8 +14,11 @@ import "time"
 type SampleFormat uint8
 
 const (
+	// F32 is 32-bit interleaved floating-point PCM, the engine's own currency.
 	F32 SampleFormat = iota
+	// S16 is 16-bit interleaved signed-integer PCM.
 	S16
+	// S32 is 32-bit interleaved signed-integer PCM.
 	S32
 )
 
