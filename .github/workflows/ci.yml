@@ -80,6 +80,21 @@ jobs:
           go-version-file: ui/webui/go.mod
           cache-dependency-path: ui/webui/go.sum
 
-      # Wails v3 reaches the webview through purego, so the backend compiles and
-      # tests on a runner with no GTK/WebKit development packages installed.
-      - run: go test ./...
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      # main.go embeds frontend/dist, which is gitignored, so the frontend must
+      # be built before the module compiles.
+      - name: Build the frontend
+        working-directory: ui/webui/frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      # The desktop build links GTK4 and WebKitGTK through cgo, which the runner
+      # does not have. The server tag drops the native webview, so the whole
+      # module compiles and tests without cgo or GTK.
+      - run: go test -tags server ./...
+        env:
+          CGO_ENABLED: "0"

@@ -30,6 +30,4 @@ __pycache__/
 
 # Local benchmark and process-monitor output: evidence kept on disk, not source.
 /ui/webui/tools/
-/ui/webui/stats_withSIMD.json
-/ui/webui/stats_withoutSIMD.json
-/ui/webui/player_stats_windows.json
+/ui/webui/*stats*.json
