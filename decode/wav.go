@@ -126,6 +126,14 @@ func (f *WavFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 	if frames, ok := canonicalFrames(sm.TotalFrames, sm.SampleRate); ok {
 		info.TotalFrames = frames
 	}
+	// The data chunk states the exact source-domain total, which survives the
+	// 48 kHz conversion even when it is not exact and TotalFrames stays -1. A
+	// streamed count of zero means unknown, so it is left unset rather than
+	// claiming an empty stream.
+	if sm.TotalFrames > 0 && sm.SampleRate > 0 {
+		info.SourceSamples = int64(sm.TotalFrames)
+		info.SourceRate = sm.SampleRate
+	}
 
 	return info, nil
 }
@@ -141,6 +149,11 @@ type wavDecoder struct {
 
 	// total is the playable frame count in the canonical domain, or -1.
 	total int64
+
+	// srcSamples and srcRate are the exact source-domain length, carried so
+	// Info can still report a duration when total is -1.
+	srcSamples int64
+	srcRate    int
 
 	// raw receives bytes from go-wav. The converter carries any partial frame,
 	// so no manual remainder bookkeeping is needed here.
@@ -197,6 +210,10 @@ func newWavDecoder(file *os.File, dec *pcm.Decoder) (*wavDecoder, error) {
 		conv:  newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
 		total: total,
 	}
+	if sm.TotalFrames > 0 && sm.SampleRate > 0 {
+		d.srcSamples = int64(sm.TotalFrames)
+		d.srcRate = sm.SampleRate
+	}
 	d.raw = rawFrames()
 	// out is one block of canonical stereo; pending aliases it, so it must not
 	// be resized while a caller still holds frames from it.
@@ -227,7 +244,12 @@ func needsConvertToS16(sm wav.StreamInfo) bool {
 }
 
 func (d *wavDecoder) Info() core.StreamInfo {
-	return core.StreamInfo{Format: core.CanonicalFormat, TotalFrames: d.total}
+	return core.StreamInfo{
+		Format:        core.CanonicalFormat,
+		TotalFrames:   d.total,
+		SourceSamples: d.srcSamples,
+		SourceRate:    d.srcRate,
+	}
 }
 
 // DecoderName names the codec implementation behind this decoder.

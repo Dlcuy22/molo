@@ -74,6 +74,72 @@ func TestStreamInfoDuration(t *testing.T) {
 	}
 }
 
+// TestStreamInfoDurationSourceDomain pins the three arms of Duration: the source
+// domain wins when it is known, the canonical frame count is the fallback, and
+// an unknown stream returns zero. The 44.1 kHz case is the reason both domains
+// exist: 12672 samples at 44100 is 287.3 ms, a length the canonical 48 kHz
+// frame count cannot state because it does not divide evenly.
+func TestStreamInfoDurationSourceDomain(t *testing.T) {
+	tests := []struct {
+		name string
+		info StreamInfo
+		want time.Duration
+	}{
+		{
+			name: "source domain wins over canonical",
+			info: StreamInfo{
+				Format:        FrameFormat{Rate: 48000, Ch: 2, Fmt: F32},
+				TotalFrames:   12000,
+				SourceSamples: 12672,
+				SourceRate:    44100,
+			},
+			want: time.Duration(12672) * time.Second / 44100,
+		},
+		{
+			name: "source domain reports even when canonical is unknown",
+			info: StreamInfo{
+				Format:        FrameFormat{Rate: 48000, Ch: 2, Fmt: F32},
+				TotalFrames:   -1,
+				SourceSamples: 12672,
+				SourceRate:    44100,
+			},
+			want: time.Duration(12672) * time.Second / 44100,
+		},
+		{
+			name: "canonical fallback when source is unset",
+			info: StreamInfo{
+				Format:      FrameFormat{Rate: 48000, Ch: 2, Fmt: F32},
+				TotalFrames: 12000,
+			},
+			want: 250 * time.Millisecond,
+		},
+		{
+			name: "source without a rate is ignored",
+			info: StreamInfo{
+				Format:        FrameFormat{Rate: 48000, Ch: 2, Fmt: F32},
+				TotalFrames:   12000,
+				SourceSamples: 12672,
+			},
+			want: 250 * time.Millisecond,
+		},
+		{
+			name: "unknown stream yields zero",
+			info: StreamInfo{
+				Format:      FrameFormat{Rate: 48000, Ch: 2, Fmt: F32},
+				TotalFrames: -1,
+			},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.info.Duration(); got != tt.want {
+				t.Fatalf("Duration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 type stubModule struct {
 	name    string
 	seen    FrameFormat

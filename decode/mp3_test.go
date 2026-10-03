@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/dlcuy22/player/core"
 )
@@ -291,6 +292,14 @@ func TestMp3ResamplesToCanonical(t *testing.T) {
 	if info.TotalFrames != -1 {
 		t.Fatalf("TotalFrames = %d, want -1 for a total that does not divide exactly", info.TotalFrames)
 	}
+	// 12672 samples at 44100 is the exact source-domain length, and it is what
+	// gives the stream a duration when TotalFrames cannot.
+	if info.SourceSamples != 12672 || info.SourceRate != 44100 {
+		t.Fatalf("source length = %d/%d, want 12672/44100", info.SourceSamples, info.SourceRate)
+	}
+	if info.Duration() <= 0 {
+		t.Fatalf("Duration() = %v, want a positive source-domain duration", info.Duration())
+	}
 
 	got := readMp3All(t, d)
 	// 12672 * 48000 / 44100 = 13792.65, so 13792 or 13793 frames are expected.
@@ -326,6 +335,25 @@ func TestMp3ProbeReportsLength(t *testing.T) {
 	// 12 audio frames of 1152 samples at 48 kHz.
 	if info.TotalFrames != 13824 {
 		t.Fatalf("Probe total = %d, want 13824 canonical frames", info.TotalFrames)
+	}
+}
+
+// TestMp3ProbeReportsSourceDuration checks the 44.1 kHz probe, where the tag
+// states 12672 source samples. That count does not divide evenly into 48 kHz
+// frames, so TotalFrames stays -1 while the source-domain duration is exact.
+func TestMp3ProbeReportsSourceDuration(t *testing.T) {
+	info, err := NewMp3Factory().Probe(fixturePath(t, "sine_stereo_44k.mp3"), ProbeOptions{Duration: core.DurationProbe})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if info.TotalFrames != -1 {
+		t.Fatalf("TotalFrames = %d, want -1 for a total that does not divide exactly", info.TotalFrames)
+	}
+	if info.SourceSamples != 12672 || info.SourceRate != 44100 {
+		t.Fatalf("source length = %d/%d, want 12672/44100", info.SourceSamples, info.SourceRate)
+	}
+	if want := time.Duration(12672) * time.Second / 44100; info.Duration() != want {
+		t.Fatalf("Duration() = %v, want %v", info.Duration(), want)
 	}
 }
 

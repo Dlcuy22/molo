@@ -103,6 +103,10 @@ func (f *FlacFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error
 	if frames, ok := canonicalFrames(sm.TotalSamples, sm.SampleRate); ok {
 		info.TotalFrames = frames
 	}
+	// STREAMINFO states the exact source-domain total, which survives the 48 kHz
+	// conversion even when it is not exact and TotalFrames stays -1.
+	info.SourceSamples = int64(sm.TotalSamples)
+	info.SourceRate = sm.SampleRate
 
 	return info, nil
 }
@@ -118,6 +122,11 @@ type flacDecoder struct {
 
 	// total is the playable frame count in the canonical domain, or -1.
 	total int64
+
+	// srcSamples and srcRate are the exact source-domain length, carried so
+	// Info can still report a duration when total is -1.
+	srcSamples int64
+	srcRate    int
 
 	// raw receives bytes from go-flac, cut to whole source frames.
 	raw []byte
@@ -155,10 +164,12 @@ func newFlacDecoder(file *os.File, dec *pcm.Decoder) (*flacDecoder, error) {
 	}
 
 	d := &flacDecoder{
-		file:  file,
-		dec:   dec,
-		conv:  newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
-		total: total,
+		file:       file,
+		dec:        dec,
+		conv:       newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
+		total:      total,
+		srcSamples: int64(sm.TotalSamples),
+		srcRate:    sm.SampleRate,
 	}
 	// A read shorter than one whole source frame would split a sample.
 	d.raw = make([]byte, max(frameBytes, pcmRawReadBytes/frameBytes*frameBytes))
@@ -170,7 +181,12 @@ func newFlacDecoder(file *os.File, dec *pcm.Decoder) (*flacDecoder, error) {
 }
 
 func (d *flacDecoder) Info() core.StreamInfo {
-	return core.StreamInfo{Format: core.CanonicalFormat, TotalFrames: d.total}
+	return core.StreamInfo{
+		Format:        core.CanonicalFormat,
+		TotalFrames:   d.total,
+		SourceSamples: d.srcSamples,
+		SourceRate:    d.srcRate,
+	}
 }
 
 // DecoderName names the codec implementation behind this decoder.

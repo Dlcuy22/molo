@@ -124,6 +124,10 @@ func (f *Mp3Factory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 	if frames, ok := canonicalFrames(sm.TotalSamples, sm.SampleRate); ok {
 		info.TotalFrames = frames
 	}
+	// The tag states the exact source-domain total, which survives the 48 kHz
+	// conversion even when it is not exact and TotalFrames stays -1.
+	info.SourceSamples = int64(sm.TotalSamples)
+	info.SourceRate = sm.SampleRate
 
 	return info, nil
 }
@@ -139,6 +143,11 @@ type mp3Decoder struct {
 
 	// total is the playable frame count in the canonical domain, or -1.
 	total int64
+
+	// srcSamples and srcRate are the exact source-domain length, carried so
+	// Info can still report a duration when total is -1.
+	srcSamples int64
+	srcRate    int
 
 	// raw receives bytes from go-mp3, cut to whole source frames.
 	raw []byte
@@ -170,10 +179,12 @@ func newMp3Decoder(file *os.File, dec *mp3pcm.Decoder) (*mp3Decoder, error) {
 	}
 
 	d := &mp3Decoder{
-		file:  file,
-		dec:   dec,
-		conv:  newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
-		total: total,
+		file:       file,
+		dec:        dec,
+		conv:       newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
+		total:      total,
+		srcSamples: int64(sm.TotalSamples),
+		srcRate:    sm.SampleRate,
 	}
 	d.raw = rawFrames()
 	// out is one block of canonical stereo; pending aliases it, so it must not
@@ -184,7 +195,12 @@ func newMp3Decoder(file *os.File, dec *mp3pcm.Decoder) (*mp3Decoder, error) {
 }
 
 func (d *mp3Decoder) Info() core.StreamInfo {
-	return core.StreamInfo{Format: core.CanonicalFormat, TotalFrames: d.total}
+	return core.StreamInfo{
+		Format:        core.CanonicalFormat,
+		TotalFrames:   d.total,
+		SourceSamples: d.srcSamples,
+		SourceRate:    d.srcRate,
+	}
 }
 
 // DecoderName names the codec implementation behind this decoder.

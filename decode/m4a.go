@@ -95,6 +95,13 @@ func (f *M4aFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 		return info, fmt.Errorf("decode: probe M4A %s: track codec is %s, not AAC-LC", path, md.Codec)
 	}
 	info.TotalFrames = m4aTotalFrames(md)
+	// The movie header states an exact presentation duration; converting it to
+	// source samples gives a length that survives even when TotalFrames is -1
+	// because the source does not divide evenly into canonical frames.
+	if samples, ok := durationSamples(md.Duration, md.SampleRate); ok {
+		info.SourceSamples = samples
+		info.SourceRate = md.SampleRate
+	}
 
 	return info, nil
 }
@@ -110,6 +117,11 @@ type m4aDecoder struct {
 
 	// total is the playable frame count in the canonical domain, or -1.
 	total int64
+
+	// srcSamples and srcRate are the exact source-domain presentation length,
+	// carried so Info can still report a duration when total is -1.
+	srcSamples int64
+	srcRate    int
 
 	// skipBytes is the encoder priming, in source bytes, that the raw decoder
 	// emits but the edit list excludes. It is consumed from the front. Keeping
@@ -162,6 +174,10 @@ func newM4aDecoderFrom(file *os.File, dec *aacpcm.Decoder, info m4a.Info) *m4aDe
 		conv:  newPCMConverter(info.SampleRate, info.Channels, bytesPS),
 		total: m4aTotalFrames(info),
 	}
+	if samples, ok := durationSamples(info.Duration, info.SampleRate); ok {
+		d.srcSamples = samples
+		d.srcRate = info.SampleRate
+	}
 	d.skipBytes = m4aPrimingBytes(info)
 	d.raw = rawFrames()
 	// out is one block of canonical stereo; pending aliases it, so it must not
@@ -172,7 +188,12 @@ func newM4aDecoderFrom(file *os.File, dec *aacpcm.Decoder, info m4a.Info) *m4aDe
 }
 
 func (d *m4aDecoder) Info() core.StreamInfo {
-	return core.StreamInfo{Format: core.CanonicalFormat, TotalFrames: d.total}
+	return core.StreamInfo{
+		Format:        core.CanonicalFormat,
+		TotalFrames:   d.total,
+		SourceSamples: d.srcSamples,
+		SourceRate:    d.srcRate,
+	}
 }
 
 // DecoderName names the codec implementation behind this decoder.

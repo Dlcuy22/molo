@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/dlcuy22/player/core"
 	"github.com/tphakala/go-flac/pcm"
@@ -296,6 +297,69 @@ func TestFlacProbeReportsLength(t *testing.T) {
 	}
 	if info.TotalFrames != 12000 {
 		t.Fatalf("Probe total = %d, want 12000 canonical frames", info.TotalFrames)
+	}
+}
+
+// TestFlacProbeReportsSourceDuration checks that a 44.1 kHz probe carries the
+// exact source-domain length alongside the canonical count. STREAMINFO holds
+// 11025 samples at 44100, so the source domain states 0.25 s directly; the
+// canonical count happens to divide evenly here, which is why the duration
+// survives either way, and the fields are what keep it when it does not.
+func TestFlacProbeReportsSourceDuration(t *testing.T) {
+	info, err := NewFlacFactory().Probe(fixturePath(t, "sine_stereo_44k.flac"), ProbeOptions{Duration: core.DurationProbe})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if info.SourceSamples != 11025 || info.SourceRate != 44100 {
+		t.Fatalf("source length = %d/%d, want 11025/44100", info.SourceSamples, info.SourceRate)
+	}
+	if want := time.Duration(11025) * time.Second / 44100; info.Duration() != want {
+		t.Fatalf("Duration() = %v, want %v", info.Duration(), want)
+	}
+}
+
+// TestFlacProbeSourceDurationWithoutCanonicalTotal is the regression for a
+// source whose sample count does not divide evenly into 48 kHz frames. The
+// canonical total is then unknown (-1), so without the source domain the
+// duration would read zero. STREAMINFO carries 12672 samples at 44100, and the
+// probe must still report an exact 12672/44100 s.
+func TestFlacProbeSourceDurationWithoutCanonicalTotal(t *testing.T) {
+	const samples = 12672
+
+	pcmBytes := make([]byte, 0, samples*2*2)
+	for i := range samples {
+		v := int16((i*97)%3000 - 1500)
+		for range 2 {
+			pcmBytes = append(pcmBytes, byte(v), byte(v>>8))
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "source_only_44k.flac")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cfg := pcm.Config{SampleRate: 44100, BitDepth: 16, Channels: 2}
+	if err := pcm.EncodeInterleaved(f, cfg, pcmBytes); err != nil {
+		f.Close()
+		t.Fatalf("encode: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	info, err := NewFlacFactory().Probe(path, ProbeOptions{Duration: core.DurationProbe})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if info.TotalFrames != -1 {
+		t.Fatalf("TotalFrames = %d, want -1 for a total that does not divide exactly", info.TotalFrames)
+	}
+	if info.SourceSamples != samples || info.SourceRate != 44100 {
+		t.Fatalf("source length = %d/%d, want %d/44100", info.SourceSamples, info.SourceRate, samples)
+	}
+	if want := time.Duration(samples) * time.Second / 44100; info.Duration() != want {
+		t.Fatalf("Duration() = %v, want %v", info.Duration(), want)
 	}
 }
 

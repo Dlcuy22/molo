@@ -114,6 +114,7 @@ func (f *AacFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 		return info, fmt.Errorf("decode: AAC reports an unusable stream %d Hz %d ch",
 			sm.SampleRate, sm.Channels)
 	}
+	// Bagian 2 fills SourceSamples/SourceRate here from an ADTS header scan.
 
 	return info, nil
 }

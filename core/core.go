@@ -59,12 +59,25 @@ type StreamInfo struct {
 	Format      FrameFormat
 	TotalFrames int64
 	Bitrate     int
+
+	// SourceSamples and SourceRate hold the exact length in the source domain,
+	// so a source whose rate does not divide evenly into 48 kHz (44.1 kHz is
+	// the common case) still reports a duration. Zero means unknown.
+	SourceSamples int64
+	SourceRate    int
 }
 
-// Duration converts TotalFrames to wall-clock time. Unknown totals and formats
-// without a usable rate yield zero so callers can treat "no duration" as "not
-// yet known" instead of an error.
+// Duration converts the stream length to wall-clock time. The source domain is
+// preferred when it is known: TotalFrames is the output frame count the
+// delivery path clamps to and is -1 whenever the source rate does not divide
+// exactly into 48 kHz, while SourceSamples is the exact source-domain length
+// that survives that case. Unknown lengths and formats without a usable rate
+// yield zero so callers can treat "no duration" as "not yet known" instead of
+// an error.
 func (s StreamInfo) Duration() time.Duration {
+	if s.SourceSamples > 0 && s.SourceRate > 0 {
+		return time.Duration(s.SourceSamples) * time.Second / time.Duration(s.SourceRate)
+	}
 	if s.TotalFrames < 0 || s.Format.Rate <= 0 {
 		return 0
 	}
