@@ -3,8 +3,8 @@
 // the state and event types so a UI never has to reach into internal/session.
 //
 // The package is deliberately UI-agnostic: no terminal code, no bubbletea, no
-// os.Exit. A TUI, a GTK window and a headless CLI all program against the same
-// Player.
+// os.Exit. A TUI, a desktop window and a headless CLI all program against the
+// same Player.
 package molo
 
 import (

@@ -1,11 +1,11 @@
 // Package script builds dsp.Effect implementations from Lua descriptions.
 //
-// The split is the whole point: Lua declares a parameter set and a node graph
-// once at load time, the Go kernel here builds that graph into a flat execution
-// plan, and only the Go plan runs per sample. Lua never runs on the audio
-// thread and never runs per sample, so the real-time contract that every other
-// dsp stage obeys holds unchanged: Process takes no lock, allocates nothing,
-// and never calls back into the interpreter.
+// The split keeps Lua off the audio thread: Lua declares a parameter set and a
+// node graph once at load time, the Go kernel here builds that graph into a
+// flat execution plan, and only the Go plan runs per sample. Lua never runs on
+// the audio thread and never runs per sample, so the real-time contract that
+// every other dsp stage obeys holds unchanged: Process takes no lock, allocates
+// nothing, and never calls back into the interpreter.
 //
 // Tier 2 scripts may register a control callback that recomputes node state per
 // block. That callback runs on a control goroutine and publishes its result

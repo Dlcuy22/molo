@@ -40,7 +40,7 @@ type Bucket struct {
 //
 // It is named Result rather than Waveform because Go gives a package one
 // namespace per identifier, so a type and the function that builds it cannot
-// share the name the interface sketch gives both.
+// share the same name.
 type Result struct {
 	Buckets []Bucket
 	Format  core.FrameFormat

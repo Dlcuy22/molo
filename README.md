@@ -1,32 +1,29 @@
 # molo
 
-An audio engine and a DSP scripting engine for Go, batteries included: decoder,
-parser, streamer, ring buffer, audio device, DSP, and metadata reader. Built
-with extendability and portability in mind.
+A batteries-included audio engine for Go, with decoder, parser, streamer, ring
+buffer, audio device, DSP, and metadata reader. Built with extendability and
+portability in mind.
 
 It plays audio from local files or from a pluggable provider, and it hands a UI
 everything it needs to draw playback, so a consumer does not have to assemble
-the decoder-to-device stack itself. It is equally a scripting engine: DSP
-effects can be written in Lua and loaded at runtime, alongside the built-in
-effects.
+the decoder-to-device stack itself.
+
+Its DSP scripting engine is one of its core features: effects can be written in
+Lua and loaded at runtime, alongside the built-in effects, with no recompile.
 
 ## Status
 
 molo is at v1.0.0. The public surface is frozen and the core pieces are in
 place: decoders, streamer, ring buffer, device output, DSP, metadata, the Lua
-scripting engine, and the facade. The known limitations are listed here rather
-than hidden:
+scripting engine, and the facade. The current known limitations are:
 
-- The AAC paths decode AAC-LC only; an HE-AAC (SBR or PS) stream is rejected
-  rather than decoded wrong.
+- The AAC paths decode AAC-LC only; an HE-AAC (SBR or PS) stream is not supported.
 - A forward-only source, such as a network body or a pipe, has no native seek,
   so the streamer reopens and discards to position it. Every local file format
-  seeks natively, including the AAC and M4A paths, which index the stream.
-- The duration is exact once the asynchronous probe completes. Until it does,
-  the length is reported as unknown, so a UI that gates its seek bar on the
-  duration shows no position for the first moment of a track. A 44.1 kHz source
-  whose samples do not divide evenly into 48 kHz frames now reports its exact
-  length too, because the length is kept in the source domain.
+  seeks natively.
+- The duration is exact only after the asynchronous probe completes. Until then
+  it is reported as unknown, so a UI that gates its seek bar on the duration
+  shows no position for the first moment of a track.
 
 ## Architecture and approach
 
@@ -41,12 +38,15 @@ Volume and effects run after the ring, just before the device, so they never
 touch the decode side.
 
 A track reference does not have to be a path. The session hands each ref to the
-first configured provider whose `Match` claims it, and `provider.LocalAudio` is
-the catch-all that keeps the historic local-file behaviour, so it stays last in
-the list. A provider (`provider.AudioProvider` returning a `provider.Source`)
-only ever returns bytes and metadata, so the engine stays UI-agnostic and never
-imports a network library of its own. With no providers configured, the engine
-is local-file only.
+first configured provider whose `Match` claims it.
+
+`provider.LocalAudio` is the catch-all that keeps the historic local-file
+behaviour, so it stays last in the list. With no providers configured, the
+engine is local-file only.
+
+A provider (`provider.AudioProvider` returning a `provider.Source`) only ever
+returns bytes and metadata, so the engine never imports a network library of its
+own.
 
 The code is layered so a UI never reaches past the facade. `core` holds only
 types and contracts. `internal/session` owns the queue, the state machine, and
@@ -70,52 +70,42 @@ it exactly like a built-in: the same pipeline, the same parameter schema, the
 same editor. Scripts run in a sandbox and describe a graph the Go side compiles,
 so no Lua runs on the audio thread.
 
-The engine does not depend on a large library such as ffmpeg. When a reference
-codec implementation is genuinely needed, the project reaches it through
-`ebitengine/purego` without cgo, as it already does for the fast Opus path
-(`libopusfile`).
-
 ### Portability, in two senses
 
 1. Platform portable. The main decoders and the audio device are pure Go, so
-   the engine builds and cross-compiles across platforms without cgo. The
-   `libopusfile` path is optional and sits behind a build tag, and a stub keeps
-   the registry shape identical where it is unavailable.
+   the engine builds and cross-compiles across platforms without cgo, and it
+   does not depend on a large library such as ffmpeg. When a reference codec
+   implementation is genuinely needed, the project reaches it through
+   `ebitengine/purego`, as it already does for the fast Opus path
+   (`libopusfile`). That path is optional and sits behind a build tag, and a
+   stub keeps the registry shape identical where it is unavailable.
 2. UI portable. The same engine drives a CLI, a TUI, or a GUI. The facade
-   exposes cheap queries (`Snapshot`) and non-blocking commands, so a consumer
-   never has to manage the low-level machinery, which the library already owns.
+   exposes cheap queries (`Snapshot`) and commands that return immediately, so a
+   consumer never has to manage the low-level machinery, which the library
+   already owns.
 
 ## Features
 
-- Two engines in one: a real-time audio engine and a DSP scripting engine.
-  Effects are either built-in Go stages or Lua scripts loaded at runtime.
 - Canonical format. Everything is normalized to 48 kHz stereo float32 before
   the ring, so the audio device opens once and is reused across tracks.
-- Decoders for Opus, FLAC, WAV, MP3, M4A, AAC, and WebM/Matroska (Opus in WebM,
-  `.webm` and `.weba`). Opus has three implementations with different seek
-  trade-offs.
-- A provider seam. Play local files by default, or plug in sources with
-  `molo.WithProviders`; a provider returns bytes and metadata, and
-  `Player.Providers()` lists what is in effect.
+- Decoders for Opus, FLAC, WAV, MP3, M4A, AAC, and Opus in WebM/Matroska. Opus
+  has three implementations with different seek trade-offs.
 - Codec selection by name, or automatic by weight. `molo -codecs` lists what
   the build supports.
 - Streaming through a power-of-two SPSC ring (about 300 ms) with a decoder
   goroutine, high and low watermarks, and 100 ms chunks.
 - Seeking native where the format supports it, with latest-wins collapsing so a
-  burst of seeks resolves to the last target. Formats without a native seek fall
-  back to reopen-and-discard.
+  burst of seeks resolves to the last target.
 - Live swap. `SwapDecoder` or `SwapBackend` changes the decoder or the device on
   the track that is playing, reopening at the position playback has reached,
   without stopping the stream.
-- DSP with a post-ring gain stage, a bs2b crossfeed, a fade, an effect registry,
-  and a parameter schema a UI can render controls from. An effect can also
-  publish live meters, described readings, and plots, and the engine exposes a
-  separate effect-chain editor surface (`molo.Effects`) to add, remove, move,
-  parameterize, and bypass stages without rebuilding the chain.
-- A Lua DSP engine in the `script` package: effects are written in Lua, loaded
-  at runtime, and registered alongside the built-ins, so a new effect needs no
-  recompile. Scripts run in a sandbox and are compiled to a plan the real-time
-  path runs.
+- A DSP pipeline with a post-ring gain stage, a bs2b crossfeed, a fade, an
+  effect registry, and a parameter schema a UI can render controls from. An
+  effect can also publish live meters, described readings, and plots, and the
+  engine exposes a separate effect-chain editor surface (`molo.Effects`) to add,
+  remove, move, parameterize, and bypass stages without rebuilding the chain.
+  Lua effects from the `script` package sit alongside the built-ins; see
+  [Extending it](#extending-it).
 - Metadata from embedded container tags first, filename fallback last, so a UI
   never shows an empty row. Embedded cover art rides along as raw bytes and a
   MIME type; a UI decodes and scales it.
@@ -182,41 +172,26 @@ can change at runtime through `Settings`, or with `SwapDecoder` and
 ## Example UIs
 
 The repository ships three front ends behind one facade, and they share no UI
-code. They are the portability claim made concrete.
+code.
 
 `cmd/molo` is the headless CLI, plain Go. It lives in the engine module rather
-than in a module of its own, and imports only the public facade. It plays the
-paths given on the command line as a queue and keeps single-key controls when
-stdin is a terminal.
+than in a module of its own. It plays the paths given on the command line as a
+queue and keeps single-key controls when stdin is a terminal. this is just a reference
+implementation of the engine's facade, not actively maintained.
 
 `ui/tui` is a terminal UI built on Bubble Tea and Lip Gloss. It draws a
 now-playing panel, a progress bar, a level meter, an optional waveform, and the
-queue.
+queue. this frontend is not actively maintained.
 
 `ui/webui` is a desktop app: a Wails v3 Go backend with a Svelte 5 frontend. It
 has transport controls, a clickable queue, decoder and backend selection, album
 artwork in the now-playing row, a bar visualizer driven by the engine's `Tap`,
 the effect editor, and YouTube Music search and queueing through the provider
-seam. It is the one front end that renders cover art today.
+seam. It is the one front end that renders cover art today. 
 
 The TUI and the desktop app keep their own `go.mod`, joined to the engine by a
 `go.work` at the root, so the engine stays free of UI dependencies.
 
-## Contributing
-
-Contributions are welcome. The repository is a Go workspace with three modules,
-so run the tests from the module you changed:
-
-```sh
-go test ./...                    # engine
-(cd ui/tui && go test ./...)     # TUI
-(cd ui/webui && go test ./...)   # desktop backend
-```
-
-A new codec is one file under `decode/` with an `init()` that registers its
-factory, plus a test. A new effect is the same shape under `dsp/`, or a Lua file
-loaded through `script` with no recompile.
-
 ## License
 
-MIT. Copyright 2026 Asrian Putra. See [LICENSE](LICENSE).
+molo is licensed under the MIT License. See [LICENSE](LICENSE).

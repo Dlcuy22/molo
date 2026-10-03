@@ -47,8 +47,8 @@ func (f *M4aFactory) Name() string { return "m4a" }
 // FriendlyName is the label a UI shows for this codec.
 func (f *M4aFactory) FriendlyName() string { return "M4a" }
 
-// Weight breaks ties against a future M4A codec registered for the same
-// extension, the same role the FLAC factory's 90 plays.
+// Weight breaks ties against another codec registered for the same extension,
+// the same role the FLAC factory's 90 plays.
 func (f *M4aFactory) Weight() int { return 90 }
 
 // Exts claims both container spellings. An .mp4 audio file has the same

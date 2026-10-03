@@ -37,7 +37,7 @@ var ErrSeekRange = errors.New("stream: seek target out of range")
 var ErrSeamlessNotSeekable = errors.New("stream: seamless swap requires a seekable decoder")
 
 // DefaultRingFrames is the buffered-audio target at the 48 kHz output rate,
-// about 300 ms. The plan allows 150 to 500 ms.
+// about 300 ms. The usable range is roughly 150 to 500 ms.
 const DefaultRingFrames = 48000 * 300 / 1000
 
 // DefaultChunkFrames bounds one decoder read, about 100 ms.
@@ -99,8 +99,8 @@ type Stats struct {
 
 // Streamer owns the decoder goroutine and the ring that feeds the consumer. Its
 // position domain is output frames at 48 kHz; nothing else here counts frames,
-// so the native-rate, output-rate and sample-count mixing that broke the
-// predecessor engine has no place to happen.
+// so a native-rate count can never be mixed with the output clock or a sample
+// count.
 type Streamer struct {
 	open Opener
 	dec  decode.Decoder
@@ -302,7 +302,7 @@ func (s *Streamer) Position() int64 { return s.pos.Load() }
 // FramesToDuration converts a position in the streamer's one frame domain
 // (output frames at 48 kHz) into wall clock time. Every frame-to-time
 // conversion goes through here so no caller can pair a native-rate count with
-// the output clock, the mistake that broke the predecessor engine.
+// the output clock.
 func FramesToDuration(frames int64) time.Duration {
 	if frames <= 0 {
 		return 0

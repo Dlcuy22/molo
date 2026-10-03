@@ -1,5 +1,5 @@
 // Package dsp holds the real-time stages that run after the ring: gain,
-// effects, limiting, metering. Everything in this package runs on the audio
+// effects, metering. Everything in this package runs on the audio
 // path, so a stage must not allocate, must not block, and must not take a lock
 // a control goroutine can hold while waiting on the audio thread.
 //

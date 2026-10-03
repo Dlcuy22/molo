@@ -41,11 +41,12 @@ type AudioProvider interface {
 }
 
 // Source is one resolved track. Opener is a factory, not a decoder, because the
-// streamer calls it again on the reopen-and-discard seek fallback
-// (stream/streamer.go:717), on a decoder swap (streamer.go:399) and on the
-// restore after a failed swap (streamer.go:626); a provider that cannot re-open
-// cannot seek. Returning one decoder would make remote seek impossible, so the
-// seam deliberately exposes the way to open again rather than the open result.
+// streamer calls it again on the reopen-and-discard fallback
+// (Streamer.reopenAndDiscard), on a decoder swap (Streamer.SwapDecoder) and on
+// the restore after a failed swap (Streamer.doSeek); a provider that cannot
+// re-open cannot seek. Returning one decoder would make remote seek impossible,
+// so the seam deliberately exposes the way to open again rather than the open
+// result.
 //
 // Opener must return a non-nil decoder or an error, never (nil, nil): the
 // session calls Info on the result, so a nil decoder would panic the producer
@@ -111,8 +112,7 @@ func (LocalAudio) Open(ctx context.Context, ref string) (Source, error) {
 		Opener: func(<-chan struct{}) (decode.Decoder, error) {
 			// The stop channel is not consulted here: OpenNamed reads a regular
 			// file, so it cannot block indefinitely, and the session refuses a
-			// new open once closing. This matches the contract Config.openDecoder
-			// had.
+			// new open once closing.
 			return decode.Default.OpenNamed("", ref)
 		},
 	}, nil

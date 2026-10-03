@@ -45,11 +45,11 @@ type Provider interface {
 // fixed, which is why Open is separate from Start: the sink is prepared once
 // and fed many streams.
 //
-// Err is the one method beyond the plan's sketch. It is there because a push
-// backend reads the Provider on its own thread: a decode failure or a dead
-// audio server has no call site to be returned from, so without Err the engine
-// can only go silent. It is the asynchronous counterpart to the error the
-// Provider already returns, and it must stay cheap and safe to poll.
+// Err is the one method a pull-only Device would not need. It is there because
+// a push backend reads the Provider on its own thread: a decode failure or a
+// dead audio server has no call site to be returned from, so without Err the
+// engine can only go silent. It is the asynchronous counterpart to the error
+// the Provider already returns, and it must stay cheap and safe to poll.
 type Device interface {
 	// Open binds the device to a format and a Provider. It must be called
 	// before Start.

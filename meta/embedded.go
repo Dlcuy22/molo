@@ -25,14 +25,13 @@ func NewEmbeddedTags() *EmbeddedTags { return &EmbeddedTags{} }
 
 func (e *EmbeddedTags) Name() string { return "embedded-tags" }
 
-// Priority puts container metadata above a filename guess. It stays below a
-// future FFprobe resolver only because probing is a heavier, more certain
-// source; when that lands its priority goes above this one.
+// Priority puts container metadata above a filename guess, because it is
+// cheaper and more direct than probing the stream.
 func (e *EmbeddedTags) Priority() int { return 100 }
 
 // supportedExts is the set of extensions dhowden/tag can parse. Matching on
 // the extension keeps this resolver from opening files it cannot read, which
-// is the whole point of the Match contract.
+// is what the Match contract is for.
 var supportedExts = map[string]struct{}{
 	".mp3":  {},
 	".m4a":  {},

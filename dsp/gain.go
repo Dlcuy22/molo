@@ -25,10 +25,8 @@ const defaultChannels = 2
 // Gain is a post-ring volume stage. It scales interleaved float32 samples in
 // place and never allocates, which keeps it legal on the real-time path.
 //
-// Gain is deliberately the single place a track's amplitude is changed, so the
-// fade-in and fade-out that track transitions will need can be built on top of
-// it (a ramp driven by the same atomic volume) rather than beside it. Nothing
-// here may grow a lock, a channel, or an allocation without breaking that plan.
+// Gain is the master volume stage. Keep it small: no lock, no channel, no
+// allocation, so the audio thread pays only for the multiply.
 type Gain struct {
 	// volume holds math.Float64bits so a live SetVolume is a single atomic
 	// store; an atomic float64 is unavailable before Go 1.19 and this is the
