@@ -2,3 +2,34 @@
 # in history: they pin upstream client identities and wire formats that go
 # stale, and they talk to live services.
 /experiments/
+
+# Local reference material: a full GPL Audacity tree with its own nested .git.
+# Never tracked; vendoring it would relicense the repo and confuse tooling.
+/ref/
+
+# Copyrighted music used for manual listening. The synthetic fixtures under
+# decode/testdata and meta/testdata are the ones that ship.
+/testfiles/
+
+# Ignore every captured audio file by default, then re-include the generated
+# fixtures the tests read.
+*.opus
+!decode/testdata/*.opus
+!meta/testdata/*.opus
+
+# Python prototype and its bytecode cache.
+/tools/
+__pycache__/
+
+# Design notes, agent instructions, and agent tooling, local to this checkout.
+/docs/
+/.agents/
+/AGENTS.md
+/DESIGN.md
+/skills-lock.json
+
+# Local benchmark and process-monitor output: evidence kept on disk, not source.
+/ui/webui/tools/
+/ui/webui/stats_withSIMD.json
+/ui/webui/stats_withoutSIMD.json
+/ui/webui/player_stats_windows.json

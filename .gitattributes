@@ -1,0 +1,8 @@
+# The tree is authored with LF. A Windows checkout rewrote the working copy to
+# CRLF, which turned every diff into whole-file churn. Pin LF in the repository
+# and let git normalize on checkout, so the history stays readable.
+* text=auto eol=lf
+
+# Batch files must keep CRLF: cmd.exe mishandles LF-only labels and goto.
+*.bat -text
+*.cmd -text
