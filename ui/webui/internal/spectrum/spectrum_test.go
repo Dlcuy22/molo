@@ -2,6 +2,7 @@ package spectrum
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 )
@@ -123,9 +124,16 @@ func TestNewRejectsBadConfig(t *testing.T) {
 	if _, err := New(silence{}, Config{Bars: 40, FFT: 2048}); err != nil {
 		t.Errorf("New with a partial config: %v", err)
 	}
-	// A non-power-of-two FFT has no transform.
-	if _, err := New(silence{}, Config{FFT: 1000}); err == nil {
-		t.Error("New accepted a non-power-of-two FFT")
+	// A non-power-of-two FFT has no transform. withDefaults now falls back to a
+	// listed size instead of letting the analyzer reject the config, so the
+	// guarantee is that the fallback happened, not that New returned an error.
+	r, err := New(silence{}, Config{FFT: 1000})
+	if err != nil {
+		t.Fatalf("New with a non-power-of-two FFT: %v", err)
+	}
+	if got := r.Config().FFT; got != DefaultConfig().FFT {
+		t.Errorf("non-power-of-two FFT survived as %d, want the default %d",
+			got, DefaultConfig().FFT)
 	}
 }
 
@@ -575,7 +583,7 @@ func TestJitterBufferCapsLag(t *testing.T) {
 func TestBarCentersSpanTheRange(t *testing.T) {
 	for _, cfg := range []Config{
 		{Bars: 150, FFT: 8192, SampleRate: 48000, MinHz: 20, MaxHz: 20000},
-		{Bars: 200, FFT: 512, SampleRate: 48000, MinHz: 10, MaxHz: 20000},
+		{Bars: 200, FFT: 1024, SampleRate: 48000, MinHz: 10, MaxHz: 20000},
 		{Bars: 16, FFT: 4096, SampleRate: 44100, MinHz: 30, MaxHz: 16000},
 	} {
 		centers := barCenters(cfg)
@@ -601,14 +609,15 @@ func TestBarCentersSpanTheRange(t *testing.T) {
 }
 
 // TestNewCapsBarsToBins checks the guard that keeps a request for more bars
-// than the transform can resolve from producing dead columns at the top.
+// than the transform can resolve from producing dead columns at the top. It
+// uses the smallest offered transform, since 512 is no longer reachable.
 func TestNewCapsBarsToBins(t *testing.T) {
-	r, err := New(silence{}, Config{Bars: 4096, FFT: 512})
+	r, err := New(silence{}, Config{Bars: 4096, FFT: ChoiceFFTSizes[0]})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := len(r.Bands()); got != 256 {
-		t.Fatalf("bands = %d, want 256 (512/2 bins)", got)
+	if got, want := len(r.Bands()), ChoiceFFTSizes[0]/2; got != want {
+		t.Fatalf("bands = %d, want %d (%d/2 bins)", got, want, ChoiceFFTSizes[0])
 	}
 }
 
@@ -616,12 +625,26 @@ func TestNewCapsBarsToBins(t *testing.T) {
 // and range, and a low cut that defaults below the high cut.
 func TestSchemaStaysConsistent(t *testing.T) {
 	params := Schema()
-	if len(params) != 3 {
-		t.Fatalf("schema has %d params, want 3", len(params))
+	if len(params) != 4 {
+		t.Fatalf("schema has %d params, want 4", len(params))
 	}
 	byKey := map[string]Param{}
 	for _, p := range params {
 		byKey[p.Key] = p
+		if p.Kind == "choice" {
+			if len(p.Choices) == 0 {
+				t.Errorf("%s: a choice must offer a non-empty set", p.Key)
+			}
+			if !slices.Contains(p.Choices, int(p.Default)) {
+				t.Errorf("%s: default %v is not one of the choices %v", p.Key, p.Default, p.Choices)
+			}
+			for i := 1; i < len(p.Choices); i++ {
+				if p.Choices[i] <= p.Choices[i-1] {
+					t.Errorf("%s: choices must ascend, got %v", p.Key, p.Choices)
+				}
+			}
+			continue
+		}
 		if p.Min > p.Max {
 			t.Errorf("%s: min %v above max %v", p.Key, p.Min, p.Max)
 		}
@@ -634,5 +657,60 @@ func TestSchemaStaysConsistent(t *testing.T) {
 	}
 	if byKey["minHz"].Default != 20 || byKey["maxHz"].Default != 20000 {
 		t.Errorf("default range = %v..%v, want 20..20000", byKey["minHz"].Default, byKey["maxHz"].Default)
+	}
+}
+
+// TestFFTChoicesAreValidPowersOfTwo pins the dropdown's entries: radix-2
+// rejects anything else, so a size that is not a power of two would fail the
+// open rather than appear.
+func TestFFTChoicesAreValidPowersOfTwo(t *testing.T) {
+	if len(ChoiceFFTSizes) == 0 {
+		t.Fatal("ChoiceFFTSizes is empty")
+	}
+	for _, size := range ChoiceFFTSizes {
+		if size < 2 || size&(size-1) != 0 {
+			t.Errorf("choice %d is not a power of two", size)
+		}
+		if _, err := NewAnalyzer(size); err != nil {
+			t.Errorf("choice %d rejected by the analyzer: %v", size, err)
+		}
+	}
+	if DefaultConfig().FFT != 8192 {
+		t.Errorf("default FFT = %v, want 8192", DefaultConfig().FFT)
+	}
+}
+
+// TestWithDefaultsRejectsUnlistedFFT covers the fallback: a size the dropdown
+// cannot produce (a non-power-of-two, or an off-list power) must not reach the
+// analyzer, and must not fail the open either.
+func TestWithDefaultsRejectsUnlistedFFT(t *testing.T) {
+	for _, bad := range []int{0, -1, 1000, 3000, 65536} {
+		cfg := withDefaults(Config{FFT: bad})
+		if cfg.FFT != DefaultConfig().FFT {
+			t.Errorf("withDefaults(FFT: %d) = %d, want the default %d",
+				bad, cfg.FFT, DefaultConfig().FFT)
+		}
+	}
+	for _, ok := range ChoiceFFTSizes {
+		if got := withDefaults(Config{FFT: ok}).FFT; got != ok {
+			t.Errorf("withDefaults dropped a listed choice %d, got %d", ok, got)
+		}
+	}
+}
+
+// TestRunnerAcceptsEveryFFTChoice is the end-to-end promise behind the control:
+// each offered size builds a working runner that still fills its bars.
+func TestRunnerAcceptsEveryFFTChoice(t *testing.T) {
+	for _, size := range ChoiceFFTSizes {
+		r, err := New(silence{}, Config{Bars: 64, FFT: size, SampleRate: 48000})
+		if err != nil {
+			t.Fatalf("New with FFT %d: %v", size, err)
+		}
+		if got := r.Config().FFT; got != size {
+			t.Errorf("Config().FFT = %d, want %d", got, size)
+		}
+		if len(r.Bands()) == 0 {
+			t.Errorf("FFT %d produced no bands", size)
+		}
 	}
 }

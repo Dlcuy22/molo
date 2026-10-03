@@ -57,7 +57,7 @@ export const EMPTY: Snapshot = {
 
 export const player = writable<Snapshot>(EMPTY);
 export const options = writable<Options>({ codecs: [], backends: [], effects: [] });
-export const spectrumConfig = writable<SpectrumConfig>({ bars: 150, minHz: 20, maxHz: 20000 });
+export const spectrumConfig = writable<SpectrumConfig>({ bars: 150, minHz: 20, maxHz: 20000, fft: 8192 });
 export const spectrumSchema = writable<Param[]>([]);
 
 /** previewConfig is the preview window the Go side holds. The UI edits it

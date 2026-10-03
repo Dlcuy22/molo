@@ -9,6 +9,7 @@ package spectrum
 
 import (
 	"math"
+	"slices"
 	"time"
 )
 
@@ -76,21 +77,36 @@ func DefaultConfig() Config {
 // Param is one visualizer control, described for a generic UI renderer. The set
 // is small and fixed, so the frontend can build the panel without a schema
 // library.
+//
+// A choice carries Choices and leaves Min, Max and Step at zero: a dropdown has
+// no continuous range, so the range fields would only describe a span the
+// control cannot actually take.
 type Param struct {
 	Key     string  `json:"key"`
 	Label   string  `json:"label"`
-	Kind    string  `json:"kind"` // "int" | "float"
+	Kind    string  `json:"kind"` // "int" | "float" | "choice"
 	Min     float64 `json:"min"`
 	Max     float64 `json:"max"`
 	Step    float64 `json:"step"`
 	Default float64 `json:"default"`
+
+	// Choices is the allowed set for Kind "choice", ascending. Radix-2 needs a
+	// power of two, so the transform size cannot be a slider: every step
+	// between two powers of two would be rejected.
+	Choices []int `json:"choices,omitempty"`
 }
+
+// ChoiceFFTSizes are the transform sizes the dropdown offers. The list is the
+// useful range: below 1024 the bass smears, and above 16384 the extra detail
+// sits past 20 kHz while the transform cost keeps climbing.
+var ChoiceFFTSizes = []int{1024, 2048, 4096, 8192, 16384}
 
 // Schema describes the visualizer controls. The frequency range is expressed in
 // whole Hz, so the UI shows a plain number rather than a fraction.
 func Schema() []Param {
 	return []Param{
 		{Key: "bars", Label: "Points", Kind: "int", Min: 16, Max: 256, Step: 1, Default: 150},
+		{Key: "fft", Label: "Resolution", Kind: "choice", Choices: ChoiceFFTSizes, Default: float64(DefaultConfig().FFT)},
 		{Key: "minHz", Label: "Low cut", Kind: "int", Min: 10, Max: 500, Step: 1, Default: 20},
 		{Key: "maxHz", Label: "High cut", Kind: "int", Min: 2000, Max: 20000, Step: 100, Default: 20000},
 	}
@@ -101,7 +117,7 @@ func Schema() []Param {
 type Runner struct {
 	cfg Config
 	tap Tap
-	an  *Analyzer
+	an  Transform
 
 	// window is the last FFT samples in time order, filled once the tap has
 	// published a whole frame's worth.
@@ -157,7 +173,7 @@ type Runner struct {
 func New(tap Tap, cfg Config) (*Runner, error) {
 	cfg = withDefaults(cfg)
 
-	an, err := NewAnalyzer(cfg.FFT)
+	an, err := NewTransform(cfg.FFT)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +209,10 @@ func withDefaults(cfg Config) Config {
 	if cfg.Bars <= 0 {
 		cfg.Bars = def.Bars
 	}
-	if cfg.FFT < 2 {
+	// An off-list transform falls back to the default rather than failing the
+	// open: the dropdown only offers valid sizes, so this is a hand-written
+	// call, and dropping to the default keeps the display running.
+	if !slices.Contains(ChoiceFFTSizes, cfg.FFT) {
 		cfg.FFT = def.FFT
 	}
 	if cfg.SampleRate <= 0 {

@@ -5,17 +5,28 @@
  * Param is one visualizer control, described for a generic UI renderer. The set
  * is small and fixed, so the frontend can build the panel without a schema
  * library.
+ * 
+ * A choice carries Choices and leaves Min, Max and Step at zero: a dropdown has
+ * no continuous range, so the range fields would only describe a span the
+ * control cannot actually take.
  */
 export interface Param {
     "key": string;
     "label": string;
 
     /**
-     * "int" | "float"
+     * "int" | "float" | "choice"
      */
     "kind": string;
     "min": number;
     "max": number;
     "step": number;
     "default": number;
+
+    /**
+     * Choices is the allowed set for Kind "choice", ascending. Radix-2 needs a
+     * power of two, so the transform size cannot be a slider: every step
+     * between two powers of two would be rejected.
+     */
+    "choices"?: number[] | null;
 }

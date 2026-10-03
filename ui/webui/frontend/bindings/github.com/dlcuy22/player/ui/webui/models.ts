@@ -219,6 +219,12 @@ export interface SpectrumConfig {
     "bars": number;
     "minHz": number;
     "maxHz": number;
+
+    /**
+     * FFT is the transform length. Zero means the shipped default, so an older
+     * frontend that does not send the field still gets a working display.
+     */
+    "fft": number;
 }
 
 /**

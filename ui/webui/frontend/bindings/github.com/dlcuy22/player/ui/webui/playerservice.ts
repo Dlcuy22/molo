@@ -41,7 +41,7 @@ export function AppendYTM(videoID: string): $CancellablePromise<void> {
 
 /**
  * ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
- * range and the points both take effect on the next tick.
+ * range, the points and the transform size all take effect on the next tick.
  */
 export function ConfigureSpectrum(cfg: $models.SpectrumConfig): $CancellablePromise<void> {
     return $Call.ByID(3682469907, cfg);

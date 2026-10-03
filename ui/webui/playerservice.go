@@ -748,11 +748,11 @@ func (s *PlayerService) SpectrumConfig() SpectrumConfig {
 	cfg := s.spectrumCfg
 	s.spectrumMu.Unlock()
 
-	return SpectrumConfig{Bars: cfg.Bars, MinHz: int(cfg.MinHz), MaxHz: int(cfg.MaxHz)}
+	return SpectrumConfig{Bars: cfg.Bars, MinHz: int(cfg.MinHz), MaxHz: int(cfg.MaxHz), FFT: cfg.FFT}
 }
 
 // ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
-// range and the points both take effect on the next tick.
+// range, the points and the transform size all take effect on the next tick.
 func (s *PlayerService) ConfigureSpectrum(cfg SpectrumConfig) error {
 	next := spectrum.DefaultConfig()
 	if cfg.Bars > 0 {
@@ -763,6 +763,9 @@ func (s *PlayerService) ConfigureSpectrum(cfg SpectrumConfig) error {
 	}
 	if cfg.MaxHz > 0 {
 		next.MaxHz = float64(cfg.MaxHz)
+	}
+	if cfg.FFT > 0 {
+		next.FFT = cfg.FFT
 	}
 	if next.MinHz >= next.MaxHz {
 		return fmt.Errorf("visualizer: low cut must be below high cut")
@@ -1046,6 +1049,9 @@ type SpectrumConfig struct {
 	Bars  int `json:"bars"`
 	MinHz int `json:"minHz"`
 	MaxHz int `json:"maxHz"`
+	// FFT is the transform length. Zero means the shipped default, so an older
+	// frontend that does not send the field still gets a working display.
+	FFT int `json:"fft"`
 }
 
 // command runs one engine call with the shared error policy: a failure is
