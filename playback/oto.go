@@ -50,7 +50,7 @@ func otoContext() (*oto.Context, error) {
 			SampleRate:      deviceRate,
 			ChannelCount:    deviceChannels,
 			Format:          oto.FormatFloat32LE,
-			ApplicationName: "player",
+			ApplicationName: "molo",
 		})
 		if err != nil {
 			otoCtxErr = err

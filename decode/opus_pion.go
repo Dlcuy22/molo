@@ -260,7 +260,7 @@ type pionOpusDecoder struct {
 }
 
 func newPionOpusDecoder(src pionSource, warmup int64) (*pionOpusDecoder, error) {
-	return newPionOpusDecoderWith(openOpusPackets, src, warmup, "player/decode (oggopus)")
+	return newPionOpusDecoderWith(openOpusPackets, src, warmup, "molo/decode (oggopus)")
 }
 
 // newPionOpusDecoderWith builds the decoder over an explicit container. The

@@ -48,9 +48,9 @@ func run(args []string, e env) int {
 	opts, err := parseArgs(args)
 	if err != nil {
 		if errors.Is(err, errUsage) {
-			fmt.Fprintf(e.stderr, "player: %v\n\n%s", err, usageText)
+			fmt.Fprintf(e.stderr, "molo: %v\n\n%s", err, usageText)
 		} else {
-			fmt.Fprintf(e.stderr, "player: %v\n", err)
+			fmt.Fprintf(e.stderr, "molo: %v\n", err)
 		}
 
 		return classify(err)
@@ -68,12 +68,12 @@ func run(args []string, e env) int {
 
 	paths, err := resolveQueue(opts.paths, decode.Default.Supported())
 	if err != nil {
-		fmt.Fprintf(e.stderr, "player: %v\n", err)
+		fmt.Fprintf(e.stderr, "molo: %v\n", err)
 
 		return classify(err)
 	}
 	if len(paths) == 0 {
-		fmt.Fprintf(e.stderr, "player: %v\n", errNoInput)
+		fmt.Fprintf(e.stderr, "molo: %v\n", errNoInput)
 
 		return classify(errNoInput)
 	}
@@ -100,7 +100,7 @@ func run(args []string, e env) int {
 	if e.interactive && e.makeRaw != nil {
 		r, err := e.makeRaw()
 		if err != nil {
-			fmt.Fprintf(e.stderr, "player: terminal: %v\n", err)
+			fmt.Fprintf(e.stderr, "molo: terminal: %v\n", err)
 
 			return exitFailure
 		}
@@ -120,7 +120,7 @@ func run(args []string, e env) int {
 
 	p, err := e.newPlayer(playerOpts...)
 	if err != nil {
-		fmt.Fprintf(e.stderr, "player: %v\n", err)
+		fmt.Fprintf(e.stderr, "molo: %v\n", err)
 
 		return exitFailure
 	}
@@ -178,7 +178,7 @@ func play(p molo.Player, opts options, paths []string, durations []time.Duration
 					}
 				case molo.Failed:
 					failed = ev.Err
-					fmt.Fprintf(e.stderr, "player: %v\n", ev.Err)
+					fmt.Fprintf(e.stderr, "molo: %v\n", ev.Err)
 					end()
 				}
 			}

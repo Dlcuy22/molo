@@ -1056,8 +1056,8 @@ func TestWebMOpusDescriptor(t *testing.T) {
 	if decoder != "pion/opus" {
 		t.Fatalf("DecoderName = %q, want pion/opus", decoder)
 	}
-	if parser != "player/decode (webmopus)" {
-		t.Fatalf("ParserName = %q, want player/decode (webmopus)", parser)
+	if parser != "molo/decode (webmopus)" {
+		t.Fatalf("ParserName = %q, want molo/decode (webmopus)", parser)
 	}
 }
 

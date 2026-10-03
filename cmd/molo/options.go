@@ -84,7 +84,7 @@ func parseArgs(args []string) (options, error) {
 		decoder string
 	)
 
-	fs := flag.NewFlagSet("player", flag.ContinueOnError)
+	fs := flag.NewFlagSet("molo", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 	fs.Float64Var(&volume, "volume", 1, "initial volume in [0, 1]")

@@ -151,7 +151,7 @@ func TestWaveformCacheUsesUserCacheDirByDefault(t *testing.T) {
 		t.Fatalf("Waveform: %v", err)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(base, "player", "waveform"))
+	entries, err := os.ReadDir(filepath.Join(base, "molo", "waveform"))
 	if err != nil {
 		t.Fatalf("default cache did not land under the user cache dir: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestWaveformExplicitCacheDirLeavesUserCacheAlone(t *testing.T) {
 	if files := cacheFiles(t, dir); len(files) != 1 {
 		t.Fatalf("explicit cache files = %v, want one", files)
 	}
-	if _, err := os.Stat(filepath.Join(base, "player")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(base, "molo")); !os.IsNotExist(err) {
 		t.Fatalf("an explicit CacheDir still touched the user cache (stat err = %v)", err)
 	}
 }

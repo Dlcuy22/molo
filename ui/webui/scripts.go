@@ -39,7 +39,7 @@ func loadScripts() {
 // through the same path as a user script, so there is one code path and the
 // embedded files never diverge from what LoadDir expects.
 func loadBundledScripts() {
-	dir, err := os.MkdirTemp("", "player-effects-")
+	dir, err := os.MkdirTemp("", "molo-effects-")
 	if err != nil {
 		slog.Error("bundled effects: temp dir", "error", err)
 
@@ -133,5 +133,5 @@ func userEffectsDir() (string, error) {
 		return "", err
 	}
 
-	return filepath.Join(base, "player", "effects"), nil
+	return filepath.Join(base, "molo", "effects"), nil
 }

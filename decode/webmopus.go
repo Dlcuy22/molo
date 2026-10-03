@@ -1848,7 +1848,7 @@ func (f *WebMOpusFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo
 // reuses the decoder wholesale: only the container function and the parser
 // label differ from the Ogg path.
 func newWebMOpusDecoder(r io.Reader, closer io.Closer, warmup int64, seekable bool) (*pionOpusDecoder, error) {
-	d, err := newPionOpusDecoderWith(openWebMOpusPackets, pionStreamSource{r: r, closer: closer, seekable: seekable}, warmup, "player/decode (webmopus)")
+	d, err := newPionOpusDecoderWith(openWebMOpusPackets, pionStreamSource{r: r, closer: closer, seekable: seekable}, warmup, "molo/decode (webmopus)")
 	if err != nil {
 		return nil, err
 	}

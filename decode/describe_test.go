@@ -15,8 +15,8 @@ func TestDescribeNamesPionOpus(t *testing.T) {
 	if decoder != "pion/opus" {
 		t.Fatalf("DecoderName = %q, want %q", decoder, "pion/opus")
 	}
-	if parser != "player/decode (oggopus)" {
-		t.Fatalf("ParserName = %q, want %q", parser, "player/decode (oggopus)")
+	if parser != "molo/decode (oggopus)" {
+		t.Fatalf("ParserName = %q, want %q", parser, "molo/decode (oggopus)")
 	}
 }
 

@@ -58,7 +58,7 @@ func newCache(dir string, noCache bool, key cacheKey) *cache {
 		if err != nil {
 			return &cache{}
 		}
-		dir = filepath.Join(base, "player", "waveform")
+		dir = filepath.Join(base, "molo", "waveform")
 	}
 
 	return &cache{

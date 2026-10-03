@@ -538,7 +538,7 @@ func (m *model) recordIdentity() {
 func (m model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
-	v.WindowTitle = "player"
+	v.WindowTitle = "molo"
 
 	return v
 }
