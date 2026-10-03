@@ -14,6 +14,17 @@ and this project adheres to
   and `go test -race` for the engine, a `CGO_ENABLED=0` cross-compile matrix,
   and a test job for each UI module.
 - `CHANGELOG.md` and `CONTRIBUTING.md`.
+- Native seek for ADTS AAC and M4A/AAC. ADTS builds a byte index from its frame
+  headers, and M4A uses the MP4 sample table, so both land on an access unit
+  instead of the reopen-and-discard fallback.
+- Exact duration in the source domain. `StreamInfo` carries `SourceSamples` and
+  `SourceRate`, so a 44.1 kHz source whose samples do not divide evenly into
+  48 kHz frames reports its real length rather than an unknown one.
+
+### Fixed
+
+- Guard the ADTS sample-rate table against a reserved `sampling_frequency_index`,
+  which could index past the table and panic on a malformed file.
 
 ## [1.0.0]
 
