@@ -175,14 +175,136 @@ func TestM4aQualitySanity(t *testing.T) {
 	}
 }
 
-// TestM4aIsNotASeeker pins the capability gap: neither go-m4a's reader nor the
-// go-aac decoder offers a sample-accurate seek, so the decoder must not expose
-// Seeker. The streamer's reopen-and-discard fallback is the intended path.
-func TestM4aIsNotASeeker(t *testing.T) {
+// TestM4aIsASeeker pins the native-seek capability. The container's sample table
+// gives every access unit an offset, so the adapter can rebuild the reader
+// cursor and land on the unit at or before the target instead of forcing the
+// streamer's reopen-and-discard fallback.
+func TestM4aIsASeeker(t *testing.T) {
 	d := openM4aFixture(t, "sine_stereo_48k.m4a")
 
-	if _, ok := d.(Seeker); ok {
-		t.Fatal("m4a decoder implements Seeker, but go-aac/go-m4a cannot seek sample-accurately")
+	if _, ok := d.(Seeker); !ok {
+		t.Fatal("m4a decoder does not implement Seeker, but the sample table supports a native seek")
+	}
+}
+
+// The fixture's real geometry, read from the container: 13 access units of 1024
+// samples with a 1024-sample encoder delay, presented as 12000 playable frames.
+const (
+	m4aFixtureAUs   = 13
+	m4aAUSamples    = 1024
+	m4aEncoderDelay = 1024
+)
+
+// m4aLandingFrame is the first playable frame a seek to target delivers. The
+// decoder lands on the access unit at or before the target and reports that
+// unit's playable start, which is its source sample minus the encoder delay.
+func m4aLandingFrame(target int64) int64 {
+	au := (target + m4aEncoderDelay) / m4aAUSamples
+	if au > m4aFixtureAUs-1 {
+		au = m4aFixtureAUs - 1
+	}
+	if au < 0 {
+		au = 0
+	}
+	landing := au*m4aAUSamples - m4aEncoderDelay
+	if landing < 0 {
+		landing = 0
+	}
+
+	return landing
+}
+
+// TestM4aSeekMatchesStraightDecode proves the seek lands on the access unit at
+// or before the target and delivers what a straight decode holds there. AAC-LC
+// cannot start mid-unit, so the landing may sit up to one unit before the
+// target; the comparison uses the landing the decoder itself reports. The PCM
+// is not bit-identical because AAC threads state across frames, so a small
+// per-sample tolerance absorbs the drift, far below the signal.
+func TestM4aSeekMatchesStraightDecode(t *testing.T) {
+	const (
+		window    = 4000
+		tolerance = 0.02
+	)
+	full := readM4aAll(t, openM4aFixture(t, "sine_stereo_48k.m4a"))
+	total := int64(len(full) / 2)
+	if total != 12000 {
+		t.Fatalf("straight decode delivered %d frames, want 12000", total)
+	}
+
+	for _, at := range []int64{0, 2048, 4096, 4097, 9000} {
+		t.Run(itoa(at), func(t *testing.T) {
+			d := openM4aFixture(t, "sine_stereo_48k.m4a")
+			if err := d.(Seeker).SeekFrame(at); err != nil {
+				t.Fatalf("SeekFrame(%d): %v", at, err)
+			}
+
+			landing := m4aLandingFrame(at)
+			w := min(int64(window), total-landing)
+			got := readExactlyFrames(t, d, int(w))
+			if !windowWithin(full, got, landing, tolerance) {
+				t.Fatalf("seek to %d landed at %d, but the window does not match the straight decode there",
+					at, landing)
+			}
+		})
+	}
+}
+
+// TestM4aSeekBackwardsAndToEnd walks the seek backwards, past the end, and
+// negative, which is where a stale reader cursor or a missed reset would show.
+func TestM4aSeekBackwardsAndToEnd(t *testing.T) {
+	const (
+		window    = 4000
+		tolerance = 0.02
+	)
+	full := readM4aAll(t, openM4aFixture(t, "sine_stereo_48k.m4a"))
+	total := int64(len(full) / 2)
+
+	d := openM4aFixture(t, "sine_stereo_48k.m4a")
+	seeker := d.(Seeker)
+
+	if err := seeker.SeekFrame(9000); err != nil {
+		t.Fatalf("SeekFrame(9000): %v", err)
+	}
+	if err := seeker.SeekFrame(2048); err != nil {
+		t.Fatalf("SeekFrame(2048): %v", err)
+	}
+	got := readExactlyFrames(t, d, window)
+	if !windowWithin(full, got, 2048, tolerance) {
+		t.Fatal("backwards seek did not restore the earlier position")
+	}
+
+	// A target past the end lands on the last unit and delivers its tail.
+	landing := m4aLandingFrame(total + 10*m4aAUSamples)
+	if err := seeker.SeekFrame(total + 10*m4aAUSamples); err != nil {
+		t.Fatalf("SeekFrame(past end): %v", err)
+	}
+	tail := readM4aAll(t, d)
+	if int64(len(tail)/2) != total-landing {
+		t.Fatalf("after seek past the end delivered %d frames, want the %d-frame tail",
+			len(tail)/2, total-landing)
+	}
+	if !windowWithin(full, tail, landing, tolerance) {
+		t.Fatal("the tail after a past-the-end seek does not match the straight decode")
+	}
+
+	if err := seeker.SeekFrame(-1); err == nil {
+		t.Fatal("SeekFrame(-1) succeeded, want an error")
+	}
+}
+
+// TestM4aSeekDoesNotReapplyPriming proves the encoder-priming trim is spent
+// once. The landing unit is already past the priming, so a seek must not drop
+// another delay worth of samples: the first frames must be the tone, not silence.
+func TestM4aSeekDoesNotReapplyPriming(t *testing.T) {
+	d := openM4aFixture(t, "sine_stereo_48k.m4a")
+	if err := d.(Seeker).SeekFrame(0); err != nil {
+		t.Fatalf("SeekFrame(0): %v", err)
+	}
+
+	lead := readExactlyFrames(t, d, m4aEncoderDelay)
+	if rms := m4aRMS(lead); rms < 0.15 {
+		t.Fatalf("first %d frames after seek RMS = %.4f, want > 0.15: priming was re-applied",
+			m4aEncoderDelay, rms)
 	}
 }
 

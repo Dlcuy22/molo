@@ -1,26 +1,34 @@
-// M4A/MP4 decoding through github.com/tphakala/go-m4a's aacm4a bridge, which
-// couples that container reader to github.com/tphakala/go-aac. This is the AAC
-// path only: an MP4 holding Opus or FLAC is rejected by the codec constructor,
-// which is the honest outcome for a file this factory cannot decode.
+// M4A/MP4 decoding through github.com/tphakala/go-m4a's container reader and
+// github.com/tphakala/go-aac's frame decoder. This is the AAC path only: an MP4
+// holding Opus or FLAC is rejected by the codec constructor, which is the honest
+// outcome for a file this factory cannot decode.
 //
-// The bridge's decoder is not edit-list aware. It emits every decoded sample,
-// including the leading encoder priming and the trailing final-frame padding
-// that the container's edit list trims. The adapter skips the priming here and
-// lets the shared delivery loop clamp to the edit-list presentation length, so
-// what leaves ReadFrames is the playable signal the edit list describes.
+// The container reader indexes every access unit (it knows each one's file
+// offset from the sample tables), so this adapter demuxes MP4 itself and hands
+// go-aac whole access units through a raw AudioSpecificConfig decoder, rather
+// than letting a bridge pull a forward-only stream. That gives a native seek:
+// go-m4a does not expose its cursor, so a seek builds a fresh reader and reads
+// forward to the landing access unit, which costs one seek per frame and no
+// audio decode.
+//
+// The decoded stream still carries the encoder priming the container's edit list
+// trims, so the adapter drops EncoderDelay leading samples from the first access
+// unit and lets the shared delivery loop clamp to the edit-list presentation
+// length. What leaves ReadFrames is the playable signal the edit list describes.
 //
 // Dependencies: github.com/tphakala/go-m4a, github.com/tphakala/go-aac.
 package decode
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/dlcuy22/player/core"
 	aacpcm "github.com/tphakala/go-aac/pcm"
 	m4a "github.com/tphakala/go-m4a"
-	"github.com/tphakala/go-m4a/aacm4a"
 )
 
 // init registers the AAC-in-MP4 decoder.
@@ -106,15 +114,21 @@ func (f *M4aFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 	return info, nil
 }
 
-// m4aDecoder adapts aacm4a's byte-oriented S16 reader to the engine's
-// ReadFrames contract, normalizing rate, channels and sample width through the
-// shared pcmConverter.
+// m4aDecoder adapts go-m4a's container reader and go-aac's frame decoder to the
+// engine's ReadFrames contract, normalizing rate, channels and sample width
+// through the shared pcmConverter.
 type m4aDecoder struct {
 	file *os.File
-	dec  *aacpcm.Decoder
+	// rd demuxes the container; it is replaced on every seek.
+	rd  *m4a.Reader
+	dec *aacpcm.FrameDecoder
 
 	conv *pcmConverter
 
+	// frameCount is the number of access units the container declares.
+	frameCount int
+	// auIndex is the next access unit to read.
+	auIndex int
 	// total is the playable frame count in the canonical domain, or -1.
 	total int64
 
@@ -123,13 +137,23 @@ type m4aDecoder struct {
 	srcSamples int64
 	srcRate    int
 
-	// skipBytes is the encoder priming, in source bytes, that the raw decoder
-	// emits but the edit list excludes. It is consumed from the front. Keeping
-	// it in the source domain makes the trim exact at any source rate, where a
-	// priming count of 1024 need not be a whole number of canonical frames.
+	// encoderDelay is the leading encoder priming, in source samples, that the
+	// raw decoder emits but the edit list excludes. It also locates the access
+	// unit a canonical seek target falls in.
+	encoderDelay int64
+	// skipBytes is the remaining priming, in source bytes, to drop from the
+	// front. It is spent after the first delivery and is not re-applied after a
+	// seek, because priming is a start-of-track trim, not a per-seek one.
 	skipBytes int64
 
-	// raw receives bytes from go-aac, cut to whole source frames.
+	// au receives one access unit read from the container.
+	au []byte
+	// prevAU retains the access unit before the seek landing one, for the
+	// overlap-add priming.
+	prevAU []byte
+	// s16 receives S16 bytes from go-aac, grown in place across frames.
+	s16 []byte
+	// raw is the buffer pcmFillLoop hands to readPCM.
 	raw []byte
 	// out holds one block of interleaved stereo float32, which pending points
 	// into until the caller has taken it.
@@ -145,11 +169,20 @@ type m4aDecoder struct {
 }
 
 func newM4aDecoder(file *os.File) (*m4aDecoder, error) {
-	dec, info, err := aacm4a.NewDecoder(file)
+	rd, err := m4a.NewReader(file)
 	if err != nil {
-		// aacm4a returns the codec's own error unwrapped, so an HE-AAC stream
-		// stays errors.Is-visible as aacpcm.ErrUnsupportedSBR; the caller's
-		// wrapping preserves that match.
+		return nil, err
+	}
+
+	info := rd.Info()
+	if info.Codec != m4a.CodecAACLC {
+		return nil, fmt.Errorf("decode: M4A track codec is %s, not AAC-LC", info.Codec)
+	}
+	// The frame decoder parses the AudioSpecificConfig up front, so an HE-AAC
+	// stream is rejected here. Its typed error is returned unwrapped so it stays
+	// errors.Is-visible as aacpcm.ErrUnsupportedSBR/PS to the routing caller.
+	dec, err := aacpcm.NewRawDecoder(info.ASC)
+	if err != nil {
 		return nil, err
 	}
 	// The decoder accepted the config, but Info still drives buffer sizing, so
@@ -159,20 +192,26 @@ func newM4aDecoder(file *os.File) (*m4aDecoder, error) {
 			info.SampleRate, info.Channels)
 	}
 
-	return newM4aDecoderFrom(file, dec, info), nil
+	return newM4aDecoderFrom(file, rd, dec, info), nil
 }
 
-// newM4aDecoderFrom builds the adapter from an already-open codec decoder and
-// its container info.
-func newM4aDecoderFrom(file *os.File, dec *aacpcm.Decoder, info m4a.Info) *m4aDecoder {
-	// The bridge always yields interleaved little-endian S16.
+// newM4aDecoderFrom builds the adapter from an already-open container reader,
+// its frame decoder and its container info.
+func newM4aDecoderFrom(file *os.File, rd *m4a.Reader, dec *aacpcm.FrameDecoder, info m4a.Info) *m4aDecoder {
+	// go-aac always yields interleaved little-endian S16.
 	const bytesPS = 2
 
 	d := &m4aDecoder{
-		file:  file,
-		dec:   dec,
-		conv:  newPCMConverter(info.SampleRate, info.Channels, bytesPS),
-		total: m4aTotalFrames(info),
+		file:         file,
+		rd:           rd,
+		dec:          dec,
+		conv:         newPCMConverter(info.SampleRate, info.Channels, bytesPS),
+		frameCount:   info.FrameCount,
+		total:        m4aTotalFrames(info),
+		encoderDelay: info.EncoderDelay,
+	}
+	if d.encoderDelay < 0 {
+		d.encoderDelay = 0
 	}
 	if samples, ok := durationSamples(info.Duration, info.SampleRate); ok {
 		d.srcSamples = samples
@@ -180,6 +219,8 @@ func newM4aDecoderFrom(file *os.File, dec *aacpcm.Decoder, info m4a.Info) *m4aDe
 	}
 	d.skipBytes = m4aPrimingBytes(info)
 	d.raw = rawFrames()
+	// au starts small; m4aReadInto grows it to the first frame's declared size.
+	d.au = make([]byte, 2048)
 	// out is one block of canonical stereo; pending aliases it, so it must not
 	// be resized while a caller still holds frames from it.
 	d.out = outBlock()
@@ -209,20 +250,127 @@ func (d *m4aDecoder) ReadFrames(dst []float32) (int, error) {
 
 // fill decodes and normalizes until one block of stereo output is ready.
 func (d *m4aDecoder) fill() error {
-	return pcmFillLoop(d.conv, d.out, &d.pending, &d.eof, d.dec.Read, d.raw, d.feed)
+	return pcmFillLoop(d.conv, d.out, &d.pending, &d.eof, d.readPCM, d.raw, d.conv.feed)
 }
 
-// feed trims the leading encoder priming from one chunk and converts the rest.
-// The raw go-aac decoder emits the priming samples the edit list trims, so they
-// are discarded before conversion rather than delivered as audio. The trim is
-// counted in bytes so it stays exact at any source rate.
-func (d *m4aDecoder) feed(raw []byte) {
-	rest, dropped := d.conv.skipFrameBytes(raw, d.skipBytes)
-	d.skipBytes -= dropped
-	if dropped > 0 && len(rest) == 0 {
-		return
+// readPCM reads the next access unit from the container, decodes it, and drops
+// any remaining encoder priming before the converter sees it.
+func (d *m4aDecoder) readPCM(dst []byte) (int, error) {
+	if d.closed {
+		return 0, ErrClosed
 	}
-	d.conv.feed(rest)
+	if d.auIndex >= d.frameCount {
+		return 0, io.EOF
+	}
+
+	au, err := m4aReadInto(d.rd, &d.au)
+	if err != nil {
+		return 0, fmt.Errorf("decode: read M4A frame %d: %w", d.auIndex, err)
+	}
+	out, samples, err := d.dec.DecodeFrame(d.s16[:0], au)
+	if err != nil {
+		return 0, fmt.Errorf("decode: decode M4A frame %d: %w", d.auIndex, err)
+	}
+	d.s16 = out
+	d.auIndex++
+
+	if samples == 0 {
+		return 0, nil
+	}
+
+	// The raw decoder emits the priming the edit list trims. Drop it from the
+	// front, counted in bytes so the trim stays exact at any source rate. It is
+	// spent once and never re-applied after a seek.
+	data := d.s16
+	if d.skipBytes > 0 {
+		rest, dropped := d.conv.skipFrameBytes(data, d.skipBytes)
+		d.skipBytes -= dropped
+		data = rest
+	}
+
+	// One AAC-LC access unit is at most 1024 samples of interleaved S16, far
+	// under the raw buffer, so this copy is always whole.
+	return copy(dst, data), nil
+}
+
+// SeekFrame repositions so the next delivered frame is frame. go-m4a exposes no
+// cursor, so this builds a fresh reader and reads forward to the landing access
+// unit, discarding those access units without decoding them. AAC-LC frames
+// cannot start mid-frame, so a canonical target is converted to a source sample,
+// raised by the encoder delay to a source position, and floored to the access
+// unit at or before it. pos is set from the landing unit, so it is authoritative
+// even when the target sat inside a 1024-sample frame.
+func (d *m4aDecoder) SeekFrame(frame int64) error {
+	if d.closed {
+		return ErrClosed
+	}
+	if frame < 0 {
+		return fmt.Errorf("decode: negative seek target %d", frame)
+	}
+
+	srcSample := canonicalSamples(frame, d.conv.srcRate)
+
+	// Every AAC-LC access unit is 1024 samples per channel, so the source sample
+	// raised by the encoder delay lands in this unit. Clamp to the track.
+	auIndex := int64(0)
+	if d.frameCount > 0 {
+		auIndex = (srcSample + d.encoderDelay) / 1024
+		if last := int64(d.frameCount) - 1; auIndex > last {
+			auIndex = last
+		}
+	}
+
+	// Reopen by building a fresh reader, which resets its unexported cursor, and
+	// read forward to the landing unit. The unit before it is kept so the
+	// decoder's overlap-add history can be primed after the reset.
+	rd, err := m4a.NewReader(d.file)
+	if err != nil {
+		return fmt.Errorf("decode: seek to frame %d: %w", frame, err)
+	}
+	for i := int64(0); i < auIndex; i++ {
+		au, err := m4aReadInto(rd, &d.au)
+		if err != nil {
+			return fmt.Errorf("decode: seek to frame %d: %w", frame, err)
+		}
+		if i == auIndex-1 {
+			d.prevAU = append(d.prevAU[:0], au...)
+		}
+	}
+
+	if err := d.dec.Reset(); err != nil {
+		return fmt.Errorf("decode: seek to frame %d: %w", frame, err)
+	}
+	// AAC-LC reconstructs each frame by overlap-add with the previous frame, so
+	// the decoder needs the unit before the landing one for its history. Decode
+	// it into scratch and discard the output; without this the first landing
+	// frame is windowed against silence and the seek would not match a straight
+	// decode. This mirrors the priming decode/aac.go does, and go-mp3 inside
+	// SeekToSample.
+	if auIndex > 0 && len(d.prevAU) > 0 {
+		if _, _, err := d.dec.DecodeFrame(d.s16[:0], d.prevAU); err != nil {
+			return fmt.Errorf("decode: seek to frame %d: %w", frame, err)
+		}
+	}
+
+	d.rd = rd
+	d.auIndex = int(auIndex)
+
+	// Anything the resampler still held belongs to the abandoned position, and
+	// the priming trim is a start-of-track concern that is already spent.
+	d.conv.reset()
+	d.pending = nil
+	d.eof = false
+	d.skipBytes = 0
+	// The first delivered sample is the landing unit's start, which is the
+	// source sample after the encoder delay, so the next streamer position is
+	// that unit's position in the playable stream.
+	landingStartSample := auIndex*1024 - d.encoderDelay
+	if landingStartSample < 0 {
+		landingStartSample = 0
+	}
+	d.pos = canonicalFramesOf(landingStartSample, d.conv)
+
+	return nil
 }
 
 func (d *m4aDecoder) Close() error {
@@ -231,7 +379,14 @@ func (d *m4aDecoder) Close() error {
 	}
 	d.closed = true
 	d.pending = nil
+	d.prevAU = nil
 	d.conv.src = nil
+	d.rd = nil
+	// go-aac's FrameDecoder holds no OS resource of its own, but honoring an
+	// io.Closer keeps this adapter correct if the library ever grows one.
+	if c, ok := any(d.dec).(io.Closer); ok {
+		_ = c.Close()
+	}
 	d.dec = nil
 	if d.file != nil {
 		d.file.Close()
@@ -239,6 +394,30 @@ func (d *m4aDecoder) Close() error {
 	}
 
 	return nil
+}
+
+// m4aReadInto reads the next access unit from rd into buf, growing buf when the
+// reader reports the needed size with io.ErrShortBuffer. The grown buffer is
+// assigned back through buf so the caller keeps reusing it.
+func m4aReadInto(rd *m4a.Reader, buf *[]byte) ([]byte, error) {
+	for {
+		n, err := rd.ReadFrameInto(*buf)
+		if errors.Is(err, io.ErrShortBuffer) {
+			// The reader reports the required size and reads nothing; a value
+			// not larger than the buffer we already gave it cannot be grown.
+			if n <= len(*buf) {
+				return nil, fmt.Errorf("decode: M4A access unit needs %d bytes", n)
+			}
+			*buf = make([]byte, n)
+
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		return (*buf)[:n], nil
+	}
 }
 
 // m4aTotalFrames is the truthful playable length. go-m4a reports the edit-list
