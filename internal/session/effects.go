@@ -360,8 +360,22 @@ func (s *Session) SetEffectParam(id, key string, value any) error {
 	if err != nil {
 		return err
 	}
+	if err := e.Set(key, value); err != nil {
+		return err
+	}
+	// Persist the accepted value into the stored pipeline so the next track's
+	// rebuild constructs this effect with it. Without this the live effect
+	// changes but the description the build reads keeps the old value, and the
+	// setting appears to reset on every track change. The value is read back
+	// from the effect so the description carries the coerced value the effect
+	// actually stored, not the raw input.
+	stored := value
+	if got, err := e.Get(key); err == nil {
+		stored = got
+	}
+	s.runtime.setPipelineParam(id, key, stored)
 
-	return e.Set(key, value)
+	return nil
 }
 
 // SetEffectBypass toggles the standard bypass parameter of the live effect.

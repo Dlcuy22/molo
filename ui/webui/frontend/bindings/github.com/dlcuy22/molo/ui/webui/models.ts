@@ -192,6 +192,12 @@ export interface Snapshot {
     "volume": number;
     "queue": QueueRow[] | null;
     "queueIdx": number;
+
+    /**
+     * Shuffled reports whether baked shuffle is in force, so the toggle can draw
+     * its pressed state from the engine rather than from a local guess.
+     */
+    "shuffled": boolean;
     "decoder": string;
 
     /**

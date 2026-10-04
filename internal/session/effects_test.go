@@ -174,6 +174,45 @@ func TestSetEffectParamKeepsTheLiveInstance(t *testing.T) {
 	t.Logf("cutoff now %v, instance unchanged", st.Values[dsp.CrossfeedCutoff])
 }
 
+// TestSetEffectParamSurvivesATrackRebuild is the reset-bug guard: a track
+// change rebuilds the chain from the stored pipeline, so a parameter the user
+// set must be in that description or it would snap back to its default on every
+// advance. The value is set, a new track is started, and the rebuilt stage is
+// read back.
+func TestSetEffectParamSurvivesATrackRebuild(t *testing.T) {
+	s := effectsSession(t, dsp.Pipeline{})
+	id, err := s.AddEffect("crossfeed", "")
+	if err != nil {
+		t.Fatalf("AddEffect: %v", err)
+	}
+	waitInstalled(t, s, 1)
+
+	if err := s.SetEffectParam(id, dsp.CrossfeedCutoff, 1500.0); err != nil {
+		t.Fatalf("SetEffectParam: %v", err)
+	}
+	if err := s.SetEffectBypass(id, true); err != nil {
+		t.Fatalf("SetEffectBypass: %v", err)
+	}
+
+	// A new track tears the chain down and rebuilds it from the pipeline.
+	if err := s.Play("next-track"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	waitState(t, s, StatePlaying, 3*time.Second)
+	waitInstalled(t, s, 1)
+
+	st, ok := stageByID(s.EffectStages(), id)
+	if !ok {
+		t.Fatalf("stage %s missing after rebuild", id)
+	}
+	if got, _ := st.Values[dsp.CrossfeedCutoff].(float64); got != 1500.0 {
+		t.Fatalf("cutoff after rebuild = %v, want 1500", st.Values[dsp.CrossfeedCutoff])
+	}
+	if !st.Bypassed {
+		t.Fatal("bypass did not survive the rebuild")
+	}
+}
+
 // TestSetEffectBypassTogglesTheLiveEffect proves bypass is just the standard
 // parameter: it flips the flag the chain reports without rebuilding.
 func TestSetEffectBypassTogglesTheLiveEffect(t *testing.T) {

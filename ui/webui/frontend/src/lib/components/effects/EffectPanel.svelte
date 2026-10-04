@@ -59,12 +59,12 @@
   const dynamicsVisuals = $derived(stage.visuals.filter((v) => v.kind === "dynamics"));
   const transferVisuals = $derived(stage.visuals.filter((v) => v.kind === "transfer"));
 
-  // The checkbox shows the user's bypass parameter, so it never flips on its
-  // own. The dimming follows the effective flag, which an effect may set for a
-  // reason other than the user, such as a watchdog fault. Keeping the two
-  // separate is what lets the panel say which one it is instead of claiming a
-  // deliberate bypass for a fault.
+  // The checkbox is an "Enabled" switch, so its on state is the opposite of
+  // the engine's bypass parameter: enabled means bypass is false, and turning
+  // it off is what disables the effect. The panel keeps that inversion in one
+  // place so no other component has to remember it.
   const userBypass = $derived(bypass !== null && Boolean(paramValue(stage, bypass)));
+  const enabled = $derived(!userBypass);
   const effective = $derived(stage.bypassed);
   const faulted = $derived(effective && !userBypass);
 </script>
@@ -75,14 +75,14 @@
       <h2 class="min-w-0 truncate text-sm font-medium text-fg">{title}</h2>
       {#if bypass}
         <label class="flex shrink-0 items-center gap-2 text-xs text-muted">
-          <span>Bypass</span>
+          <span>Enabled</span>
           <span class="relative inline-flex shrink-0 items-center">
             <input
               class="peer h-4 w-7 cursor-pointer appearance-none rounded-full bg-track transition-colors checked:bg-accent"
               type="checkbox"
-              checked={userBypass}
-              aria-label="Bypass {title}"
-              onchange={(e) => onbypass((e.currentTarget as HTMLInputElement).checked)}
+              checked={enabled}
+              aria-label="Enable {title}"
+              onchange={(e) => onbypass(!(e.currentTarget as HTMLInputElement).checked)}
             />
             <span
               class="pointer-events-none absolute left-0.5 size-3 rounded-full bg-fg transition-transform peer-checked:translate-x-3"
@@ -119,10 +119,10 @@
   <div class="flex flex-col gap-3 transition-opacity" class:opacity-50={effective}>
     {#if faulted}
       <p class="text-[11px] text-muted" role="status">
-        Bypassed automatically: this effect stopped keeping up. Controls still apply.
+        Disabled automatically: this effect stopped keeping up. Controls still apply.
       </p>
     {:else if effective}
-      <p class="text-[11px] text-muted" role="status">Bypassed. Controls still apply.</p>
+      <p class="text-[11px] text-muted" role="status">Disabled. Controls still apply.</p>
     {/if}
 
     <!--

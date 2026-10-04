@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +35,9 @@ type fakePlayer struct {
 	// pendingSeek is the target a non-auto Seek is waiting to land.
 	pendingSeek time.Duration
 
+	// queue is the ref list the facade reads back for LoadPaths' append case.
+	queue []string
+
 	calls []string
 }
 
@@ -54,6 +58,20 @@ func (f *fakePlayer) callsSnapshot() []string {
 	defer f.mu.Unlock()
 
 	return append([]string(nil), f.calls...)
+}
+
+// called reports whether a call was recorded, for tests that assert a command
+// reached the engine without caring about the rest of the sequence.
+func (f *fakePlayer) called(s string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.calls {
+		if c == s {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (f *fakePlayer) resetCalls() {
@@ -111,7 +129,14 @@ func (f *fakePlayer) Play(path string) error {
 	return nil
 }
 
-func (f *fakePlayer) PlayQueue(paths []string) error { return nil }
+func (f *fakePlayer) PlayQueue(paths []string) error {
+	f.mu.Lock()
+	f.queue = append([]string(nil), paths...)
+	f.mu.Unlock()
+	f.record("playQueue:" + fmt.Sprint(len(paths)))
+
+	return nil
+}
 
 func (f *fakePlayer) PlayIndex(index int) error { return nil }
 
@@ -119,24 +144,58 @@ func (f *fakePlayer) Next() error { return nil }
 
 func (f *fakePlayer) Prev() error { return nil }
 
-func (f *fakePlayer) Queue() []string { return nil }
+func (f *fakePlayer) SetShuffle(on bool) error {
+	f.record(fmt.Sprintf("shuffle:%v", on))
+
+	return nil
+}
+
+func (f *fakePlayer) Shuffled() bool { return false }
+
+func (f *fakePlayer) Queue() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return append([]string(nil), f.queue...)
+}
 
 func (f *fakePlayer) Providers() []string { return nil }
 
 // InsertQueue and InsertQueueAndPlay satisfy the facade for the YouTube Music
 // command tests; the queue edit itself is covered by the engine's own tests.
+// They keep the fake's queue in step so LoadPaths' append path is assertable.
 func (f *fakePlayer) InsertQueue(index int, refs []string) error {
 	f.record("insert:" + refs[0])
+	f.mu.Lock()
+	at := index
+	if at < 0 || at > len(f.queue) {
+		at = len(f.queue)
+	}
+	next := append([]string(nil), f.queue[:at]...)
+	next = append(next, refs...)
+	next = append(next, f.queue[at:]...)
+	f.queue = next
+	f.mu.Unlock()
 
 	return nil
 }
 
 func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
+	f.mu.Lock()
+	live := f.state == molo.Playing || f.state == molo.Paused
+	f.mu.Unlock()
+	if live {
+		return molo.ErrNoLiveTrack
+	}
 	f.record("insertAndPlay:" + refs[0])
+	f.mu.Lock()
+	next := append([]string(nil), f.queue...)
+	next = append(next, refs...)
+	f.queue = next
+	f.mu.Unlock()
 
 	return nil
 }
-
 func (f *fakePlayer) Pause() error {
 	f.record("pause")
 	f.mu.Lock()

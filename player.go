@@ -203,6 +203,14 @@ type Player interface {
 	// Prev goes back one track, restarting the current one when it is the
 	// first.
 	Prev() error
+	// SetShuffle turns baked shuffle on or off. On, the queue in force is
+	// replaced with a shuffled permutation and the current track keeps playing;
+	// advances then follow that order. Off restores the order the last shuffle
+	// was taken from. It is the queue's order that changes, not a per-advance
+	// random pick.
+	SetShuffle(on bool) error
+	// Shuffled reports whether baked shuffle is in force.
+	Shuffled() bool
 	// InsertQueue inserts refs into the queue at index without touching the
 	// track that is playing, which is what "play next" means. An index at or
 	// past the end appends. The live track keeps sounding; the inserted refs
@@ -446,6 +454,8 @@ func (p *player) PlayQueue(refs []string) error {
 func (p *player) PlayIndex(index int) error { return p.session.PlayIndex(index) }
 func (p *player) Next() error               { return p.session.Next() }
 func (p *player) Prev() error               { return p.session.Prev() }
+func (p *player) SetShuffle(on bool) error  { return p.session.SetShuffle(on) }
+func (p *player) Shuffled() bool            { return p.session.Shuffled() }
 func (p *player) Queue() []string           { return p.session.Queue() }
 
 // InsertQueue inserts refs at index without disturbing the current track.

@@ -103,9 +103,11 @@ export function InsertNextYTM(videoID: string): $CancellablePromise<void> {
 }
 
 /**
- * LoadPaths replaces the queue with the chosen files and folders and starts it.
- * A folder is expanded to its playable files, recursively and sorted, the same
- * way the TUI reads a folder argument.
+ * LoadPaths adds the chosen files and folders to the queue. When nothing is
+ * queued yet it replaces the (empty) queue and starts the first track; when a
+ * queue already exists it appends, so adding a folder does not cut off or reset
+ * the track that is playing. A folder is expanded to its playable files,
+ * recursively and sorted, the same way the TUI reads a folder argument.
  */
 export function LoadPaths(paths: string[] | null): $CancellablePromise<void> {
     return $Call.ByID(1185588344, paths);
@@ -271,6 +273,14 @@ export function SetEffectParam(id: string, key: string, value: any): $Cancellabl
  */
 export function SetPreviewConfig(cfg: $models.PreviewConfig): $CancellablePromise<void> {
     return $Call.ByID(3789468178, cfg);
+}
+
+/**
+ * SetShuffle turns baked shuffle on or off. On, the queue is reordered once and
+ * advances follow that order; off restores the order the shuffle was taken from.
+ */
+export function SetShuffle(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3896707945, on);
 }
 
 /**

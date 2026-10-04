@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"reflect"
 	"slices"
 	"sync"
@@ -340,6 +341,32 @@ func (r *runtimeSettings) pipelineGenNow() uint64 {
 	return r.pipelineGen
 }
 
+// setPipelineParam writes one parameter into the stored pipeline so a later
+// rebuild (the next track's chain) constructs the effect with the value the
+// user set rather than the value it was added with. The live effect's Set is
+// what changes the audio now; this keeps the description in step so the change
+// survives a rebuild. The Params map is copied before the write because the
+// stored maps are shared with readers.
+func (r *runtimeSettings) setPipelineParam(id, key string, value any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i := range r.pipeline.Post {
+		if r.pipeline.Post[i].ID != id {
+			continue
+		}
+		src := r.pipeline.Post[i].Params
+		params := make(dsp.Values, len(src)+1)
+		for k, v := range src {
+			params[k] = v
+		}
+		params[key] = value
+		r.pipeline.Post[i].Params = params
+
+		return
+	}
+}
+
 // Pipeline returns a copy of the pipeline in force. Verifying a pipeline round
 // trips is reading it back, so the copy is deliberate: a caller that mutates
 // what it gets cannot reach the engine's copy.
@@ -413,6 +440,10 @@ type command struct {
 	// as two commands.
 	play bool
 
+	// on is the desired state of cmdShuffle: true shuffles the queue, false
+	// restores the order it had before the last shuffle.
+	on bool
+
 	// effects is a pre-built, configured post-ring chain an ApplyPipeline or
 	// SetSettings accepted. It was built on the caller's goroutine, so the
 	// control loop only has to publish it with an atomic swap.
@@ -449,6 +480,7 @@ const (
 	cmdSwapDecoder
 	cmdSwapBackend
 	cmdApplyPipeline
+	cmdShuffle
 )
 
 // openResult is a finished synchronous pipeline build, delivered to the
@@ -632,6 +664,19 @@ type Session struct {
 	index         int
 	seq           uint64
 	inFlight      bool
+
+	// shuffled is the baked-shuffle state. When true the queue in force is a
+	// shuffled permutation, and queueOrder holds the original order the last
+	// shuffle was taken from, so turning shuffle off restores it. The order is
+	// baked into the queue itself: Next and Prev walk the shuffled list, they
+	// do not pick a random track per advance.
+	shuffled   bool
+	queueOrder []string
+
+	// shuffleSeedOverride pins the shuffle permutation when non-zero. It is a
+	// test seam so the baked order is assertable; a real session leaves it zero
+	// and seeds from the clock.
+	shuffleSeedOverride int64
 
 	// Seek is the one slow step that is not a build, so the controller starts
 	// it on a worker and keeps going. seekBusy is true while a worker is
@@ -1219,6 +1264,26 @@ func (s *Session) Prev() error {
 	return nil
 }
 
+// SetShuffle turns baked shuffle on or off. On, the queue in force is replaced
+// with a shuffled permutation of itself and the current track keeps playing;
+// the next advance follows the shuffled order rather than picking a random
+// track each time. Off restores the order the last shuffle was taken from. A
+// shuffle is the control loop's to apply because it re-seats the queue under
+// the same lock Queue reads under.
+func (s *Session) SetShuffle(on bool) error {
+	s.enqueue(command{kind: cmdShuffle, on: on})
+
+	return nil
+}
+
+// Shuffled reports whether baked shuffle is in force.
+func (s *Session) Shuffled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.shuffled
+}
+
 // Queue returns a copy of the current queue.
 func (s *Session) Queue() []string {
 	s.mu.Lock()
@@ -1425,9 +1490,11 @@ func (s *Session) runCommands() {
 func (s *Session) apply(c command) {
 	switch c.kind {
 	case cmdPlay:
+		s.resetShuffle()
 		s.setQueue([]string{c.path})
 		s.startIndex(0)
 	case cmdPlayQueue:
+		s.resetShuffle()
 		s.setQueue(c.paths)
 		s.startIndex(0)
 	case cmdPlayIndex:
@@ -1477,6 +1544,8 @@ func (s *Session) apply(c command) {
 	case cmdApplyPipeline:
 		s.installChain(c.effects, c.pipelineGen, c.keys)
 		s.signalInstalled(c.installed)
+	case cmdShuffle:
+		s.setShuffle(c.on)
 	}
 }
 
@@ -1619,9 +1688,133 @@ func (s *Session) insertQueue(index int, refs []string, play bool) {
 	s.setQueue(next)
 	s.updateView(func(v *view) { v.queueLen = len(next) })
 
+	// An insert while shuffled extends the queue, so it must extend the order
+	// the unshuffle restores too; otherwise turning shuffle off would drop the
+	// newly added refs. A Play or PlayQueue that replaces the whole queue resets
+	// the shuffle state instead.
+	if s.shuffled {
+		s.queueOrder = append(s.queueOrder, refs...)
+	}
+
 	if play && !s.hasLiveTrack() {
 		s.startIndex(at)
 	}
+}
+
+// resetShuffle drops any baked-shuffle order. A whole-queue replacement (Play
+// or PlayQueue) makes the captured order stale, so the next advance walks the
+// new queue in its given order rather than a permutation of a queue that no
+// longer exists.
+func (s *Session) resetShuffle() {
+	s.mu.Lock()
+	s.shuffled = false
+	s.queueOrder = nil
+	s.mu.Unlock()
+}
+
+// setShuffle turns baked shuffle on or off. It never restarts the current
+// track: the queue is reordered in place and the index is moved to wherever the
+// playing ref landed, so the streamer keeps sounding. Turning shuffle off
+// restores the order captured when it was turned on.
+//
+// The reorder is deterministic given a seed, so a test can assert the
+// permutation without reaching into the audio path. The current track is placed
+// first in the shuffled order, which is what "the queue continues from here"
+// means.
+func (s *Session) setShuffle(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if on == s.shuffled {
+		return
+	}
+
+	if !on {
+		// Restore the pre-shuffle order and re-seat the index onto the playing
+		// ref. A ref no longer in the restored list (it was inserted while
+		// shuffled) keeps its place at the top instead of being dropped.
+		current := s.currentRefLocked()
+		order := s.queueOrder
+		s.queueOrder = nil
+		s.shuffled = false
+		if len(order) == 0 {
+			return
+		}
+		s.queue = append([]string(nil), order...)
+		s.reindexLocked(current)
+		s.v.queueLen = len(s.queue)
+
+		return
+	}
+
+	current := s.currentRefLocked()
+	s.queueOrder = append([]string(nil), s.queue...)
+	shuffled := shuffleRefs(s.queue, current, s.shuffleSeed())
+	s.queue = shuffled
+	s.shuffled = true
+	s.reindexLocked(current)
+	s.v.queueLen = len(s.queue)
+}
+
+// currentRefLocked is the ref of the track in force, or "" when nothing is
+// loaded. It is the identity a reorder follows: the index is only a position,
+// and a shuffle changes positions without changing which track is sounding.
+func (s *Session) currentRefLocked() string {
+	if s.index >= 0 && s.index < len(s.queue) {
+		return s.queue[s.index]
+	}
+
+	return s.v.path
+}
+
+// reindexLocked moves the index onto ref, so the shuffled list still points at
+// the track that is playing. A ref the list no longer holds leaves the index
+// where it is; the caller has already put the playing ref in a known slot.
+func (s *Session) reindexLocked(ref string) {
+	for i, r := range s.queue {
+		if r == ref {
+			s.index = i
+			s.v.queueIndex = i
+
+			return
+		}
+	}
+}
+
+// shuffleSeed is the seed a shuffle uses. It is a field so a test can pin the
+// permutation; zero means seed from the clock.
+func (s *Session) shuffleSeed() int64 {
+	if s.shuffleSeedOverride != 0 {
+		return s.shuffleSeedOverride
+	}
+
+	return time.Now().UnixNano()
+}
+
+// shuffleRefs returns refs shuffled so that current comes first, so the track
+// that is playing stays the head of the queue. A random source seeded with seed
+// makes the permutation reproducible for a test.
+func shuffleRefs(refs []string, current string, seed int64) []string {
+	out := append([]string(nil), refs...)
+	if len(out) < 2 {
+		return out
+	}
+
+	rng := rand.New(rand.NewSource(seed))
+	rng.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+
+	if current == "" {
+		return out
+	}
+	for i, r := range out {
+		if r == current {
+			out[0], out[i] = out[i], out[0]
+
+			break
+		}
+	}
+
+	return out
 }
 
 // startIndex tears the current track down and opens index asynchronously.

@@ -137,7 +137,7 @@
               {labelOf(s)}
             </button>
             {#if s.bypassed}
-              <span class="shrink-0 text-[11px] text-muted">Bypassed</span>
+              <span class="shrink-0 text-[11px] text-muted">Disabled</span>
             {/if}
             <button
               type="button"

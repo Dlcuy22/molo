@@ -116,6 +116,68 @@ func TestQueueRowsMarksExactlyOne(t *testing.T) {
 	}
 }
 
+// TestLoadPathsAppendsWhenAQueueExists is the add-folder bug: with a track
+// already loaded, adding more files must extend the queue rather than replace
+// it and cut the track off. With nothing queued it still replaces and starts.
+func TestLoadPathsAppendsWhenAQueueExists(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		return p
+	}
+	a, b := write("a.flac"), write("b.flac")
+
+	// Empty queue: the first load replaces and starts.
+	fp := newFakePlayer()
+	svc := newPlayerService()
+	svc.player = fp
+	if err := svc.LoadPaths([]string{a}); err != nil {
+		t.Fatalf("LoadPaths(first): %v", err)
+	}
+	if got := fp.Queue(); len(got) != 1 || got[0] != a {
+		t.Fatalf("queue after first load = %q, want [%q]", got, a)
+	}
+	if !fp.called("playQueue:1") {
+		t.Fatalf("calls = %v, want a PlayQueue for the first load", fp.callsSnapshot())
+	}
+
+	// Non-empty queue: the second load appends and does not start a new track.
+	fp.mu.Lock()
+	fp.state = molo.Playing
+	fp.path = a
+	fp.mu.Unlock()
+	if err := svc.LoadPaths([]string{b}); err != nil {
+		t.Fatalf("LoadPaths(second): %v", err)
+	}
+	got := fp.Queue()
+	if len(got) != 2 || got[0] != a || got[1] != b {
+		t.Fatalf("queue after second load = %q, want [%q %q]", got, a, b)
+	}
+	if !fp.called("insert:" + b) {
+		t.Fatalf("calls = %v, want the second load to append", fp.callsSnapshot())
+	}
+	if snap := fp.Snapshot(); snap.Path != a {
+		t.Fatalf("second load changed the live track to %q, want %q", snap.Path, a)
+	}
+}
+
+// TestSetShuffleReachesTheEngine pins the toggle's command wiring.
+func TestSetShuffleReachesTheEngine(t *testing.T) {
+	fp := newFakePlayer()
+	svc := newPlayerService()
+	svc.player = fp
+	if err := svc.SetShuffle(true); err != nil {
+		t.Fatalf("SetShuffle(true): %v", err)
+	}
+	if got := fp.callsSnapshot(); len(got) == 0 || got[len(got)-1] != "shuffle:true" {
+		t.Fatalf("calls = %v, want shuffle:true", got)
+	}
+}
+
 // TestClamp01 pins the gain clamp, which guards the engine's range check.
 func TestClamp01(t *testing.T) {
 	for _, c := range []struct{ in, want float64 }{

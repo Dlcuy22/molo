@@ -431,6 +431,7 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Volume:      snap.Volume,
 		Queue:       s.queueRows(queue, snap.QueueIndex),
 		QueueIdx:    snap.QueueIndex,
+		Shuffled:    s.player.Shuffled(),
 		Decoder:     snap.Decoder,
 		DecoderPref: s.player.Settings().Decoder,
 		Backend:     snap.Backend,
@@ -841,9 +842,11 @@ func (s *PlayerService) SetPreviewConfig(cfg PreviewConfig) error {
 	return nil
 }
 
-// LoadPaths replaces the queue with the chosen files and folders and starts it.
-// A folder is expanded to its playable files, recursively and sorted, the same
-// way the TUI reads a folder argument.
+// LoadPaths adds the chosen files and folders to the queue. When nothing is
+// queued yet it replaces the (empty) queue and starts the first track; when a
+// queue already exists it appends, so adding a folder does not cut off or reset
+// the track that is playing. A folder is expanded to its playable files,
+// recursively and sorted, the same way the TUI reads a folder argument.
 func (s *PlayerService) LoadPaths(paths []string) error {
 	return s.command(func() error {
 		queue, err := s.expand(paths)
@@ -854,7 +857,15 @@ func (s *PlayerService) LoadPaths(paths []string) error {
 			return fmt.Errorf("no playable files in the selection")
 		}
 
-		return s.player.PlayQueue(queue)
+		existing := s.player.Queue()
+		if len(existing) == 0 {
+			return s.player.PlayQueue(queue)
+		}
+
+		// A queue already exists, so this is an "add": append without
+		// disturbing the current track. Starting the new refs here would jump
+		// away from the track the user is on, which is the bug this guards.
+		return s.player.InsertQueue(len(existing), queue)
 	})
 }
 
@@ -936,6 +947,12 @@ func (s *PlayerService) Next() error { return s.command(func() error { return s.
 
 func (s *PlayerService) Prev() error { return s.command(func() error { return s.player.Prev() }) }
 
+// SetShuffle turns baked shuffle on or off. On, the queue is reordered once and
+// advances follow that order; off restores the order the shuffle was taken from.
+func (s *PlayerService) SetShuffle(on bool) error {
+	return s.command(func() error { return s.player.SetShuffle(on) })
+}
+
 // Stop ends playback but keeps the queue, so a later play reuses it.
 func (s *PlayerService) Stop() error { return s.command(func() error { return s.player.Stop() }) }
 
@@ -1016,7 +1033,10 @@ type Snapshot struct {
 	Volume    float64    `json:"volume"`
 	Queue     []QueueRow `json:"queue"`
 	QueueIdx  int        `json:"queueIdx"`
-	Decoder   string     `json:"decoder"`
+	// Shuffled reports whether baked shuffle is in force, so the toggle can draw
+	// its pressed state from the engine rather than from a local guess.
+	Shuffled bool   `json:"shuffled"`
+	Decoder  string `json:"decoder"`
 	// DecoderPref is the saved decoder preference, which is what the chooser
 	// selects. Decoder is the effective decoder for the current track, which is
 	// more specific and would not match any option value.

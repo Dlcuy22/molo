@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -367,4 +368,104 @@ func TestInsertQueueBeforeTheCurrentTrackAppends(t *testing.T) {
 	if snap := s.Snapshot(); snap.QueueIndex != 1 || snap.Path != "b" {
 		t.Fatalf("current track moved: index=%d path=%q, want 1 and %q", snap.QueueIndex, snap.Path, "b")
 	}
+}
+
+// TestShuffleBakesAnOrderAndRestoresIt pins the two halves of baked shuffle:
+// turning it on permutes the queue once and keeps the playing track at the
+// head, and turning it off restores the original order. Nothing here restarts
+// the track, so the device count stays at one.
+func TestShuffleBakesAnOrderAndRestoresIt(t *testing.T) {
+	s, factory := newQueueSession(t)
+	a, b, c := fixture(t, "short_stereo.opus"), fixture(t, "mono_1s.opus"), fixture(t, "stereo_2s.opus")
+
+	if err := s.PlayQueue([]string{a, b, c}); err != nil {
+		t.Fatalf("PlayQueue: %v", err)
+	}
+	waitState(t, s, StatePlaying, 3*time.Second)
+
+	s.shuffleSeedOverride = 1
+	if err := s.SetShuffle(true); err != nil {
+		t.Fatalf("SetShuffle(true): %v", err)
+	}
+	eventually(t, 2*time.Second, "shuffle on", func() bool { return s.Shuffled() })
+
+	shuffled := s.Queue()
+	if len(shuffled) != 3 {
+		t.Fatalf("Queue() length after shuffle = %d, want 3", len(shuffled))
+	}
+	// The playing track is always first, so the queue continues from here.
+	if shuffled[0] != a {
+		t.Fatalf("shuffled queue head = %q, want the playing track %q", shuffled[0], a)
+	}
+	if !sameSet(shuffled, []string{a, b, c}) {
+		t.Fatalf("shuffled queue %q is not a permutation of [a b c]", shuffled)
+	}
+	if snap := s.Snapshot(); snap.Path != a || snap.State != StatePlaying {
+		t.Fatalf("shuffle restarted the track: path=%q state=%s", snap.Path, stateName(snap.State))
+	}
+	if factory.count() != 1 {
+		t.Fatalf("devices built = %d, want 1: a shuffle must not reopen the track", factory.count())
+	}
+
+	if err := s.SetShuffle(false); err != nil {
+		t.Fatalf("SetShuffle(false): %v", err)
+	}
+	eventually(t, 2*time.Second, "shuffle off", func() bool { return !s.Shuffled() })
+	if got := s.Queue(); !reflect.DeepEqual(got, []string{a, b, c}) {
+		t.Fatalf("Queue() after unshuffle = %q, want the original [a b c]", got)
+	}
+	if snap := s.Snapshot(); snap.Path != a || snap.QueueIndex != 0 {
+		t.Fatalf("after unshuffle: path=%q index=%d, want %q at 0", snap.Path, snap.QueueIndex, a)
+	}
+}
+
+// TestShuffleNextFollowsTheBakedOrder proves the baked semantics: Next walks
+// the shuffled list in order rather than picking a random track per advance, so
+// two runs over the same seed produce the same sequence.
+func TestShuffleNextFollowsTheBakedOrder(t *testing.T) {
+	s, _ := newQueueSession(t)
+	a, b, c, d := fixture(t, "short_stereo.opus"), fixture(t, "mono_1s.opus"), fixture(t, "stereo_2s.opus"), fixture(t, "sine_mono_48k.flac")
+
+	if err := s.PlayQueue([]string{a, b, c, d}); err != nil {
+		t.Fatalf("PlayQueue: %v", err)
+	}
+	waitState(t, s, StatePlaying, 3*time.Second)
+
+	s.shuffleSeedOverride = 7
+	if err := s.SetShuffle(true); err != nil {
+		t.Fatalf("SetShuffle(true): %v", err)
+	}
+	eventually(t, 2*time.Second, "shuffle on", func() bool { return s.Shuffled() })
+
+	want := s.Queue()
+	if err := s.Next(); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	eventually(t, 3*time.Second, "second shuffled track", func() bool {
+		return s.Snapshot().QueueIndex == 1
+	})
+	if got := s.Snapshot().Path; got != want[1] {
+		t.Fatalf("after Next path = %q, want the baked second entry %q", got, want[1])
+	}
+}
+
+// sameSet reports whether two ref lists hold the same multiset of refs.
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		counts[s]--
+	}
+	for _, n := range counts {
+		if n != 0 {
+			return false
+		}
+	}
+
+	return true
 }

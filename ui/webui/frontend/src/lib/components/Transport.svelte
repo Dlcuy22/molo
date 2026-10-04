@@ -2,6 +2,7 @@
   import {
     Pause,
     Play,
+    Shuffle,
     SkipBack,
     SkipForward,
     Stop,
@@ -153,6 +154,24 @@
         onclick={() => commands.stop()}
       >
         <Stop size="18" weight="fill" />
+      </button>
+
+      <!--
+        Shuffle bakes a new queue order once rather than picking a random track
+        on each advance, so the icon stays lit while that order is in force and
+        the queue list shows exactly what will play next.
+      -->
+      <button
+        class="grid size-9 place-items-center rounded-[4px] transition-colors hover:bg-hover disabled:text-disabled disabled:hover:bg-transparent"
+        class:text-accent={snap.shuffled}
+        class:text-muted={!snap.shuffled}
+        disabled={!canPrev}
+        aria-label={snap.shuffled ? "Shuffle on" : "Shuffle off"}
+        aria-pressed={snap.shuffled}
+        title={snap.shuffled ? "Shuffle on" : "Shuffle off"}
+        onclick={() => commands.shuffle(!snap.shuffled)}
+      >
+        <Shuffle size="18" weight={snap.shuffled ? "fill" : "regular"} />
       </button>
     </div>
 

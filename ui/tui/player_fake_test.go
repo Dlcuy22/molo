@@ -138,6 +138,10 @@ func (f *fakePlayer) Prev() error {
 	return nil
 }
 
+func (f *fakePlayer) SetShuffle(on bool) error { return nil }
+
+func (f *fakePlayer) Shuffled() bool { return false }
+
 // advanceLocked moves the fake's current track within its queue so a next/prev
 // in a test produces the track change and state a real engine would.
 func (f *fakePlayer) advanceLocked(delta int) {

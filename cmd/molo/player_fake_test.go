@@ -167,6 +167,10 @@ func (f *fakePlayer) Prev() error {
 	return nil
 }
 
+func (f *fakePlayer) SetShuffle(on bool) error { return nil }
+
+func (f *fakePlayer) Shuffled() bool { return false }
+
 // InsertQueue records the call and splices the refs into the fake queue, so a
 // test can assert where a "play next" landed.
 func (f *fakePlayer) InsertQueue(index int, refs []string) error {
