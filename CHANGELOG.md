@@ -17,6 +17,13 @@ and this project adheres to
 
 ### Added
 
+- A consumer-gated debug stream on the session, `DebugEvents`, separate from
+  the control event stream so diagnostic traffic can never displace a control
+  event. It reports the resolved decoder, parser and backend when a track is
+  activated, underrun deltas sampled on the device poll, seek and swap timings,
+  pipeline installs, duration probes, state transitions and failures. It costs
+  the engine nothing until it is read, and drops the oldest record under
+  backpressure, counted in `DebugDropped`.
 - Continuous integration on GitHub Actions: `go vet`, `go build`, `go test`,
   and `go test -race` for the engine, a `CGO_ENABLED=0` cross-compile matrix,
   and a test job for each UI module.

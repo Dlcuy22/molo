@@ -66,6 +66,37 @@ type TrackEnded = session.TrackEnded
 // Failed reports a decode or device error. The player remains usable.
 type Failed = session.Failed
 
+// DebugEvent is one diagnostic record from the debug stream. It is separate
+// from the control events: debug traffic is frequent and disposable, and it
+// never displaces a control event. Which numeric fields are meaningful depends
+// on Kind.
+type DebugEvent = session.DebugEvent
+
+// DebugKind classifies a DebugEvent.
+type DebugKind = session.DebugKind
+
+// The debug record kinds. They mirror the control events but carry diagnostics
+// rather than state transitions.
+const (
+	// DebugTrack is emitted when a track is activated, naming its resolved
+	// decoder, parser and backend.
+	DebugTrack = session.DebugTrack
+	// DebugUnderrun is emitted when the streamer's underrun counter advances.
+	DebugUnderrun = session.DebugUnderrun
+	// DebugSeek is emitted after a reposition lands.
+	DebugSeek = session.DebugSeek
+	// DebugSwap is emitted after a live decoder or backend change lands.
+	DebugSwap = session.DebugSwap
+	// DebugPipeline is emitted when a new post-ring chain is installed.
+	DebugPipeline = session.DebugPipeline
+	// DebugProbe is emitted when the asynchronous duration probe answers.
+	DebugProbe = session.DebugProbe
+	// DebugState is emitted for an accepted state transition.
+	DebugState = session.DebugState
+	// DebugError is emitted for a decode, device or engine failure.
+	DebugError = session.DebugError
+)
+
 // Tap is the real-time audio feed a visualizer reads. Read copies up to
 // len(dst) mono downmixed frames in time order, never blocks, and reports zero
 // when nothing is buffered.
@@ -185,6 +216,17 @@ type Player interface {
 	// consumer that falls behind costs the oldest event, counted in
 	// Snapshot.DroppedEvents.
 	Events() <-chan Event
+
+	// DebugEvents returns the diagnostic stream: per-track codec selection,
+	// underrun deltas, seek and swap timings, pipeline installs and failures.
+	// It is separate from Events and costs the engine nothing until it is
+	// called. A consumer that falls behind costs the oldest record, counted in
+	// DebugDropped.
+	DebugEvents() <-chan DebugEvent
+
+	// DebugDropped reports how many debug records a slow consumer cost. It is
+	// the debug stream's counterpart to Snapshot.DroppedEvents.
+	DebugDropped() int64
 
 	// Play replaces the queue with one track and starts it. ref is a track
 	// reference, not necessarily a filesystem path: it may be any string a
@@ -445,8 +487,12 @@ func New(opts ...Option) (Player, error) {
 	return &player{session: s}, nil
 }
 
-func (p *player) Snapshot() Snapshot    { return p.session.Snapshot() }
-func (p *player) Events() <-chan Event  { return p.session.Events() }
+func (p *player) Snapshot() Snapshot   { return p.session.Snapshot() }
+func (p *player) Events() <-chan Event { return p.session.Events() }
+func (p *player) DebugEvents() <-chan DebugEvent {
+	return p.session.DebugEvents()
+}
+func (p *player) DebugDropped() int64   { return p.session.DebugDropped() }
 func (p *player) Play(ref string) error { return p.session.Play(ref) }
 func (p *player) PlayQueue(refs []string) error {
 	return p.session.PlayQueue(refs)

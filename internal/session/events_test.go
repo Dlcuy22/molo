@@ -28,7 +28,7 @@ func drainQueue(ch <-chan Event) int {
 func TestEventQueueKeepsTheNewestAndCountsTheDropped(t *testing.T) {
 	// The push may never block, and the newest event must survive a full
 	// buffer so a slow UI is not left on a stale state.
-	q := newEventQueue(2)
+	q := newEventQueue[Event](2)
 	for i := 0; i < 5; i++ {
 		q.push(StateChanged{To: State(i + 1)})
 	}
@@ -49,7 +49,7 @@ func TestEventQueueKeepsTheNewestAndCountsTheDropped(t *testing.T) {
 }
 
 func TestEventQueuePushesAreNeverBlocking(t *testing.T) {
-	q := newEventQueue(1)
+	q := newEventQueue[Event](1)
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 1000; i++ {

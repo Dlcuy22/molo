@@ -599,7 +599,8 @@ type Session struct {
 	gain   *dsp.Gain
 	chain  *dsp.Chain
 	tap    *tap
-	events *eventQueue
+	events *eventQueue[Event]
+	debug  *debugSink
 	v      view
 
 	mu     sync.Mutex
@@ -664,6 +665,11 @@ type Session struct {
 	index         int
 	seq           uint64
 	inFlight      bool
+
+	// lastUnderruns is the streamer's cumulative underrun count as of the last
+	// device poll. It is owned by the control goroutine and read only there, so
+	// it needs no lock. It is the baseline a delta is computed against.
+	lastUnderruns int64
 
 	// shuffled is the baked-shuffle state. When true the queue in force is a
 	// shuffled permutation, and queueOrder holds the original order the last
@@ -794,7 +800,8 @@ func New(cfg Config) (*Session, error) {
 		gain:    dsp.NewGain(cfg.Volume),
 		chain:   dsp.NewChain(),
 		tap:     newTap(),
-		events:  newEventQueue(cfg.EventBuffer),
+		events:  newEventQueue[Event](cfg.EventBuffer),
+		debug:   newDebugSink(defaultDebugBuffer),
 		v:       view{state: StateIdle, queueIndex: -1},
 		wake:    make(chan struct{}, 1),
 		closing: make(chan struct{}),
@@ -1601,6 +1608,11 @@ func (s *Session) installChain(effects []dsp.Effect, gen uint64, keys []stageKey
 	// the same lock that guards the generation keeps the two views consistent.
 	s.runtime.clearPending(gen)
 	s.emit(PipelineChanged{Stages: len(effects)})
+	s.debug.emit(DebugEvent{
+		Kind:    DebugPipeline,
+		Message: fmt.Sprintf("pipeline %d stage(s)", len(effects)),
+		Count:   int64(len(effects)),
+	})
 }
 
 // resetChain clears the effect state after the device has been parked, so a
@@ -2089,6 +2101,10 @@ func (s *Session) activate(res openResult) {
 	}
 
 	s.live = res.streamer
+	// A fresh streamer starts its counters at zero, so the underrun baseline
+	// is reset with it. Without this the first delta of a new track would be
+	// measured against the previous track's cumulative count.
+	s.lastUnderruns = 0
 	// Install the effects the worker built for this track before the provider
 	// is pointed at the streamer, so the first buffer the device reads already
 	// has the chain. If a pipeline change landed while this build ran, its
@@ -2137,6 +2153,15 @@ func (s *Session) activate(res openResult) {
 
 	s.setState(StatePlaying)
 	s.emit(TrackChanged{Index: res.index, Path: res.path})
+	s.debug.emit(DebugEvent{
+		Kind:    DebugTrack,
+		Path:    res.path,
+		Message: "track " + res.path,
+		Count:   res.info.TotalFrames,
+		Decoder: res.decoder,
+		Parser:  res.parser,
+		Backend: s.runtime.backendName(),
+	})
 	s.enrich(res)
 
 	// Start the upgrade only after the track is actually playing: a build that
@@ -2248,6 +2273,12 @@ func (s *Session) handleProbe(res probeResult) {
 	}
 
 	s.v.duration = res.info.Duration()
+	s.debug.emit(DebugEvent{
+		Kind:    DebugProbe,
+		Path:    s.v.path,
+		Message: "duration " + res.info.Duration().String(),
+		Count:   res.info.TotalFrames,
+	})
 }
 
 // handleMeta records resolved tags, merging in the stream info the decoder
@@ -2303,7 +2334,36 @@ func (s *Session) pollDevice() {
 	}
 	if err := s.device.Err(); err != nil {
 		s.fail(err, true)
+
+		return
 	}
+	s.pollUnderruns()
+}
+
+// pollUnderruns samples the streamer's cumulative underrun counter and reports
+// the increase since the last poll. It is a poll rather than a callback because
+// the shortfall is counted on the streamer's producer path, which must not be
+// asked to render or emit; sampling on the device tick keeps the audio path
+// untouched. The whole check is skipped when no debug consumer is attached, so
+// an ordinary session pays nothing for it.
+func (s *Session) pollUnderruns() {
+	if !s.debug.active.Load() || s.live == nil {
+		return
+	}
+	stats := s.live.Stats()
+	delta, base := underrunDelta(s.lastUnderruns, stats.Underruns)
+	s.lastUnderruns = base
+	if delta <= 0 {
+		return
+	}
+	s.debug.emit(DebugEvent{
+		Kind:     DebugUnderrun,
+		Path:     s.trackPath(),
+		Message:  fmt.Sprintf("underrun +%d", delta),
+		Delta:    delta,
+		Count:    stats.Underruns,
+		Buffered: stats.Buffered,
+	})
 }
 
 // fail tears the pipeline down after a decode or device error and reports it.
@@ -2324,6 +2384,11 @@ func (s *Session) fail(err error, closeDevice bool) {
 
 	s.emit(Failed{Err: err})
 	s.setState(StateStopped)
+	s.debug.emit(DebugEvent{
+		Kind:    DebugError,
+		Path:    s.trackPath(),
+		Message: err.Error(),
+	})
 }
 
 // stopToStopped ends playback on request or at the end of the queue. The
@@ -2721,6 +2786,13 @@ func (s *Session) handleReposition(res seekResult) {
 	}
 
 	s.emit(Seeked{Position: res.target, From: res.from, Elapsed: res.elapsed})
+	s.debug.emit(DebugEvent{
+		Kind:    DebugSeek,
+		Path:    s.trackPath(),
+		Message: fmt.Sprintf("seek %s -> %s in %s", res.from, res.target, res.elapsed),
+		Elapsed: res.elapsed,
+		Count:   framesFor(res.target),
+	})
 }
 
 // handleDecoderSwap applies a finished live decoder change. On success it
@@ -2768,6 +2840,14 @@ func (s *Session) handleDecoderSwap(res seekResult) {
 	}
 
 	s.emit(Swapped{Kind: "decoder", Name: res.name, Elapsed: res.elapsed})
+	s.debug.emit(DebugEvent{
+		Kind:    DebugSwap,
+		Path:    s.trackPath(),
+		Message: fmt.Sprintf("decoder %s in %s", swapLabel(res.name), res.elapsed),
+		Elapsed: res.elapsed,
+		Decoder: res.decoder,
+		Parser:  res.parser,
+	})
 }
 
 // handleSeamlessSwap applies a finished source upgrade. Nothing is reported: no
@@ -2852,6 +2932,12 @@ func (s *Session) handleBackendSwap(res seekResult) {
 	}
 
 	s.emit(Swapped{Kind: "backend", Name: res.name, Elapsed: res.elapsed})
+	s.debug.emit(DebugEvent{
+		Kind:    DebugSwap,
+		Message: fmt.Sprintf("backend %s in %s", res.name, res.elapsed),
+		Elapsed: res.elapsed,
+		Backend: res.name,
+	})
 }
 
 // shutdown is the single teardown path. It runs on the control goroutine, so
@@ -2882,6 +2968,7 @@ func (s *Session) shutdown() {
 			}
 		default:
 			s.events.close()
+			s.debug.close()
 
 			return
 		}
@@ -2903,6 +2990,11 @@ func (s *Session) setState(to State) {
 	s.mu.Unlock()
 
 	s.emit(StateChanged{From: from, To: to})
+	s.debug.emit(DebugEvent{
+		Kind:    DebugState,
+		Path:    s.trackPath(),
+		Message: stateLabel(from) + " -> " + stateLabel(to),
+	})
 }
 
 func (s *Session) state() State {

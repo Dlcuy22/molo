@@ -83,6 +83,10 @@ func (f *fakePlayer) Snapshot() molo.Snapshot {
 
 func (f *fakePlayer) Events() <-chan molo.Event { return f.events }
 
+func (f *fakePlayer) DebugEvents() <-chan molo.DebugEvent { return nil }
+
+func (f *fakePlayer) DebugDropped() int64 { return 0 }
+
 func (f *fakePlayer) emit(ev molo.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

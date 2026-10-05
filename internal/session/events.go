@@ -70,34 +70,34 @@ func (Swapped) isEvent()         {}
 func (PipelineChanged) isEvent() {}
 func (Failed) isEvent()          {}
 
-// eventQueue is a non-blocking event sink. It is a channel plus a drop-oldest
+// eventQueue is a non-blocking sink. It is a channel plus a drop-oldest
 // policy: a push never waits for a consumer, and when the buffer is full the
-// oldest event is discarded in favour of the newest. The dropped count is kept
-// so a slow UI is visible instead of silent.
+// oldest value is discarded in favour of the newest. The dropped count is kept
+// so a slow consumer is visible instead of silent.
 //
 // Dropping the oldest rather than the newest is the deliberate choice for a
 // player UI: a stale "Playing" is worse than a missing one, and the newest
 // state is the one that matches what the user hears.
-type eventQueue struct {
+type eventQueue[T any] struct {
 	mu     sync.Mutex
-	ch     chan Event
+	ch     chan T
 	drop   int64
 	closed bool
 }
 
-func newEventQueue(capacity int) *eventQueue {
+func newEventQueue[T any](capacity int) *eventQueue[T] {
 	if capacity < 1 {
 		capacity = 1
 	}
 
-	return &eventQueue{ch: make(chan Event, capacity)}
+	return &eventQueue[T]{ch: make(chan T, capacity)}
 }
 
 // channel is the consumer side. It is a plain channel, so a UI can range over
 // it or select on it like any other.
-func (q *eventQueue) channel() <-chan Event { return q.ch }
+func (q *eventQueue[T]) channel() <-chan T { return q.ch }
 
-func (q *eventQueue) push(ev Event) {
+func (q *eventQueue[T]) push(ev T) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {
@@ -125,17 +125,17 @@ func (q *eventQueue) push(ev Event) {
 	}
 }
 
-// droppedCount reports how many events a slow consumer cost.
-func (q *eventQueue) droppedCount() int64 {
+// droppedCount reports how many values a slow consumer cost.
+func (q *eventQueue[T]) droppedCount() int64 {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	return q.drop
 }
 
-// close ends the event stream. Pushes after this are inert, so a worker that
+// close ends the stream. Pushes after this are inert, so a worker that
 // outlives Close cannot panic on a closed channel.
-func (q *eventQueue) close() {
+func (q *eventQueue[T]) close() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {

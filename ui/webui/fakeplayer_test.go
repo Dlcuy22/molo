@@ -114,6 +114,10 @@ func (f *fakePlayer) Snapshot() molo.Snapshot {
 
 func (f *fakePlayer) Events() <-chan molo.Event { return nil }
 
+func (f *fakePlayer) DebugEvents() <-chan molo.DebugEvent { return nil }
+
+func (f *fakePlayer) DebugDropped() int64 { return 0 }
+
 func (f *fakePlayer) Play(path string) error {
 	f.record("play:" + path)
 	f.mu.Lock()
