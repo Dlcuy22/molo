@@ -12,3 +12,4 @@ build/android/gen/
 # A stray `go build` in this directory drops the binary here; it is an artifact,
 # not source.
 webui
+webui.exe
