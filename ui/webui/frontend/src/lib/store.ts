@@ -14,6 +14,7 @@ import type {
   EffectParamInfo,
   EffectStageInfo,
   Options,
+  PresetImportResult,
   PreviewConfig,
   Snapshot,
   SpectrumConfig,
@@ -401,6 +402,25 @@ export const commands = {
   addEffect: (kind: string, impl: string) => editEffect(() => PlayerService.AddEffect(kind, impl)),
   removeEffect: (id: string) => editEffect(() => PlayerService.RemoveEffect(id)),
   moveEffect: (id: string, to: number) => editEffect(() => PlayerService.MoveEffect(id, to)),
+  // importPreset opens the native picker and installs the chosen EasyEffects
+  // preset, replacing the chain. It resolves with the stage count and the
+  // warnings the importer skipped, or null when the dialog was cancelled, so
+  // the caller can report what changed instead of guessing.
+  importPreset: async (): Promise<PresetImportResult | null> => {
+    try {
+      const res = await PlayerService.ImportEasyEffectsPreset();
+      if (res.stages === 0 && (res.warnings?.length ?? 0) === 0) {
+        return null; // cancelled, chain untouched
+      }
+      await syncEffectChain();
+
+      return res;
+    } catch (err) {
+      player.update((s) => ({ ...s, error: errorText(err) }));
+
+      return null;
+    }
+  },
   setEffectBypass: (id: string, bypassed: boolean) => {
     // Optimistic: the checkbox and the panel must react on the click, not on
     // the next snapshot. The 4 Hz tick reconciles the true value.

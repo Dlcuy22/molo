@@ -95,6 +95,26 @@ export function EffectWindowOpen(): $CancellablePromise<boolean> {
 }
 
 /**
+ * ImportEasyEffectsPreset shows the native picker, reads the chosen EasyEffects
+ * preset, and replaces the effect chain with the imported one. The dialog is
+ * owned by Go so the frontend needs no file-system permission of its own, the
+ * same shape as OpenFiles. A cancelled dialog returns an empty result and
+ * leaves the chain untouched.
+ */
+export function ImportEasyEffectsPreset(): $CancellablePromise<$models.PresetImportResult> {
+    return $Call.ByID(2879237944);
+}
+
+/**
+ * ImportEasyEffectsPresetData imports a preset from JSON already in hand. It is
+ * the path a frontend uses when it holds the bytes (a paste, or a test), with
+ * no dialog and no file access.
+ */
+export function ImportEasyEffectsPresetData(data: string): $CancellablePromise<$models.PresetImportResult> {
+    return $Call.ByID(3749912320, data);
+}
+
+/**
  * InsertNextYTM queues a YouTube Music track to play after the current one,
  * which is what Enter on a search result means. With a track already sounding
  * the queue is spliced after it, so that track keeps playing; with nothing

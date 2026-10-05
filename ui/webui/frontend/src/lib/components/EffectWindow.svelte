@@ -165,7 +165,7 @@
 
     <main class="min-h-0 flex-1 overflow-y-auto p-4">
       {#if tab === "registry"}
-        <EffectRegistry {kinds} onadd={add} />
+        <EffectRegistry {kinds} onadd={add} onimport={commands.importPreset} />
       {:else if tab === "script"}
         <!-- The script tab lists the Lua effects the engine loaded, so a
              listener can see what is available and add one. Editing happens in

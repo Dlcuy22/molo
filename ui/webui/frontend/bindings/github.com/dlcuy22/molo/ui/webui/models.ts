@@ -108,6 +108,17 @@ export interface Options {
 }
 
 /**
+ * PresetImportResult reports what an EasyEffects preset import installed. The
+ * stages count is the chain the preset replaced; the warnings name every
+ * setting the importer skipped, so a user is not left guessing why a preset
+ * sounds different from EasyEffects.
+ */
+export interface PresetImportResult {
+    "stages": number;
+    "warnings": string[] | null;
+}
+
+/**
  * PreviewConfig is the preview window. StartMs and LengthMs are milliseconds
  * from the start of the track; a LengthMs of 0 means "to the end". FadeMs is
  * the ramp at each edge, Loop repeats the window until the selection changes,

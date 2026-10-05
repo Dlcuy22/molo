@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/dlcuy22/molo"
 	"github.com/dlcuy22/molo/dsp"
@@ -89,6 +90,15 @@ type EffectChainInfo struct {
 type EffectMetersInfo struct {
 	ID     string             `json:"id"`
 	Meters map[string]float32 `json:"meters"`
+}
+
+// PresetImportResult reports what an EasyEffects preset import installed. The
+// stages count is the chain the preset replaced; the warnings name every
+// setting the importer skipped, so a user is not left guessing why a preset
+// sounds different from EasyEffects.
+type PresetImportResult struct {
+	Stages   int      `json:"stages"`
+	Warnings []string `json:"warnings"`
 }
 
 // effects returns the editor surface, or an error when the engine was not built
@@ -220,6 +230,84 @@ func (s *PlayerService) OpenEffectWindow() error {
 	s.openEffectWindow()
 
 	return nil
+}
+
+// ImportEasyEffectsPreset shows the native picker, reads the chosen EasyEffects
+// preset, and replaces the effect chain with the imported one. The dialog is
+// owned by Go so the frontend needs no file-system permission of its own, the
+// same shape as OpenFiles. A cancelled dialog returns an empty result and
+// leaves the chain untouched.
+func (s *PlayerService) ImportEasyEffectsPreset() (PresetImportResult, error) {
+	if s.player == nil {
+		return PresetImportResult{}, fmt.Errorf("no player")
+	}
+	app := application.Get()
+	if app == nil {
+		return PresetImportResult{}, fmt.Errorf("no application")
+	}
+
+	path, err := app.Dialog.OpenFile().
+		SetTitle("Import an EasyEffects preset").
+		AddFilter("EasyEffects preset", "*.json").
+		PromptForSingleSelection()
+	if err != nil {
+		return PresetImportResult{}, s.fail(err)
+	}
+	if path == "" {
+		return PresetImportResult{}, nil // cancelled
+	}
+
+	return s.applyPresetFile(path)
+}
+
+// ImportEasyEffectsPresetData imports a preset from JSON already in hand. It is
+// the path a frontend uses when it holds the bytes (a paste, or a test), with
+// no dialog and no file access.
+func (s *PlayerService) ImportEasyEffectsPresetData(data string) (PresetImportResult, error) {
+	if s.player == nil {
+		return PresetImportResult{}, fmt.Errorf("no player")
+	}
+
+	return s.applyPresetBytes([]byte(data))
+}
+
+// applyPresetFile reads a preset file and applies it.
+func (s *PlayerService) applyPresetFile(path string) (PresetImportResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PresetImportResult{}, s.fail(fmt.Errorf("read preset: %w", err))
+	}
+
+	return s.applyPresetBytes(data)
+}
+
+// applyPresetBytes parses a preset and installs its chain. A parse failure or a
+// pipeline the engine rejects leaves the existing chain in place, so a bad file
+// cannot silence the player.
+func (s *PlayerService) applyPresetBytes(data []byte) (PresetImportResult, error) {
+	pipeline, warnings, err := dsp.LoadEasyEffectsPreset(data)
+	if err != nil {
+		return PresetImportResult{}, s.fail(err)
+	}
+	if err := s.player.ApplyPipeline(pipeline); err != nil {
+		return PresetImportResult{}, s.fail(err)
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
+	s.clearError()
+	s.emit(eventSnapshot, s.Snapshot())
+
+	return PresetImportResult{Stages: len(pipeline.Post), Warnings: warnings}, nil
+}
+
+// fail records an error on the snapshot and returns it, so a caller that
+// rejects still surfaces the message in the UI error line.
+func (s *PlayerService) fail(err error) error {
+	s.setError(err.Error())
+	s.emit(eventSnapshot, s.Snapshot())
+
+	return err
 }
 
 // EffectWindowOpen reports whether the effect window exists, so the main window

@@ -16,6 +16,7 @@ export type {
     EffectStageInfo,
     EffectVisualInfo,
     Options,
+    PresetImportResult,
     PreviewConfig,
     PreviewState,
     QueueRow,
