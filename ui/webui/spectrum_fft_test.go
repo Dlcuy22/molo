@@ -13,6 +13,17 @@ func spectrumService(t *testing.T) *PlayerService {
 	return svc
 }
 
+// countingTap is the narrowest spectrum.Tap: it records that the pump reached
+// the transform without producing samples, so a test can tell a skipped frame
+// from a computed one.
+type countingTap struct{ reads int }
+
+func (c *countingTap) Read([]float32) int {
+	c.reads++
+
+	return 0
+}
+
 // TestSpectrumConfigRoundTripsTheFFTSize covers the dropdown's whole path: what
 // the UI reads back is what it sent. A resolver that dropped the field would
 // make the dropdown snap to the default on the next tick.
@@ -82,5 +93,91 @@ func TestSpectrumSchemaOffersTheFFTDropdown(t *testing.T) {
 	}
 	if fft.fallback != 8192 {
 		t.Fatalf("fft default = %v, want 8192", fft.fallback)
+	}
+}
+
+// TestSpectrumEnableGateSkipsTheTransform pins that disabling the visualizer
+// stops the pump from touching the tap at all, so the off state costs no CPU,
+// and that re-enabling resumes it.
+func TestSpectrumEnableGateSkipsTheTransform(t *testing.T) {
+	svc := spectrumService(t)
+	svc.tap = &countingTap{}
+	if err := svc.rebuildRunner(); err != nil {
+		t.Fatalf("rebuildRunner: %v", err)
+	}
+
+	if err := svc.ConfigureSpectrum(SpectrumConfig{Bars: 150, MinHz: 20, MaxHz: 20000, Enabled: false}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if svc.SpectrumConfig().Enabled {
+		t.Fatal("Enabled = true after disabling")
+	}
+	svc.publishSpectrum()
+	if reads := svc.tap.(*countingTap).reads; reads != 0 {
+		t.Fatalf("disabled pump read the tap %d times, want 0", reads)
+	}
+
+	if err := svc.ConfigureSpectrum(SpectrumConfig{Bars: 150, MinHz: 20, MaxHz: 20000, Enabled: true}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !svc.SpectrumConfig().Enabled {
+		t.Fatal("Enabled = false after enabling")
+	}
+	svc.publishSpectrum()
+	if reads := svc.tap.(*countingTap).reads; reads == 0 {
+		t.Fatal("enabled pump never read the tap")
+	}
+}
+
+// TestSpectrumConfigShipsEnabled pins the startup default: a fresh service
+// visualizes without the UI having to ask for it.
+func TestSpectrumConfigShipsEnabled(t *testing.T) {
+	svc := spectrumService(t)
+
+	if !svc.SpectrumConfig().Enabled {
+		t.Fatal("a fresh service should ship with the visualizer enabled")
+	}
+}
+
+// TestSpectrumRebuildKeepsTheEnableGate checks that a shape change carries the
+// gate through: what the caller sends is what the service reports back.
+func TestSpectrumRebuildKeepsTheEnableGate(t *testing.T) {
+	svc := spectrumService(t)
+	if err := svc.ConfigureSpectrum(SpectrumConfig{Bars: 150, MinHz: 20, MaxHz: 20000, Enabled: false}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if err := svc.ConfigureSpectrum(SpectrumConfig{Bars: 128, MinHz: 20, MaxHz: 20000, Enabled: false}); err != nil {
+		t.Fatalf("reshape: %v", err)
+	}
+	if svc.SpectrumConfig().Enabled {
+		t.Fatal("reshape re-enabled a disabled visualizer")
+	}
+	if got := svc.spectrumCfg.Bars; got != 128 {
+		t.Fatalf("Bars = %d, want 128", got)
+	}
+}
+
+// TestSpectrumEnableToggleKeepsTheRunner pins that flipping only the enable flag
+// does not rebuild the transform, so switching back on resumes from the live
+// window instead of cold-starting.
+func TestSpectrumEnableToggleKeepsTheRunner(t *testing.T) {
+	svc := spectrumService(t)
+	svc.tap = &countingTap{}
+	if err := svc.rebuildRunner(); err != nil {
+		t.Fatalf("rebuildRunner: %v", err)
+	}
+	before := svc.runner
+
+	if err := svc.ConfigureSpectrum(SpectrumConfig{Bars: 150, MinHz: 20, MaxHz: 20000, FFT: 8192, Enabled: false}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if svc.runner != before {
+		t.Fatal("disabling rebuilt the runner")
+	}
+	if err := svc.ConfigureSpectrum(SpectrumConfig{Bars: 150, MinHz: 20, MaxHz: 20000, FFT: 8192, Enabled: true}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if svc.runner != before {
+		t.Fatal("re-enabling rebuilt the runner")
 	}
 }

@@ -118,6 +118,11 @@ type PlayerService struct {
 	spectrumMu  sync.Mutex
 	spectrumCfg spectrum.Config
 	runner      *spectrum.Runner
+	// spectrumEnabled gates the pump. Off, the tick still fires but the
+	// transform is skipped and nothing is emitted, so a hidden visualizer
+	// costs no CPU. The runner is kept, not rebuilt, so switching back on
+	// resumes from the live tap on the next tick.
+	spectrumEnabled bool
 
 	// spectrumLast is the last emitted frame and spectrumLastSilent whether it
 	// read as silence, so the pump can skip a frame that carries nothing new.
@@ -133,16 +138,17 @@ func newPlayerService() *PlayerService {
 	ytmIndex := newYTMIndex()
 
 	return &PlayerService{
-		closing:     make(chan struct{}),
-		spectrumCfg: spectrum.DefaultConfig(),
-		coverCache:  make(map[string]string),
-		index:       newTagIndex(),
-		ytm:         ytmIndex,
-		ytmProv:     newYTMProvider(ytmIndex, ytmSeamlessSwap),
-		searchCache: make(map[string][]YTMResult),
-		ctx:         ctx,
-		cancel:      cancel,
-		log:         slog.Default(),
+		closing:         make(chan struct{}),
+		spectrumCfg:     spectrum.DefaultConfig(),
+		spectrumEnabled: true,
+		coverCache:      make(map[string]string),
+		index:           newTagIndex(),
+		ytm:             ytmIndex,
+		ytmProv:         newYTMProvider(ytmIndex, ytmSeamlessSwap),
+		searchCache:     make(map[string][]YTMResult),
+		ctx:             ctx,
+		cancel:          cancel,
+		log:             slog.Default(),
 	}
 }
 
@@ -308,6 +314,8 @@ func (s *PlayerService) pumpSpectrum() {
 }
 
 // publishSpectrum computes one frame and emits it as a plain slice of levels.
+// A disabled visualizer skips the transform entirely: the tick still fires, but
+// with no listener the display would only burn CPU on a frame nobody draws.
 // A frame that carries nothing new is skipped: an identical repeat (the
 // runner holds its display while the tap has no new samples, e.g. paused) or
 // continued near-silence after the drain already reached the floor. Without
@@ -316,8 +324,9 @@ func (s *PlayerService) pumpSpectrum() {
 func (s *PlayerService) publishSpectrum() {
 	s.spectrumMu.Lock()
 	runner := s.runner
+	enabled := s.spectrumEnabled
 	s.spectrumMu.Unlock()
-	if runner == nil {
+	if runner == nil || !enabled {
 		return
 	}
 
@@ -747,13 +756,16 @@ func (s *PlayerService) SpectrumSchema() []spectrum.Param { return spectrum.Sche
 func (s *PlayerService) SpectrumConfig() SpectrumConfig {
 	s.spectrumMu.Lock()
 	cfg := s.spectrumCfg
+	enabled := s.spectrumEnabled
 	s.spectrumMu.Unlock()
 
-	return SpectrumConfig{Bars: cfg.Bars, MinHz: int(cfg.MinHz), MaxHz: int(cfg.MaxHz), FFT: cfg.FFT}
+	return SpectrumConfig{Bars: cfg.Bars, MinHz: int(cfg.MinHz), MaxHz: int(cfg.MaxHz), FFT: cfg.FFT, Enabled: enabled}
 }
 
 // ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
 // range, the points and the transform size all take effect on the next tick.
+// Enabled is not part of the shape: it only gates the pump, so it can be
+// toggled without rebuilding the runner and losing the live window.
 func (s *PlayerService) ConfigureSpectrum(cfg SpectrumConfig) error {
 	next := spectrum.DefaultConfig()
 	if cfg.Bars > 0 {
@@ -773,11 +785,26 @@ func (s *PlayerService) ConfigureSpectrum(cfg SpectrumConfig) error {
 	}
 
 	s.spectrumMu.Lock()
+	wasEnabled := s.spectrumEnabled
+	shapeChanged := s.spectrumCfg != next
+	haveRunner := s.runner != nil
 	s.spectrumCfg = next
+	s.spectrumEnabled = cfg.Enabled
+	// Turning the pump back on must reach the display even if the first frame
+	// reads as silence, so drop the suppression state the way a rebuild does.
+	if cfg.Enabled && !wasEnabled {
+		s.spectrumLast = s.spectrumLast[:0]
+		s.spectrumLastSilent = false
+	}
 	s.spectrumMu.Unlock()
 
-	if err := s.rebuildRunner(); err != nil {
-		return err
+	// Only a shape change rebuilds the transform. A pure enable toggle keeps
+	// the runner and its live window, so switching back on resumes with no
+	// cold start; a rebuild here would discard the backlog and lag the display.
+	if shapeChanged || !haveRunner {
+		if err := s.rebuildRunner(); err != nil {
+			return err
+		}
 	}
 	s.emit(eventSnapshot, s.Snapshot())
 
@@ -1064,14 +1091,20 @@ type CodecOption struct {
 	Label string `json:"label"`
 }
 
-// SpectrumConfig is the visualizer shape the UI edits.
+// SpectrumConfig is the visualizer shape the UI edits. It is a full read and
+// write payload: the frontend always echoes every field back, so a zero value
+// is a real value (Enabled false disables the pump) rather than "unset".
 type SpectrumConfig struct {
 	Bars  int `json:"bars"`
 	MinHz int `json:"minHz"`
 	MaxHz int `json:"maxHz"`
-	// FFT is the transform length. Zero means the shipped default, so an older
-	// frontend that does not send the field still gets a working display.
+	// FFT is the transform length. Zero means the shipped default, because no
+	// transform can be zero wide.
 	FFT int `json:"fft"`
+	// Enabled gates the analysis pump. Off, the tick still fires but the
+	// transform is skipped, so a hidden visualizer costs no CPU. The service
+	// starts enabled.
+	Enabled bool `json:"enabled"`
 }
 
 // command runs one engine call with the shared error policy: a failure is

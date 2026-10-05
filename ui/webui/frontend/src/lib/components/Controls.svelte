@@ -53,6 +53,15 @@ import { fftLabel } from "../spectrum-fft";
     commands.configureSpectrum(next);
   }
 
+  // onSpectrumEnabled flips the whole visualizer, rendering and transform both.
+  // It is optimistic like the sliders: the switch must move on the click, and
+  // the engine confirms on the next snapshot tick.
+  function onSpectrumEnabled(e: Event) {
+    const next = { ...$spectrumConfig, enabled: (e.currentTarget as HTMLInputElement).checked };
+    spectrumConfig.set(next);
+    commands.configureSpectrum(next);
+  }
+
   // fftLabel names a transform size the way the choice is chosen: the resolution
   // it buys is what distinguishes them, not the sample count.
 </script>
@@ -126,6 +135,24 @@ import { fftLabel } from "../spectrum-fft";
     <!-- The panel is built from the schema the engine reports, so a new knob is
          one Go entry and no frontend change. -->
     <div class="flex flex-wrap items-end gap-x-5 gap-y-3 rounded-[6px] border border-line bg-surface p-3">
+      <!-- The switch is not a schema knob: it gates the whole visualizer, so it
+           is rendered here rather than as a Param the engine describes. -->
+      <label class="flex w-40 items-center justify-between gap-3 text-xs text-muted">
+        <span>Enabled</span>
+        <span class="relative inline-flex shrink-0 items-center">
+          <input
+            class="peer h-4 w-7 cursor-pointer appearance-none rounded-full bg-track transition-colors checked:bg-accent"
+            type="checkbox"
+            checked={$spectrumConfig.enabled}
+            aria-label="Enable the visualizer"
+            onchange={onSpectrumEnabled}
+          />
+          <span
+            class="pointer-events-none absolute left-0.5 size-3 rounded-full bg-fg transition-transform peer-checked:translate-x-3"
+            aria-hidden="true"
+          ></span>
+        </span>
+      </label>
       {#each $spectrumSchema as p (p.key)}
         {#if p.kind === "choice"}
           <!-- A choice has no continuous range, so the panel renders the set the

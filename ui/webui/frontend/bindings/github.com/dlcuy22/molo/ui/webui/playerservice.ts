@@ -42,6 +42,8 @@ export function AppendYTM(videoID: string): $CancellablePromise<void> {
 /**
  * ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
  * range, the points and the transform size all take effect on the next tick.
+ * Enabled is not part of the shape: it only gates the pump, so it can be
+ * toggled without rebuilding the runner and losing the live window.
  */
 export function ConfigureSpectrum(cfg: $models.SpectrumConfig): $CancellablePromise<void> {
     return $Call.ByID(3682469907, cfg);

@@ -219,7 +219,9 @@ export interface Snapshot {
 }
 
 /**
- * SpectrumConfig is the visualizer shape the UI edits.
+ * SpectrumConfig is the visualizer shape the UI edits. It is a full read and
+ * write payload: the frontend always echoes every field back, so a zero value
+ * is a real value (Enabled false disables the pump) rather than "unset".
  */
 export interface SpectrumConfig {
     "bars": number;
@@ -227,10 +229,17 @@ export interface SpectrumConfig {
     "maxHz": number;
 
     /**
-     * FFT is the transform length. Zero means the shipped default, so an older
-     * frontend that does not send the field still gets a working display.
+     * FFT is the transform length. Zero means the shipped default, because no
+     * transform can be zero wide.
      */
     "fft": number;
+
+    /**
+     * Enabled gates the analysis pump. Off, the tick still fires but the
+     * transform is skipped, so a hidden visualizer costs no CPU. The service
+     * starts enabled.
+     */
+    "enabled": boolean;
 }
 
 /**

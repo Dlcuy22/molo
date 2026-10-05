@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Warning, MagnifyingGlass } from "phosphor-svelte";
-  import { connect, commands, player, ready } from "./lib/store";
+  import { connect, commands, player, ready, spectrumConfig } from "./lib/store";
   import { displayTitle } from "./lib/format";
   import Transport from "./lib/components/Transport.svelte";
   import TrackInfo from "./lib/components/TrackInfo.svelte";
@@ -106,7 +106,9 @@
   <main class="flex min-h-0 flex-1 flex-col gap-3 p-4">
     <TrackInfo {snap} />
 
-    <Spectrum />
+    {#if $spectrumConfig.enabled}
+      <Spectrum />
+    {/if}
 
     <!-- min-h-0 lets the queue scroll inside the flex row instead of growing
          the page. -->
