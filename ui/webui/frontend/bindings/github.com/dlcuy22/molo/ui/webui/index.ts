@@ -8,6 +8,7 @@ export {
 
 export type {
     CodecOption,
+    DiscordStatus,
     EffectChainInfo,
     EffectKindInfo,
     EffectMetersInfo,

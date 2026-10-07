@@ -14,6 +14,10 @@ and this project adheres to
   `github.com/dlcuy22/player`. This is a breaking change: update every import
   path, and `go get github.com/dlcuy22/molo`. The public package is `molo`, the
   headless CLI is `cmd/molo`, and the TUI is `cmd/molo-tui`.
+- Discord Rich Presence now shows `Listening to <artist>` instead of the
+  application name, matching the reference client. The Discord IPC client is
+  now part of the web UI, so the activity can carry the name field the wire
+  format accepts; the `github.com/axrona/go-discordrpc` dependency is dropped.
 
 ### Added
 

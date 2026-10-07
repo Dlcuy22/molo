@@ -40,6 +40,17 @@ export function AppendYTM(videoID: string): $CancellablePromise<void> {
 }
 
 /**
+ * ArtistAvatar returns a YouTube Music artist's avatar as an inline data URL,
+ * or "" when there is none. It is the settings preview's source: the presence
+ * itself only needs the URL, but the webview may not load the remote image, so
+ * the preview asks for the bytes the backend already fetched. The lookup is
+ * cached in memory and on disk, so repeated asks cost nothing.
+ */
+export function ArtistAvatar(artistID: string): $CancellablePromise<string> {
+    return $Call.ByID(1413159162, artistID);
+}
+
+/**
  * ConfigureSpectrum replaces the visualizer shape. The frame is rebuilt, so the
  * range, the points and the transform size all take effect on the next tick.
  * Enabled is not part of the shape: it only gates the pump, so it can be
@@ -58,6 +69,13 @@ export function ConfigureSpectrum(cfg: $models.SpectrumConfig): $CancellableProm
  */
 export function Cover(id: string): $CancellablePromise<string> {
     return $Call.ByID(1183065355, id);
+}
+
+/**
+ * DiscordStatus reports the integration's state for the settings UI.
+ */
+export function DiscordStatus(): $CancellablePromise<$models.DiscordStatus> {
+    return $Call.ByID(3279222562);
 }
 
 /**
@@ -272,6 +290,13 @@ export function SetBackend(name: string): $CancellablePromise<void> {
  */
 export function SetCodec(name: string): $CancellablePromise<void> {
     return $Call.ByID(3320687474, name);
+}
+
+/**
+ * SetDiscordEnabled turns the integration on or off and remembers the choice.
+ */
+export function SetDiscordEnabled(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3996627121, on);
 }
 
 /**

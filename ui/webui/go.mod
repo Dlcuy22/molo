@@ -8,6 +8,7 @@ require (
 	github.com/tphakala/simd v1.9.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.25
 	golang.org/x/image v0.41.0
+	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 )
 
 replace github.com/dlcuy22/molo => ../..

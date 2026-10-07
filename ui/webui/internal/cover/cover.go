@@ -57,12 +57,33 @@ func DataURL(data []byte) (string, error) {
 		return "", nil
 	}
 
-	img, _, err := image.Decode(bytes.NewReader(data))
+	encoded, mime, err := EncodeThumb(data, maxEdge)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrNotImage, err)
+		return "", err
+	}
+	if len(encoded) == 0 {
+		return "", nil
 	}
 
-	thumb := Thumbnail(img, maxEdge)
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(encoded), nil
+}
+
+// EncodeThumb decodes artwork and returns a small encoded image bounded to max
+// on its longest side, plus the MIME type. It is the upload path's encoder:
+// Discord draws the presence art small, so a multi-megabyte cover is downscaled
+// before it leaves the machine. JPEG unless the art really has transparency,
+// matching DataURL.
+func EncodeThumb(data []byte, max int) ([]byte, string, error) {
+	if len(data) == 0 {
+		return nil, "", nil
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", ErrNotImage, err)
+	}
+
+	thumb := Thumbnail(img, max)
 
 	var buf bytes.Buffer
 	mime := "image/jpeg"
@@ -75,10 +96,10 @@ func DataURL(data []byte) (string, error) {
 		err = jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: jpegQuality})
 	}
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return buf.Bytes(), mime, nil
 }
 
 // Thumbnail scales img to fit inside a max x max box, preserving aspect ratio.

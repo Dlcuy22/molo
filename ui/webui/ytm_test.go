@@ -77,7 +77,7 @@ func TestYTMRefRoundTrip(t *testing.T) {
 }
 
 func TestYTMProviderMatchAndName(t *testing.T) {
-	p := newYTMProvider(newYTMIndex(), false)
+	p := newYTMProvider(newYTMIndex(), false, nil)
 	if p.Name() != "ytm" {
 		t.Fatalf("Name = %q", p.Name())
 	}

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,6 +98,16 @@ type ytmTrack struct {
 	Album      string
 	DurationMs int64
 
+	// ArtistID is the browse id of the first credited artist. It is the key the
+	// avatar lookup uses, and it is kept even when no avatar has been resolved
+	// yet, so the lookup can happen later.
+	ArtistID string
+
+	// ArtistThumbURL is the resolved avatar URL, or "" when the artist has none
+	// or has not been looked up. It is a URL rather than bytes because only the
+	// Discord presence consumes it, and Discord fetches an https URL itself.
+	ArtistThumbURL string
+
 	// ThumbnailURL is the high quality art URL from the catalogue. It is kept
 	// so the art can be fetched lazily, when a row is drawn or the track is
 	// played, rather than for every search result at once.
@@ -160,6 +171,31 @@ func (x *ytmIndex) put(t ytmTrack) {
 	if len(t.Thumb) == 0 {
 		t.Thumb = prev.Thumb
 	}
+	// The artist id and its resolved avatar are filled in by a later, separate
+	// lookup, so a subsequent search hit that carries neither must not erase
+	// them.
+	if t.ArtistID == "" {
+		t.ArtistID = prev.ArtistID
+	}
+	if t.ArtistThumbURL == "" {
+		t.ArtistThumbURL = prev.ArtistThumbURL
+	}
+	x.entries[ref] = t
+}
+
+// setArtist records the resolved avatar (and the artist id it belongs to) on an
+// existing entry, leaving the rest alone.
+func (x *ytmIndex) setArtist(ref, artistID, avatarURL string) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	t, ok := x.entries[ref]
+	if !ok {
+		return
+	}
+	if artistID != "" {
+		t.ArtistID = artistID
+	}
+	t.ArtistThumbURL = avatarURL
 	x.entries[ref] = t
 }
 
@@ -212,6 +248,18 @@ type ytmProvider struct {
 	index *ytmIndex
 	http  *http.Client
 
+	// artists caches resolved artist avatars for the presence's small image. It
+	// is separate from the track index because one artist can front many tracks.
+	artists *ytmArtistIndex
+
+	// avatarMu guards the decoded-avatar cache, which serves the settings
+	// preview. It is keyed by artist id and holds a data URL, so the preview
+	// never reaches the image host itself.
+	avatarMu   sync.Mutex
+	avatarData map[string]string
+
+	log *slog.Logger
+
 	// seamless selects the experimental fast-start path: Open returns a
 	// forward-only Opener over a background download plus an Upgrade that wraps
 	// the completed body in a seekable decoder. The UI sets it from
@@ -219,23 +267,31 @@ type ytmProvider struct {
 	// Open keeps the whole-track fetch exactly as before.
 	seamless bool
 
-	// resolve and search are the network calls, indirected so a test can drive
-	// the provider and the service without touching YouTube. In production they
-	// are the client's own methods; the client itself is not kept, because
-	// nothing else on it is used.
-	resolve func(context.Context, string) (*ytm.Streams, error)
-	search  func(context.Context, string, string, bool) (*ytm.SearchResults, error)
+	// resolve, search and loadArtist are the network calls, indirected so a test
+	// can drive the provider and the service without touching YouTube. In
+	// production they are the client's own methods; the client itself is not
+	// kept, because nothing else on it is used.
+	resolve    func(context.Context, string) (*ytm.Streams, error)
+	search     func(context.Context, string, string, bool) (*ytm.SearchResults, error)
+	loadArtist func(context.Context, string) (*ytm.Artist, error)
 }
 
-func newYTMProvider(index *ytmIndex, seamless bool) *ytmProvider {
+func newYTMProvider(index *ytmIndex, seamless bool, log *slog.Logger) *ytmProvider {
+	if log == nil {
+		log = slog.Default()
+	}
 	client := ytm.NewClient()
 
 	return &ytmProvider{
-		index:    index,
-		http:     &http.Client{Timeout: ytmHTTPTimeout},
-		seamless: seamless,
-		resolve:  client.GetStream,
-		search:   client.Search,
+		index:      index,
+		artists:    newYTMArtistIndex(),
+		avatarData: make(map[string]string),
+		log:        log,
+		http:       &http.Client{Timeout: ytmHTTPTimeout},
+		seamless:   seamless,
+		resolve:    client.GetStream,
+		search:     client.Search,
+		loadArtist: client.LoadArtist,
 	}
 }
 
@@ -392,6 +448,25 @@ func (p *ytmProvider) trackFor(ref string, streams *ytm.Streams) ytmTrack {
 	}
 
 	return t
+}
+
+// artistArtFor resolves the avatar URL for a cached track, looking it up and
+// caching it on the first ask. It is called from the presence update, off the
+// playback path, so the browse round trip never delays a track's start.
+func (p *ytmProvider) artistArtFor(ctx context.Context, ref string) string {
+	t, ok := p.index.lookup(ref)
+	if !ok {
+		return ""
+	}
+	if t.ArtistThumbURL != "" {
+		return t.ArtistThumbURL
+	}
+	url := p.artistArt(ctx, t.ArtistID)
+	if url != "" {
+		p.index.setArtist(ref, t.ArtistID, url)
+	}
+
+	return url
 }
 
 // thumbFor fetches one thumbnail, best effort. Art is decorative, so a failure
@@ -654,7 +729,11 @@ type YTMResult struct {
 	Kind       string `json:"kind"`
 	Explicit   bool   `json:"explicit"`
 	Thumbnail  string `json:"thumbnail"`
-	Playable   bool   `json:"playable"`
+	// ArtistID is the first credited artist's browse id, carried so the
+	// presence's avatar lookup has a key without a second search. It is empty
+	// when the catalogue named no artist.
+	ArtistID string `json:"artistId"`
+	Playable bool   `json:"playable"`
 }
 
 // ytmResults flattens a search response into the rows the palette shows, songs
@@ -705,6 +784,7 @@ func ytmResults(res *ytm.SearchResults) []YTMResult {
 					Kind:       "Song",
 					Explicit:   it.IsExplicit,
 					Thumbnail:  ytmThumb(it.Thumbnail),
+					ArtistID:   ytmFirstArtistID(it.Artists),
 					Playable:   true,
 				}
 				if it.Type == ytm.SongTypeVideo {
@@ -761,6 +841,18 @@ func ytmArtists(artists []ytm.Artist) string {
 	}
 
 	return strings.Join(names, ", ")
+}
+
+// ytmFirstArtistID returns the browse id of the first credited artist, which is
+// the key an avatar lookup uses. It is empty when no credit carries an id.
+func ytmFirstArtistID(artists []ytm.Artist) string {
+	for _, a := range artists {
+		if id := strings.TrimSpace(a.ID); id != "" {
+			return id
+		}
+	}
+
+	return ""
 }
 
 // ytmAlbum names the album of a song, when the catalogue listed one.

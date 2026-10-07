@@ -129,6 +129,11 @@ type PlayerService struct {
 	spectrumLast       []float64
 	spectrumLastSilent bool
 
+	// presence is the Discord Rich Presence integration. It is inert until the
+	// user turns it on, so the snapshot pump always calls into it and the cost
+	// when off is one comparison.
+	presence presenceState
+
 	log *slog.Logger
 }
 
@@ -144,7 +149,7 @@ func newPlayerService() *PlayerService {
 		coverCache:      make(map[string]string),
 		index:           newTagIndex(),
 		ytm:             ytmIndex,
-		ytmProv:         newYTMProvider(ytmIndex, ytmSeamlessSwap),
+		ytmProv:         newYTMProvider(ytmIndex, ytmSeamlessSwap, nil),
 		searchCache:     make(map[string][]YTMResult),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -195,6 +200,10 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	go s.pumpSpectrum()
 	go s.pumpEffectMeters()
 
+	// Restore Discord presence if the user had it on, now that the engine and
+	// the catalogue are up and a track can be described.
+	s.initDiscord()
+
 	return nil
 }
 
@@ -209,6 +218,7 @@ func (s *PlayerService) ServiceShutdown() error {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	s.stopDiscord()
 	s.wg.Wait()
 	if s.preview != nil {
 		s.preview.close()
@@ -246,11 +256,15 @@ func (s *PlayerService) pumpEvents() {
 				// it.
 				s.setError(failed.Err.Error())
 			}
-			s.emit(eventSnapshot, s.Snapshot())
+			snap := s.Snapshot()
+			s.emit(eventSnapshot, snap)
+			s.syncPresence(snap)
 		case <-ticker.C:
 			// A tick with no track is a wasted payload, but it is what lets the
 			// UI show a first "Ready" and recover if a push was ever missed.
-			s.emit(eventSnapshot, s.Snapshot())
+			snap := s.Snapshot()
+			s.emit(eventSnapshot, snap)
+			s.syncPresence(snap)
 		}
 	}
 }
@@ -431,6 +445,7 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Title:       snap.Meta.Tags.Title,
 		Artist:      snap.Meta.Tags.Artist,
 		Album:       snap.Meta.Tags.Album,
+		ArtistID:    s.currentArtistID(snap.Path),
 		CoverID:     cover.ID(snap.Meta.Tags.Cover),
 		CoverMime:   snap.Meta.Tags.CoverMIME,
 		Codec:       snap.Meta.Codec,
@@ -449,6 +464,22 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Error:       lastErr,
 		Preview:     preview,
 	}
+}
+
+// currentArtistID returns the first credited artist's browse id for a remote
+// track, or "" for a local file. It is carried in the snapshot so the settings
+// preview can fetch the avatar without a second search; the presence path reads
+// the same id from the catalogue index.
+func (s *PlayerService) currentArtistID(path string) string {
+	if !isYTMRef(path) {
+		return ""
+	}
+	t, ok := s.ytm.lookup(path)
+	if !ok {
+		return ""
+	}
+
+	return t.ArtistID
 }
 
 // syncIndex reconciles the tag index with the queue, but only when the queue
@@ -654,6 +685,20 @@ func (s *PlayerService) ytmCover(ref string) string {
 	return url
 }
 
+// ArtistAvatar returns a YouTube Music artist's avatar as an inline data URL,
+// or "" when there is none. It is the settings preview's source: the presence
+// itself only needs the URL, but the webview may not load the remote image, so
+// the preview asks for the bytes the backend already fetched. The lookup is
+// cached in memory and on disk, so repeated asks cost nothing.
+func (s *PlayerService) ArtistAvatar(artistID string) string {
+	artistID = strings.TrimSpace(artistID)
+	if artistID == "" {
+		return ""
+	}
+
+	return s.ytmProv.artistAvatarDataURL(s.ctx, artistID)
+}
+
 // SearchYTMSongs searches YouTube Music and returns the results a listener can
 // act on: songs first, then the other kinds, each labelled. The engine is not
 // involved; this is catalogue work, and it is the one call here that reaches
@@ -691,6 +736,7 @@ func (s *PlayerService) SearchYTMSongs(query string) ([]YTMResult, error) {
 			Album:        r.Album,
 			DurationMs:   r.DurationMs,
 			ThumbnailURL: r.Thumbnail,
+			ArtistID:     r.ArtistID,
 		})
 	}
 
@@ -1045,6 +1091,10 @@ type Snapshot struct {
 	Title  string `json:"title"`
 	Artist string `json:"artist"`
 	Album  string `json:"album"`
+	// ArtistID is the current remote track's first artist browse id, or "" for
+	// a local file. The settings preview uses it to fetch the avatar that the
+	// Discord presence shows as its small image.
+	ArtistID string `json:"artistId"`
 	// CoverID identifies the current artwork; the UI fetches the bytes through
 	// Cover(id). It is empty when the track has no art, which is the signal to
 	// fall back to the placeholder.
@@ -1116,12 +1166,16 @@ type SpectrumConfig struct {
 func (s *PlayerService) command(fn func() error) error {
 	if err := fn(); err != nil {
 		s.setError(err.Error())
-		s.emit(eventSnapshot, s.Snapshot())
+		snap := s.Snapshot()
+		s.emit(eventSnapshot, snap)
+		s.syncPresence(snap)
 
 		return err
 	}
 	s.clearError()
-	s.emit(eventSnapshot, s.Snapshot())
+	snap := s.Snapshot()
+	s.emit(eventSnapshot, snap)
+	s.syncPresence(snap)
 
 	return nil
 }
@@ -1132,12 +1186,16 @@ func (s *PlayerService) commandID(fn func() (string, error)) (string, error) {
 	id, err := fn()
 	if err != nil {
 		s.setError(err.Error())
-		s.emit(eventSnapshot, s.Snapshot())
+		snap := s.Snapshot()
+		s.emit(eventSnapshot, snap)
+		s.syncPresence(snap)
 
 		return "", err
 	}
 	s.clearError()
-	s.emit(eventSnapshot, s.Snapshot())
+	snap := s.Snapshot()
+	s.emit(eventSnapshot, snap)
+	s.syncPresence(snap)
 
 	return id, nil
 }

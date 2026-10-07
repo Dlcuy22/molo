@@ -8,6 +8,7 @@
   import Queue from "./lib/components/Queue.svelte";
   import Spectrum from "./lib/components/Spectrum.svelte";
   import Controls from "./lib/components/Controls.svelte";
+  import DiscordPanel from "./lib/components/DiscordPanel.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
 
   // The one subscription to the Go push stream. connect returns its own
@@ -152,6 +153,9 @@
       <section class="flex w-full flex-col gap-3 lg:w-[26rem] lg:shrink-0">
         <div class="rounded-[6px] border border-line bg-surface p-3">
           <Controls decoderPref={snap.decoderPref} backend={snap.backend} />
+        </div>
+        <div class="rounded-[6px] border border-line bg-surface p-3">
+          <DiscordPanel />
         </div>
         <div class="rounded-[6px] border border-line bg-surface p-3">
           <div class="flex items-center justify-between gap-2">

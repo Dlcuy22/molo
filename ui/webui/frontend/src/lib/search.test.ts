@@ -122,6 +122,7 @@ function hit(partial: Partial<YTMResult>): YTMResult {
     kind: "Song",
     explicit: false,
     thumbnail: "",
+    artistId: "",
     playable: true,
     ...partial,
   };

@@ -11,6 +11,15 @@ export interface CodecOption {
 }
 
 /**
+ * DiscordStatus is the settings UI's read of the integration: whether the user
+ * turned it on and whether the IPC socket is currently open.
+ */
+export interface DiscordStatus {
+    "enabled": boolean;
+    "connected": boolean;
+}
+
+/**
  * EffectChainInfo is the whole chain in processing order.
  */
 export interface EffectChainInfo {
@@ -176,6 +185,13 @@ export interface Snapshot {
     "album": string;
 
     /**
+     * ArtistID is the current remote track's first artist browse id, or "" for
+     * a local file. The settings preview uses it to fetch the avatar that the
+     * Discord presence shows as its small image.
+     */
+    "artistId": string;
+
+    /**
      * CoverID identifies the current artwork; the UI fetches the bytes through
      * Cover(id). It is empty when the track has no art, which is the signal to
      * fall back to the placeholder.
@@ -267,5 +283,12 @@ export interface YTMResult {
     "kind": string;
     "explicit": boolean;
     "thumbnail": string;
+
+    /**
+     * ArtistID is the first credited artist's browse id, carried so the
+     * presence's avatar lookup has a key without a second search. It is empty
+     * when the catalogue named no artist.
+     */
+    "artistId": string;
     "playable": boolean;
 }

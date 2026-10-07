@@ -19,6 +19,7 @@ import type {
   Snapshot,
   SpectrumConfig,
   YTMResult,
+  DiscordStatus,
 } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 import type { Param } from "../../bindings/github.com/dlcuy22/molo/ui/webui/internal/spectrum/models";
 import type { EffectKind, EffectStage } from "./effect-types";
@@ -38,6 +39,7 @@ export const EMPTY: Snapshot = {
   title: "",
   artist: "",
   album: "",
+  artistId: "",
   coverId: "",
   coverMime: "",
   codec: "",
@@ -82,6 +84,11 @@ export const previewConfig = writable<PreviewConfig>({
  *  none. The snapshot carries only the artwork id, so the 4 Hz payload stays
  *  small and the bytes cross the bridge once, when the id changes. */
 export const cover = writable<string>("");
+
+/** discordStatus mirrors the Discord Rich Presence integration: whether it is
+ *  on and whether the IPC socket is open. It is read on connect and refreshed
+ *  after a toggle, so the settings panel can show a truthful state line. */
+export const discordStatus = writable<DiscordStatus>({ enabled: false, connected: false });
 
 /** queueCoverCache memoises the palette's per-track artwork by cover id, so a
  *  row scrolled back into view, or a shared album cover, is not re-fetched.
@@ -142,6 +149,34 @@ export function queueCover(id: string, path: string): Promise<string> {
  *  is separate from the queue cache because its key is the reference, not a
  *  file path, and a search hit is drawn before it is ever queued. */
 const ytmCoverCache = new Map<string, Promise<string>>();
+
+/** artistAvatarCache memoises an artist's avatar data URL by browse id. The
+ *  presence uses the remote URL directly; the settings preview asks for the
+ *  bytes, because the webview cannot be relied on to load the remote image. */
+const artistAvatarCache = new Map<string, Promise<string>>();
+
+/** artistAvatar fetches an artist's avatar once per browse id, as a data URL.
+ *  An empty id resolves to "" without a call. */
+export function artistAvatar(artistID: string): Promise<string> {
+  if (artistID === "") {
+    return Promise.resolve("");
+  }
+  const hit = artistAvatarCache.get(artistID);
+  if (hit) {
+    return hit;
+  }
+
+  const p = commands.artistAvatar(artistID).catch(() => "");
+  if (artistAvatarCache.size >= queueCoverCacheMax) {
+    const oldest = artistAvatarCache.keys().next().value;
+    if (oldest !== undefined) {
+      artistAvatarCache.delete(oldest);
+    }
+  }
+  artistAvatarCache.set(artistID, p);
+
+  return p;
+}
 
 /** ytmCover fetches a YouTube Music track's artwork once per reference. The
  *  backend downloads and re-encodes it, so the webview never talks to the
@@ -314,6 +349,7 @@ export function connect(): () => void {
   PlayerService.SpectrumConfig().then(spectrumConfig.set);
   PlayerService.SpectrumSchema().then(spectrumSchema.set);
   PlayerService.PreviewConfig().then(previewConfig.set);
+  PlayerService.DiscordStatus().then(discordStatus.set);
   if (isEffectWindow) {
     void syncEffectChain();
     PlayerService.EffectKinds().then((kinds) => {
@@ -386,6 +422,19 @@ export const commands = {
   insertNextYTM: (videoID: string) => invoke(PlayerService.InsertNextYTM(videoID)),
   appendYTM: (videoID: string) => invoke(PlayerService.AppendYTM(videoID)),
   ytmCover: (ref: string) => PlayerService.QueueCover(ref),
+  // artistAvatar is the settings preview's artwork read. Like queueCover it is
+  // a plain read: a failure means "no avatar", not an error worth surfacing.
+  artistAvatar: (artistID: string) => PlayerService.ArtistAvatar(artistID),
+  // setDiscordEnabled flips Rich Presence. The status is re-read after the
+  // call so the panel shows the true connection state rather than a guess.
+  setDiscordEnabled: async (on: boolean): Promise<void> => {
+    try {
+      await PlayerService.SetDiscordEnabled(on);
+    } catch (err) {
+      player.update((s) => ({ ...s, error: errorText(err) }));
+    }
+    PlayerService.DiscordStatus().then(discordStatus.set);
+  },
   // The preview calls are plain too: a preview is an audition, so a rejected
   // one should quietly do nothing rather than take over the error line. The
   // config setter mirrors the value locally so a slider stays responsive.

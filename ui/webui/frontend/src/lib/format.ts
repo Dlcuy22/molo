@@ -62,6 +62,13 @@ export function isRemoteRef(path: string): boolean {
   return path.startsWith("ytm:");
 }
 
+/** ytmVideoId reads the video id out of a remote reference, or "" when the path
+ *  is not a YouTube Music reference. The prefix length lives here so the
+ *  watch-link builder and any other consumer stay in step. */
+export function ytmVideoId(path: string): string {
+  return isRemoteRef(path) ? path.slice("ytm:".length) : "";
+}
+
 /** baseName is path.basename for the browser: the last segment, POSIX or
  *  Windows separators both handled. A remote reference has no file name, so it
  *  yields nothing rather than "ytm:abc123" shown as a title. */
