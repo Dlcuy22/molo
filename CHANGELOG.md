@@ -28,6 +28,13 @@ and this project adheres to
   `OpenReader`/`OpenReaderNamed`, so a stream is dispatched to a codec by
   content sniffing just like a path; the Ogg Opus and WebM/Opus readers can play
   a URL today. The default provider list is now `Network` then `local`.
+- MPRIS2 support in the desktop app: molo now appears in the Linux desktop's
+  media controls (panel widget, lock screen, media keys, Bluetooth headset
+  buttons) and can be driven from them. It is a hand-rolled server on
+  `godbus/dbus/v5` rather than a dependency, so the tree stays MIT. The new
+  `internal/systemedia` package is the platform seam: MPRIS is the Linux
+  backend, and the same interface will carry SMTC on Windows and the macOS
+  MediaPlayer framework, with a no-op backend elsewhere.
 - A consumer-gated debug stream on the session, `DebugEvents`, separate from
   the control event stream so diagnostic traffic can never displace a control
   event. It reports the resolved decoder, parser and backend when a track is

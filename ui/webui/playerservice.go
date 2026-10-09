@@ -134,6 +134,12 @@ type PlayerService struct {
 	// when off is one comparison.
 	presence presenceState
 
+	// systemMedia publishes what is playing to the OS media controls (MPRIS on
+	// Linux) and receives their transport commands. It is always on: unlike the
+	// Discord presence there is no account or opt-in, and a host with no
+	// transport simply stays inert.
+	systemMedia systemMediaState
+
 	log *slog.Logger
 }
 
@@ -204,6 +210,10 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// the catalogue are up and a track can be described.
 	s.initDiscord()
 
+	// Publish to the OS media controls. It is unconditional: a host with no
+	// transport logs once and stays inert.
+	s.initSystemMedia()
+
 	return nil
 }
 
@@ -219,6 +229,7 @@ func (s *PlayerService) ServiceShutdown() error {
 		s.cancel()
 	}
 	s.stopDiscord()
+	s.stopSystemMedia()
 	s.wg.Wait()
 	if s.preview != nil {
 		s.preview.close()
@@ -256,15 +267,22 @@ func (s *PlayerService) pumpEvents() {
 				// it.
 				s.setError(failed.Err.Error())
 			}
+			if seeked, isSeek := ev.(molo.Seeked); isSeek {
+				// A seek is not a PropertiesChanged property, so the desktop
+				// needs the Seeked signal to move its progress bar at once.
+				s.systemMediaSeeked(seeked.Position)
+			}
 			snap := s.Snapshot()
 			s.emit(eventSnapshot, snap)
 			s.syncPresence(snap)
+			s.syncSystemMedia(snap)
 		case <-ticker.C:
 			// A tick with no track is a wasted payload, but it is what lets the
 			// UI show a first "Ready" and recover if a push was ever missed.
 			snap := s.Snapshot()
 			s.emit(eventSnapshot, snap)
 			s.syncPresence(snap)
+			s.syncSystemMedia(snap)
 		}
 	}
 }
