@@ -28,6 +28,12 @@ const (
 )
 
 func main() {
+	// Attach to the launching terminal, if there is one, before the logger is
+	// built so slog captures the console's handles. A GUI launch with no parent
+	// console leaves the debug pump off and allocates nothing, so a double-click
+	// never pops a console window.
+	consoleAttached = attachConsole()
+
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	// Registering the payload types is what gives the frontend a typed event

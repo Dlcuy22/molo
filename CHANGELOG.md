@@ -40,6 +40,11 @@ and this project adheres to
   `internal/systemedia` package is the platform seam: MPRIS is the Linux
   backend, and the same interface will carry SMTC on Windows and the macOS
   MediaPlayer framework, with a no-op backend elsewhere.
+- A debug console in the desktop app's terminal. When molo is launched from a
+  terminal, the engine's consumer-gated `DebugEvents` stream is mirrored there
+  as one line per record, so the GUI can be watched without a second webview
+  window. A double-clicked GUI launch has no terminal and stays quiet; setting
+  `MOLO_DEBUG` allocates a console for that case.
 - A consumer-gated debug stream on the session, `DebugEvents`, separate from
   the control event stream so diagnostic traffic can never displace a control
   event. It reports the resolved decoder, parser and backend when a track is

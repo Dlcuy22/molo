@@ -38,6 +38,11 @@ type fakePlayer struct {
 	// queue is the ref list the facade reads back for LoadPaths' append case.
 	queue []string
 
+	// debugCh is the consumer side of the fake's debug stream. It is nil unless
+	// a test sets it, and a nil channel simply never yields, so the pump waits
+	// on shutdown instead of reading records.
+	debugCh <-chan molo.DebugEvent
+
 	calls []string
 }
 
@@ -114,7 +119,7 @@ func (f *fakePlayer) Snapshot() molo.Snapshot {
 
 func (f *fakePlayer) Events() <-chan molo.Event { return nil }
 
-func (f *fakePlayer) DebugEvents() <-chan molo.DebugEvent { return nil }
+func (f *fakePlayer) DebugEvents() <-chan molo.DebugEvent { return f.debugCh }
 
 func (f *fakePlayer) DebugDropped() int64 { return 0 }
 

@@ -9,6 +9,7 @@ require (
 	github.com/tphakala/simd v1.9.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.25
 	golang.org/x/image v0.41.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 )
 
@@ -31,5 +32,4 @@ require (
 	github.com/tphakala/go-opus v1.1.0 // indirect
 	github.com/tphakala/go-wav v1.1.0 // indirect
 	github.com/yuin/gopher-lua v1.1.2 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 )

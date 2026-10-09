@@ -214,6 +214,11 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	// transport logs once and stays inert.
 	s.initSystemMedia()
 
+	// Mirror the engine's debug stream to the terminal when the app was
+	// launched from one, so the desktop build can be watched without a second
+	// window. A GUI launch with no terminal leaves this off.
+	s.startConsole()
+
 	return nil
 }
 
