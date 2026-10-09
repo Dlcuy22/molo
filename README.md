@@ -40,13 +40,17 @@ touch the decode side.
 A track reference does not have to be a path. The session hands each ref to the
 first configured provider whose `Match` claims it.
 
-`provider.LocalAudio` is the catch-all that keeps the historic local-file
-behaviour, so it stays last in the list. With no providers configured, the
-engine is local-file only.
+Two providers ship built in: `provider.NewNetworkProvider` streams a direct
+`http://` or `https://` audio URL through ranged GETs (so seeking is a range
+request, not a re-download), and `provider.LocalAudio` is the catch-all that
+keeps the historic local-file behaviour, so it stays last in the list. With no
+providers configured, the engine uses both, in that order.
 
 A provider (`provider.AudioProvider` returning a `provider.Source`) only ever
 returns bytes and metadata, so the engine never imports a network library of its
-own.
+own. The network provider reads through the same decode registry as a local
+file; only the codecs that can open a stream (Ogg Opus and WebM/Opus today) can
+play a URL.
 
 The code is layered so a UI never reaches past the facade. `core` holds only
 types and contracts. `internal/session` owns the queue, the state machine, and

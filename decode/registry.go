@@ -6,6 +6,7 @@
 package decode
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"errors"
@@ -151,6 +152,17 @@ type Registry interface {
 	// entirely. An empty name means automatic selection, identical to Open.
 	OpenNamed(name, path string) (Decoder, error)
 
+	// OpenReader opens a decoder over a stream with no path, choosing a
+	// factory by content sniffing. Only factories that implement ReaderOpener
+	// are eligible; a stream no such factory claims is ErrUnsupported. A source
+	// that is seekable keeps native seek, because the reader is handed to the
+	// factory unchanged.
+	OpenReader(r io.Reader) (Decoder, error)
+
+	// OpenReaderNamed is OpenReader through the named factory, bypassing
+	// sniffing. A name that does not implement ReaderOpener is ErrUnknownCodec.
+	OpenReaderNamed(name string, r io.Reader) (Decoder, error)
+
 	Probe(path string) (Prober, bool)
 	Supported() []string
 
@@ -237,6 +249,88 @@ func (r *registry) OpenNamed(name, path string) (Decoder, error) {
 	}
 
 	return f.Open(path)
+}
+
+// OpenReader opens a stream through the highest-weight ReaderOpener whose
+// Match accepts the leading bytes. A seekable stream is sniffed by reading and
+// rewinding, so it reaches the factory as its own io.ReadSeeker and keeps
+// native seek; a forward-only stream is wrapped so the sniffed bytes are not
+// lost, and the factory sees a plain io.Reader.
+func (r *registry) OpenReader(rd io.Reader) (Decoder, error) {
+	header, src, err := sniffReader(rd)
+	if err != nil {
+		return nil, err
+	}
+	f := r.byMagicReader(header)
+	if f == nil {
+		return nil, fmt.Errorf("%w: no stream decoder claims the leading bytes", ErrUnsupported)
+	}
+
+	return f.OpenReader(src)
+}
+
+// OpenReaderNamed opens a stream through the named factory, bypassing sniffing
+// and weight. The named factory must implement ReaderOpener, because a
+// path-based codec cannot read a stream.
+func (r *registry) OpenReaderNamed(name string, rd io.Reader) (Decoder, error) {
+	f := r.byName(name)
+	if f == nil {
+		return nil, fmt.Errorf("%w: %q (available: %s)", ErrUnknownCodec, name, strings.Join(r.names(), ", "))
+	}
+	ro, ok := f.(ReaderOpener)
+	if !ok {
+		return nil, fmt.Errorf("%w: codec %q cannot open a stream", ErrUnknownCodec, name)
+	}
+
+	return ro.OpenReader(rd)
+}
+
+// sniffReader returns a bounded leading window of rd and a reader positioned so
+// the factory sees the stream from its first byte. A seekable source is read
+// and rewound, which keeps it a native io.ReadSeeker for the factory; a
+// forward-only source is wrapped in a buffered reader whose peek window becomes
+// the header, so the bytes are consumed once and still delivered.
+func sniffReader(rd io.Reader) ([]byte, io.Reader, error) {
+	if rs, ok := rd.(io.ReadSeeker); ok {
+		buf := make([]byte, sniffWindow)
+		n, err := io.ReadFull(rs, buf)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, nil, err
+		}
+		if _, err := rs.Seek(0, io.SeekStart); err != nil {
+			return nil, nil, err
+		}
+
+		return bytes.Clone(buf[:n]), rs, nil
+	}
+
+	br := bufio.NewReaderSize(rd, sniffWindow)
+	header, err := br.Peek(sniffWindow)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
+		return nil, nil, err
+	}
+
+	return bytes.Clone(header), br, nil
+}
+
+// byMagicReader picks the highest-weight ReaderOpener whose Match accepts the
+// header, with the last registration breaking a tie, mirroring byMagic.
+func (r *registry) byMagicReader(header []byte) ReaderOpener {
+	var winner ReaderOpener
+	winnerWeight := 0
+	for _, f := range r.factories {
+		ro, ok := f.(ReaderOpener)
+		if !ok || !f.Match(header) {
+			continue
+		}
+		_, weight := ProfileOf(f)
+		if winner == nil || weight >= winnerWeight {
+			winner = ro
+			winnerWeight = weight
+		}
+	}
+
+	return winner
 }
 
 // byName returns the last factory registered under name, so a host that

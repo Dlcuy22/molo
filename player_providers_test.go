@@ -48,15 +48,24 @@ func TestProvidersIsReachableThroughTheInterface(t *testing.T) {
 	}
 }
 
-// TestProvidersEmptyByDefault pins the local-only default.
-func TestProvidersEmptyByDefault(t *testing.T) {
+// TestProvidersBuiltInByDefault pins the built-in sources: a fresh player
+// streams direct http/https URLs and still plays local files, with no
+// configuration.
+func TestProvidersBuiltInByDefault(t *testing.T) {
 	p, err := molo.New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	defer p.Close()
 
-	if got := p.Providers(); len(got) != 0 {
-		t.Fatalf("Providers() = %v, want empty", got)
+	got := p.Providers()
+	want := []string{"Network", "local"}
+	if len(got) != len(want) {
+		t.Fatalf("Providers() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Providers() = %v, want %v", got, want)
+		}
 	}
 }

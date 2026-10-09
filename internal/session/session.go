@@ -1300,8 +1300,8 @@ func (s *Session) Queue() []string {
 }
 
 // Providers lists the names of the configured providers in the order they are
-// tried. It is empty for the default local-only setup, which has no explicit
-// provider list.
+// tried. A session built through the facade always has at least the built-in
+// list; it is empty only for a session constructed directly with no providers.
 func (s *Session) Providers() []string {
 	names := make([]string, 0, len(s.cfg.Providers))
 	for _, p := range s.cfg.Providers {

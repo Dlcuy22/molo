@@ -21,6 +21,13 @@ and this project adheres to
 
 ### Added
 
+- Direct http/https audio streaming as a built-in source. A URL reference is
+  read through ranged GETs by the new `provider.NetworkProvider`, so a seek is a
+  range request rather than a whole-file re-download, and the engine still
+  imports no network library of its own. The decode registry gained
+  `OpenReader`/`OpenReaderNamed`, so a stream is dispatched to a codec by
+  content sniffing just like a path; the Ogg Opus and WebM/Opus readers can play
+  a URL today. The default provider list is now `Network` then `local`.
 - A consumer-gated debug stream on the session, `DebugEvents`, separate from
   the control event stream so diagnostic traffic can never displace a control
   event. It reports the resolved decoder, parser and backend when a track is

@@ -266,8 +266,8 @@ type Player interface {
 	// (for example "ytm:abc123") rather than paths once a provider is in use.
 	Queue() []string
 	// Providers lists the names of the providers in effect, in priority order,
-	// for a UI that shows where audio can come from. It is empty for the default
-	// local-only setup.
+	// for a UI that shows where audio can come from. The default is the
+	// built-in list ("Network", then "local").
 	Providers() []string
 
 	// Pause stops the device; it is ignored unless the player is playing.
@@ -444,8 +444,11 @@ func WithPipeline(p dsp.Pipeline) Option {
 
 // WithProviders sets the audio source providers, highest priority first. Each
 // track reference is given to the first provider whose Match returns true, so a
-// catch-all provider such as provider.LocalAudio must stay last. Nil keeps the
-// default: local files only, through the decode registry.
+// catch-all provider such as provider.LocalAudio must stay last.
+//
+// Nil (the default) selects provider.Defaults(): direct http/https streaming,
+// then the local filesystem. An explicit list replaces the default entirely, so
+// a caller that wants only local files passes provider.LocalAudio{}.
 //
 // A non-empty list that claims nothing fails the track with ErrNoProvider
 // rather than silently treating the reference as a file path.
@@ -467,6 +470,14 @@ func New(opts ...Option) (Player, error) {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	// An unset provider list selects the built-in sources. This keeps direct
+	// http/https streaming available with no configuration while leaving local
+	// playback identical, because LocalAudio marks its source Local and the
+	// session keeps its own opener, resolver and prober for it.
+	providers := cfg.Providers
+	if providers == nil {
+		providers = provider.Defaults()
+	}
 
 	s, err := session.New(session.Config{
 		Backend:      cfg.Backend,
@@ -474,7 +485,7 @@ func New(opts ...Option) (Player, error) {
 		RingFrames:   cfg.RingFrames,
 		Volume:       cfg.Volume,
 		Resolver:     cfg.Resolver,
-		Providers:    cfg.Providers,
+		Providers:    providers,
 		ProbeMode:    cfg.ProbeMode,
 		Decoder:      cfg.Decoder,
 		Pipeline:     cfg.Pipeline,

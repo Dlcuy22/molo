@@ -92,6 +92,14 @@ type Source struct {
 // provider without giving up the local path's behaviour.
 type LocalAudio struct{}
 
+// Defaults returns the built-in provider list in priority order: a direct
+// http/https URL first, then the local filesystem fallback. A caller that wants
+// extra sources prepends them; a caller that wants none passes an explicit list
+// to the player. The local provider is last because its Match always succeeds.
+func Defaults() []AudioProvider {
+	return []AudioProvider{NewNetworkProvider(nil), LocalAudio{}}
+}
+
 // Name identifies LocalAudio. It matches the historic local path.
 func (LocalAudio) Name() string { return "local" }
 
