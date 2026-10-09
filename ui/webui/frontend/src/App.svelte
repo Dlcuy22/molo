@@ -104,17 +104,23 @@
   track title, then the spectrum, then the play button.
 -->
 <div class="flex h-full flex-col bg-bg text-fg">
-  <main class="flex min-h-0 flex-1 flex-col gap-3 p-4">
+  <!-- main is the window's scroll surface: the queue scrolls in its own panel,
+       and this outer scroll keeps the panels below the fold reachable. -->
+  <main class="scroll-thin flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
     <TrackInfo {snap} />
 
     {#if $spectrumConfig.enabled}
       <Spectrum />
     {/if}
 
-    <!-- min-h-0 lets the queue scroll inside the flex row instead of growing
-         the page. -->
-    <div class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
-      <section class="flex min-h-0 flex-1 flex-col rounded-[6px] border border-line bg-surface">
+    <!-- The row grows to its tallest column instead of being clamped to the
+         viewport, so a short window scrolls rather than painting over the
+         transport. -->
+    <div class="flex flex-1 flex-col gap-3 lg:flex-row">
+      <!-- min-h-56 keeps the queue's own scroll floor usable on a short window. -->
+      <section
+        class="flex min-h-56 flex-1 flex-col rounded-[6px] border border-line bg-surface"
+      >
         <div class="flex items-center justify-between gap-2 px-3 pb-1 pt-3">
           <h2 class="text-xs font-medium text-muted">Queue</h2>
           <div class="flex items-center gap-2">
