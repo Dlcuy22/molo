@@ -36,8 +36,6 @@ github.com/mattn/go-runewidth v0.0.24 h1:cpokDiIn0MGnhdHwuWnJBITySJ20QyNGnY2kR/a
 github.com/mattn/go-runewidth v0.0.24/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
 github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
-github.com/pion/opus v0.1.0 h1:GgK/a3DNDrffKjUFsK39rZKqfv7bQ2S2eqRKt0BnqAE=
-github.com/pion/opus v0.1.0/go.mod h1:t5Xog2n682JnawoykACE6nKVmupFvmJvkpM7x6bTv6g=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
@@ -50,6 +48,8 @@ github.com/tphakala/go-m4a v0.5.0 h1:MsGA8OutWHaxZGV6H7oEbvOiCCKAmmxTG3P3+hjF6UY
 github.com/tphakala/go-m4a v0.5.0/go.mod h1:CZ4zF1xbkzCKD+amTQhzzYtghcXKSKZEDNixgRzU6sk=
 github.com/tphakala/go-mp3 v0.1.0 h1:3nY1WwY3E9lSK22d1AtaAvQXqMSfDQlPtqD+Ym/Yc+c=
 github.com/tphakala/go-mp3 v0.1.0/go.mod h1:h8c9IC7aD14TKrq+hnjOMd31B+0GLXtX9TJXXNItisg=
+github.com/tphakala/go-opus v1.1.0 h1:SbXQjwI/ZYy6wPXd0fafLTurkUbAhBpaYnvXYtn8uIo=
+github.com/tphakala/go-opus v1.1.0/go.mod h1:57hQHipntY2+xK7sycF4CYVSXDLW3V+AiX77iOJlojQ=
 github.com/tphakala/go-wav v1.1.0 h1:U70YwkAFH4CFjoJ6z+oMl/UUtXAx1Dik54vJTJkE+3w=
 github.com/tphakala/go-wav v1.1.0/go.mod h1:uHyG52/VxaMf7e3AxS/lJ+DDZoADPuIlxsij1iWUi/U=
 github.com/tphakala/simd v1.9.0 h1:EURkGIeEMZ7V96i2TJZvLIiXj6RZebe3xdf4n4Bhynk=
