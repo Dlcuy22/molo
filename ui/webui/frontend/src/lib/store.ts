@@ -421,6 +421,10 @@ export const commands = {
   searchYTM: (query: string) => PlayerService.SearchYTMSongs(query),
   insertNextYTM: (videoID: string) => invoke(PlayerService.InsertNextYTM(videoID)),
   appendYTM: (videoID: string) => invoke(PlayerService.AppendYTM(videoID)),
+  // addYTMPlaylist resolves a playlist or album URL/id and appends its tracks.
+  // It is an engine command like a play, so a rejection lands on the error line;
+  // the catalogue fetch happens on the Go side.
+  addYTMPlaylist: (input: string) => invoke(PlayerService.AddYTMPlaylist(input)),
   ytmCover: (ref: string) => PlayerService.QueueCover(ref),
   // artistAvatar is the settings preview's artwork read. Like queueCover it is
   // a plain read: a failure means "no avatar", not an error worth surfacing.

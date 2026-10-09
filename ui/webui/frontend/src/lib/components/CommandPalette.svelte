@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { MagnifyingGlass, MusicNote, Pause } from "phosphor-svelte";
   import { commands, previewConfig, queueCover, searchYTM, ytmCover } from "../store";
-  import { matchQueue, hasTags, ytmKindLabel, ytmResultRow, ytmSubtitle } from "../search";
+  import { matchQueue, hasTags, isPlaylistKind, playlistIDFromQuery, ytmKindLabel, ytmPlaylistResult, ytmResultRow, ytmSubtitle } from "../search";
   import { formatTime, isRemoteRef, subtitle } from "../format";
   import type {
     PreviewConfig,
@@ -56,6 +56,10 @@
   // to audition, so the controls are not offered there at all.
   let previewMode = $state(false);
   let settingsOpen = $state(false);
+  // adding marks a playlist add in flight. A playlist add walks the catalogue
+  // and can take a moment, so the palette says so and refuses a second start
+  // rather than queueing the same playlist twice.
+  let adding = $state(false);
 
   // covers maps a row's identity to its artwork data URL, filled in only for
   // the rows the observer has seen on screen. An identity with no entry draws
@@ -68,9 +72,19 @@
   const pending = new Set<string>();
 
   // ytmRows projects the current hits onto the queue row shape the list draws.
-  const ytmRows = $derived(
-    ytmResults.map((r, i) => ({ ...ytmResultRow(r, i), ytm: r }) as PaletteRow),
-  );
+  // A playlist URL pasted into the field is prepended as a synthetic hit, so
+  // adding a whole playlist is the first, obvious action rather than a hidden
+  // mode.
+  const ytmRows = $derived.by(() => {
+    const rows = ytmResults.map((r, i) => ({ ...ytmResultRow(r, i), ytm: r }) as PaletteRow);
+    const pasted = playlistIDFromQuery(query);
+    if (pasted !== "") {
+      const hit = ytmPlaylistResult(pasted);
+      rows.unshift({ ...ytmResultRow(hit, 0), ytm: hit } as PaletteRow);
+    }
+
+    return rows;
+  });
 
   // matches is the one result set the list renders, from whichever source this
   // palette was opened with. The queue side is recomputed from the store on
@@ -102,14 +116,24 @@
   );
 
   // ytmCounts reports whether a search also matched things that cannot be
-  // played, so the footer can say so once instead of repeating it per row.
+  // played, so the footer can say so once instead of repeating it per row. A
+  // playlist or album is excluded: it cannot be played, but it can be added.
   const ytmOtherKinds = $derived(
-    isYTM ? matches.filter((r) => r.ytm && !r.ytm.playable).length : 0,
+    isYTM
+      ? matches.filter((r) => r.ytm && !r.ytm.playable && !isPlaylistKind(r.ytm)).length
+      : 0,
   );
 
   /** isSelectable reports whether Enter can act on a row. */
   function isSelectable(row: PaletteRow): boolean {
     if (row.ytm) {
+      // A playlist or album hit is an "add to queue" action, so it is
+      // selectable when it carries an id; a song is selectable when it can
+      // actually play.
+      if (isPlaylistKind(row.ytm)) {
+        return row.ytm.videoId !== "";
+      }
+
       return row.ytm.playable && row.path !== "";
     }
 
@@ -138,6 +162,13 @@
     preview.duration > 0 ? Math.min(1, preview.position / preview.duration) : 0,
   );
 
+  // cursorIsPlaylist drives the footer: on a playlist row Enter adds the whole
+  // list, so the hint must say that rather than "play next".
+  const cursorRow = $derived(matches[cursor]);
+  const cursorIsPlaylist = $derived(
+    !!cursorRow?.ytm && isPlaylistKind(cursorRow.ytm),
+  );
+
   // Reset once per open, not on every dependency change: a snapshot push
   // rebuilds the queue array several times a second, and a reset keyed on the
   // props alone would still be fragile if a prop identity changed. Tracking the
@@ -155,6 +186,7 @@
       ytmSeq++;
       settingsOpen = false;
       previewMode = source === "queue" && startPreview;
+      adding = false;
       // Adopt the source this open started in, so the source-change effect
       // below does not read the open itself as a switch and disarm the preview
       // we just armed (Ctrl+Alt+P after the palette was last used for YouTube).
@@ -191,6 +223,16 @@
       return;
     }
     if (q === "") {
+      clearSearchTimer();
+      ytmResults = [];
+      ytmLoading = false;
+      ytmError = "";
+
+      return;
+    }
+    // A pasted playlist URL is not a search term: the palette already offers
+    // the add action for it, so a request would only fetch unrelated hits.
+    if (playlistIDFromQuery(q) !== "") {
       clearSearchTimer();
       ytmResults = [];
       ytmLoading = false;
@@ -434,6 +476,14 @@
       if (!isSelectable(row)) {
         return;
       }
+      // A playlist or album is added whole. It is one engine command that
+      // resolves the catalogue and appends every track, so the palette waits
+      // for it rather than closing on a call that has not landed yet.
+      if (isPlaylistKind(row.ytm)) {
+        addPlaylist(row.ytm.videoId);
+
+        return;
+      }
       // Enter queues the track to play next; Shift+Enter adds it to the end
       // without touching what is playing. Neither replaces the queue, so
       // starting a search does not throw away what is already there.
@@ -446,6 +496,19 @@
       commands.playIndex(row.index);
     }
     onclose();
+  }
+
+  /** addPlaylist resolves and queues a whole playlist, then closes. The error,
+   *  if any, lands on the player's error line through the command wrapper. */
+  function addPlaylist(id: string) {
+    if (adding) {
+      return;
+    }
+    adding = true;
+    commands.addYTMPlaylist(id).finally(() => {
+      adding = false;
+      onclose();
+    });
   }
 
   function togglePreviewMode() {
@@ -874,9 +937,16 @@
         {#if isYTM}
           <!-- Enter queues the track after the current one rather than
                replacing the queue, so a search never throws away what is
-               playing. Shift+Enter is the plain "queue it for later". -->
-          <span><kbd class="font-sans text-fg">Enter</kbd> to play next</span>
-          <span><kbd class="font-sans text-fg">Shift Enter</kbd> to add to queue</span>
+               playing. Shift+Enter is the plain "queue it for later". A
+               playlist row changes the verb: it adds the whole list. -->
+          {#if adding}
+            <span role="status">Adding playlist…</span>
+          {:else if cursorIsPlaylist}
+            <span><kbd class="font-sans text-fg">Enter</kbd> to add playlist to queue</span>
+          {:else}
+            <span><kbd class="font-sans text-fg">Enter</kbd> to play next</span>
+            <span><kbd class="font-sans text-fg">Shift Enter</kbd> to add to queue</span>
+          {/if}
         {:else}
           <span><kbd class="font-sans text-fg">Enter</kbd> to play</span>
           <span><kbd class="font-sans text-fg">Ctrl Alt P</kbd> preview</span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasTags, matchQueue, searchText, tokenize, ytmKindLabel, ytmResultRow, ytmSubtitle } from "./search";
+import { hasTags, isPlaylistKind, matchQueue, playlistIDFromQuery, searchText, tokenize, ytmKindLabel, ytmPlaylistResult, ytmResultRow, ytmSubtitle } from "./search";
 import type { QueueRow } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 import type { YTMResult } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 
@@ -167,5 +167,44 @@ describe("ytmKindLabel", () => {
     expect(ytmKindLabel(hit({ kind: "Song" }))).toBe("");
     expect(ytmKindLabel(hit({ kind: "Video" }))).toBe("Video");
     expect(ytmKindLabel(hit({ kind: "Artist" }))).toBe("Artist");
+  });
+});
+
+describe("isPlaylistKind", () => {
+  it("is true for playlists and albums only", () => {
+    expect(isPlaylistKind(hit({ kind: "Playlist" }))).toBe(true);
+    expect(isPlaylistKind(hit({ kind: "Album" }))).toBe(true);
+    expect(isPlaylistKind(hit({ kind: "Song" }))).toBe(false);
+    expect(isPlaylistKind(hit({ kind: "Artist" }))).toBe(false);
+  });
+});
+
+describe("playlistIDFromQuery", () => {
+  it("reads the id out of a share URL", () => {
+    expect(
+      playlistIDFromQuery("https://music.youtube.com/playlist?list=PLdirQjL5RyWE&si=DyvjQqw8h-cm07fx"),
+    ).toBe("PLdirQjL5RyWE");
+  });
+
+  it("accepts a bare id with a known prefix", () => {
+    expect(playlistIDFromQuery("PLdirQjL5RyWE")).toBe("PLdirQjL5RyWE");
+    expect(playlistIDFromQuery("VLPLabc")).toBe("VLPLabc");
+    expect(playlistIDFromQuery("MPREb_album")).toBe("MPREb_album");
+  });
+
+  it("does not mistake an ordinary query for a playlist", () => {
+    expect(playlistIDFromQuery("kessoku band")).toBe("");
+    expect(playlistIDFromQuery("")).toBe("");
+  });
+});
+
+describe("ytmPlaylistResult", () => {
+  it("marks the pasted playlist as an add action, not a track", () => {
+    const r = ytmPlaylistResult("PLabc");
+    expect(r.videoId).toBe("PLabc");
+    expect(r.kind).toBe("Playlist");
+    expect(r.playable).toBe(false);
+    // It carries no track reference, so it never renders as playable art.
+    expect(ytmResultRow(r, 0).path).toBe("");
   });
 });

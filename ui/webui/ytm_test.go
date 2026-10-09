@@ -373,3 +373,115 @@ func TestYTMQueueCommandsQueueTheReference(t *testing.T) {
 		t.Fatal("AppendYTM with no id must fail")
 	}
 }
+
+// TestYTMPlaylistIDParsesURLAndBareID pins the input shapes the palette can hand
+// over: the share URL a listener copies, a browse id, and a bare id.
+func TestYTMPlaylistIDParsesURLAndBareID(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"https://music.youtube.com/playlist?list=PLdirQjL5RyWE&si=DyvjQqw8h-cm07fx", "PLdirQjL5RyWE"},
+		{"https://music.youtube.com/playlist?list=PLabc-123&si=x", "PLabc-123"},
+		{"PLdirQjL5RyWE", "PLdirQjL5RyWE"},
+		{"VLPLdirQjL5RyWE", "VLPLdirQjL5RyWE"},
+		{"MPREb_album", "MPREb_album"},
+		{"MPSPplaylist", "playlist"},
+		{"  PLspace  ", "PLspace"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := ytmPlaylistID(c.in); got != c.want {
+			t.Errorf("ytmPlaylistID(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestYTMPlaylistResultsFlattensAndDedupes pins the row shape a playlist add
+// caches: songs with credits, order preserved, a repeated id kept once.
+func TestYTMPlaylistResultsFlattensAndDedupes(t *testing.T) {
+	album := &ytm.Playlist{Name: "The Album"}
+	pl := &ytm.Playlist{
+		Name: "My Mix",
+		Items: []ytm.Song{
+			{ID: "MPEDone", Name: "One", Artists: []ytm.Artist{{Name: "A"}}, DurationMs: 1000, Album: album},
+			{ID: "two", Name: "Two", Artists: []ytm.Artist{{Name: "B"}}},
+			{ID: "MPEDone", Name: "One (repeat)", Artists: []ytm.Artist{{Name: "A"}}},
+			{ID: "", Name: "No id"},
+		},
+	}
+
+	got := ytmPlaylistResults(pl)
+	if len(got) != 2 {
+		t.Fatalf("results = %d, want 2 (duplicate and blank dropped)", len(got))
+	}
+	if got[0].VideoID != "one" || got[0].Title != "One" || !got[0].Playable {
+		t.Fatalf("first = %+v, want the cleaned, playable song", got[0])
+	}
+	if got[0].Artist != "A" || got[0].Album != "The Album" {
+		t.Fatalf("first credits = %+v", got[0])
+	}
+	if got[1].VideoID != "two" {
+		t.Fatalf("second = %+v, want order preserved", got[1])
+	}
+}
+
+// TestAddYTMPlaylistQueuesEveryTrack drives the service's playlist add through a
+// fake catalogue and asserts both halves: the queue receives one reference per
+// track in order, and the catalogue index is filled so a row has a title before
+// anything plays.
+func TestAddYTMPlaylistQueuesEveryTrack(t *testing.T) {
+	fp := newFakePlayer()
+	svc := newPlayerService()
+	svc.player = fp
+	svc.ytmProv.loadPlaylist = func(context.Context, string, *ytm.BuiltInContinuation) (*ytm.Playlist, error) {
+		return &ytm.Playlist{Name: "Mix", Items: []ytm.Song{
+			{ID: "s1", Name: "One"},
+			{ID: "s2", Name: "Two"},
+		}}, nil
+	}
+
+	if err := svc.AddYTMPlaylist("PLabc"); err != nil {
+		t.Fatalf("AddYTMPlaylist: %v", err)
+	}
+	if got := fp.Queue(); len(got) != 2 || got[0] != "ytm:s1" || got[1] != "ytm:s2" {
+		t.Fatalf("queue = %v, want [ytm:s1 ytm:s2]", got)
+	}
+	if row := ytmQueueRow(0, "ytm:s1", 0, svc.ytm); row.Title != "One" {
+		t.Fatalf("row = %+v, want the catalogue title cached before play", row)
+	}
+
+	if err := svc.AddYTMPlaylist(""); err == nil {
+		t.Fatal("AddYTMPlaylist with no id must fail")
+	}
+}
+
+// TestAddYTMPlaylistFollowsContinuation proves a paged playlist is walked to the
+// end, so a long list is not silently cut to its first page.
+func TestAddYTMPlaylistFollowsContinuation(t *testing.T) {
+	fp := newFakePlayer()
+	svc := newPlayerService()
+	svc.player = fp
+	calls := 0
+	svc.ytmProv.loadPlaylist = func(_ context.Context, _ string, cont *ytm.BuiltInContinuation) (*ytm.Playlist, error) {
+		calls++
+		if cont == nil {
+			return &ytm.Playlist{
+				Items:        []ytm.Song{{ID: "s1", Name: "One"}},
+				Continuation: &ytm.BuiltInContinuation{Token: "next"},
+			}, nil
+		}
+
+		return &ytm.Playlist{Items: []ytm.Song{{ID: "s2", Name: "Two"}}}, nil
+	}
+
+	if err := svc.AddYTMPlaylist("PLabc"); err != nil {
+		t.Fatalf("AddYTMPlaylist: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("loadPlaylist calls = %d, want 2 (one page, one continuation)", calls)
+	}
+	if got := fp.Queue(); len(got) != 2 || got[1] != "ytm:s2" {
+		t.Fatalf("queue = %v, want the continuation track included", got)
+	}
+}

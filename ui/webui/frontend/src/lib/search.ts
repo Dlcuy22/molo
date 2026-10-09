@@ -82,6 +82,55 @@ export function ytmKindLabel(result: YTMResult): string {
   return result.kind === "Song" ? "" : result.kind;
 }
 
+/** isPlaylistKind reports whether a hit is a playlist or album, which the
+ *  palette can add to the queue as a whole rather than play as one track. */
+export function isPlaylistKind(result: YTMResult): boolean {
+  return result.kind === "Playlist" || result.kind === "Album";
+}
+
+/**
+ * playlistIDFromQuery reads a YouTube Music playlist out of what the user typed.
+ * A share URL carries the id as its list= parameter; a bare id is accepted only
+ * with a known prefix, so an ordinary search word is never mistaken for one.
+ * It returns "" when the text is a normal query.
+ */
+export function playlistIDFromQuery(query: string): string {
+  const q = query.trim();
+  if (q === "") {
+    return "";
+  }
+  const fromURL = q.match(/[?&]list=([A-Za-z0-9_-]+)/);
+  if (fromURL) {
+    return fromURL[1];
+  }
+  if (/^(VL|MPREb_|PL|RD|OLAK5uy_)[A-Za-z0-9_-]+$/.test(q)) {
+    return q;
+  }
+
+  return "";
+}
+
+/**
+ * ytmPlaylistResult builds the hit that represents adding a whole playlist,
+ * either one the user pasted as a URL or a playlist row from a search. It is
+ * marked not playable because it is not a track; the palette acts on its kind
+ * instead.
+ */
+export function ytmPlaylistResult(id: string, title = "Add YouTube Music playlist"): YTMResult {
+  return {
+    videoId: id,
+    title,
+    artist: "",
+    album: "",
+    durationMs: 0,
+    kind: "Playlist",
+    explicit: false,
+    thumbnail: "",
+    artistId: "",
+    playable: false,
+  };
+}
+
 /**
  * matchQueue returns the rows matching every token of the query, in a useful
  * order. An empty query returns the whole queue untouched, so opening the

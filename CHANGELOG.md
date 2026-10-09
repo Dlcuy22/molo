@@ -28,6 +28,11 @@ and this project adheres to
   `OpenReader`/`OpenReaderNamed`, so a stream is dispatched to a codec by
   content sniffing just like a path; the Ogg Opus and WebM/Opus readers can play
   a URL today. The default provider list is now `Network` then `local`.
+- Adding a whole YouTube Music playlist or album to the queue from the desktop
+  app's Ctrl+F palette. A playlist or album search hit, or a share URL pasted
+  into the field, is resolved to its tracks and appended in catalogue order; the
+  queue keeps only `ytm:<videoId>` references, with the catalogue metadata
+  cached so each row shows its title and art before it plays.
 - MPRIS2 support in the desktop app: molo now appears in the Linux desktop's
   media controls (panel widget, lock screen, media keys, Bluetooth headset
   buttons) and can be driven from them. It is a hand-rolled server on

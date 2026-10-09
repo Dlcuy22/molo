@@ -67,6 +67,13 @@ const (
 	// so without a bound a long session would grow it with every query.
 	ytmIndexMax = 512
 
+	// ytmPlaylistMaxTracks and ytmPlaylistMaxPages bound one playlist add. A
+	// long playlist is still bounded work: the walk stops at the track cap, or
+	// at the page cap if the catalogue keeps handing back continuations. The
+	// bounds are stated rather than silent so a truncated add is a known limit.
+	ytmPlaylistMaxTracks = 1000
+	ytmPlaylistMaxPages  = 40
+
 	// ytmSeamlessSwap is the one switch for the experimental fast-start path.
 	// The web UI is the consumer and opts in here, at initialization: this value
 	// is read by both the provider, which then offers the Upgrade, and the
@@ -267,13 +274,14 @@ type ytmProvider struct {
 	// Open keeps the whole-track fetch exactly as before.
 	seamless bool
 
-	// resolve, search and loadArtist are the network calls, indirected so a test
-	// can drive the provider and the service without touching YouTube. In
-	// production they are the client's own methods; the client itself is not
-	// kept, because nothing else on it is used.
-	resolve    func(context.Context, string) (*ytm.Streams, error)
-	search     func(context.Context, string, string, bool) (*ytm.SearchResults, error)
-	loadArtist func(context.Context, string) (*ytm.Artist, error)
+	// resolve, search, loadArtist and loadPlaylist are the network calls,
+	// indirected so a test can drive the provider and the service without
+	// touching YouTube. In production they are the client's own methods; the
+	// client itself is not kept, because nothing else on it is used.
+	resolve      func(context.Context, string) (*ytm.Streams, error)
+	search       func(context.Context, string, string, bool) (*ytm.SearchResults, error)
+	loadArtist   func(context.Context, string) (*ytm.Artist, error)
+	loadPlaylist func(context.Context, string, *ytm.BuiltInContinuation) (*ytm.Playlist, error)
 }
 
 func newYTMProvider(index *ytmIndex, seamless bool, log *slog.Logger) *ytmProvider {
@@ -292,6 +300,9 @@ func newYTMProvider(index *ytmIndex, seamless bool, log *slog.Logger) *ytmProvid
 		resolve:    client.GetStream,
 		search:     client.Search,
 		loadArtist: client.LoadArtist,
+		loadPlaylist: func(ctx context.Context, id string, cont *ytm.BuiltInContinuation) (*ytm.Playlist, error) {
+			return client.LoadPlaylist(ctx, id, cont, nil, nil, false)
+		},
 	}
 }
 
@@ -433,6 +444,43 @@ func (p *ytmProvider) Open(ctx context.Context, ref string) (provider.Source, er
 	}
 
 	return src, nil
+}
+
+// playlist walks a playlist's pages, flattening each into the rows the service
+// caches and queues. The walk is bounded so a runaway continuation cannot spin:
+// it stops at the track cap, or at the page cap if the catalogue keeps handing
+// back tokens. A nil continuation ends it, so a single-page playlist costs one
+// request.
+func (p *ytmProvider) playlist(ctx context.Context, id string) ([]YTMResult, error) {
+	var out []YTMResult
+	seen := make(map[string]struct{})
+	var cont *ytm.BuiltInContinuation
+
+	for page := 0; page < ytmPlaylistMaxPages; page++ {
+		pl, err := p.loadPlaylist(ctx, id, cont)
+		if err != nil {
+			return nil, err
+		}
+		if pl == nil {
+			break
+		}
+		for _, r := range ytmPlaylistResults(pl) {
+			if _, ok := seen[r.VideoID]; ok {
+				continue
+			}
+			seen[r.VideoID] = struct{}{}
+			out = append(out, r)
+			if len(out) >= ytmPlaylistMaxTracks {
+				return out, nil
+			}
+		}
+		if pl.Continuation == nil {
+			break
+		}
+		cont = pl.Continuation
+	}
+
+	return out, nil
 }
 
 // trackFor merges the catalogue metadata already cached for a reference with
@@ -828,6 +876,69 @@ func ytmResults(res *ytm.SearchResults) []YTMResult {
 	out = append(out, videos...)
 
 	return append(out, others...)
+}
+
+// ytmPlaylistID extracts a playlist id from the input a listener gives: the
+// share URL they copy, a "VL"-prefixed browse id, or a bare id. It returns ""
+// when nothing usable is there.
+func ytmPlaylistID(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	// A share URL carries the id as its list= parameter; the query string is
+	// the only place the id is guaranteed to be, so it is read first.
+	if i := strings.Index(input, "list="); i != -1 {
+		input = input[i+len("list="):]
+		if j := strings.IndexByte(input, '&'); j != -1 {
+			input = input[:j]
+		}
+	}
+	// CleanPlaylistID strips the "MPSP" prefix the editor uses; the browse
+	// call adds "VL" itself, so a bare id is exactly what LoadPlaylist wants.
+	return ytm.CleanPlaylistID(strings.TrimSpace(input))
+}
+
+// ytmPlaylistResults flattens a loaded playlist's tracks into the same rows a
+// search yields, so the catalogue index and the queue share one shape. Order is
+// the catalogue's, and a repeated id is kept once: a playlist can list a track
+// twice, but the queue should not.
+func ytmPlaylistResults(p *ytm.Playlist) []YTMResult {
+	if p == nil {
+		return nil
+	}
+	out := make([]YTMResult, 0, len(p.Items))
+	seen := make(map[string]struct{}, len(p.Items))
+	for _, it := range p.Items {
+		id := ytm.CleanSongID(it.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		album := ytmAlbum(it.Album)
+		if album == "" && p.Type == ytm.PlaylistTypeAlbum {
+			// An album's tracks often carry no per-track album credit; the
+			// playlist name is the album, which is a fact, not a guess.
+			album = strings.TrimSpace(p.Name)
+		}
+		out = append(out, YTMResult{
+			VideoID:    id,
+			Title:      it.Name,
+			Artist:     ytmArtists(it.Artists),
+			Album:      album,
+			DurationMs: it.DurationMs,
+			Kind:       "Song",
+			Explicit:   it.IsExplicit,
+			Thumbnail:  ytmThumb(it.Thumbnail),
+			ArtistID:   ytmFirstArtistID(it.Artists),
+			Playable:   true,
+		})
+	}
+
+	return out
 }
 
 // ytmArtists joins the credited artists, dropping blanks so a partly populated

@@ -31,6 +31,22 @@ export function AddEffect(kind: string, impl: string): $CancellablePromise<strin
 }
 
 /**
+ * AddYTMPlaylist resolves a YouTube Music playlist or album and adds its tracks
+ * to the queue in catalogue order. The input is the share URL a listener copies
+ * ("...?list=PL..."), a browse id, or a bare id. The catalogue metadata of every
+ * track is cached as it is resolved, so a queue row shows its real title and art
+ * before anything is played; the queue itself holds only "ytm:<videoId>"
+ * references, which is all the engine ever sees.
+ * 
+ * When the queue is empty the playlist starts playing; an existing queue is
+ * appended to, leaving the current track alone, which is the same rule Add files
+ * and Add folder follow.
+ */
+export function AddYTMPlaylist(input: string): $CancellablePromise<void> {
+    return $Call.ByID(3532982679, input);
+}
+
+/**
  * AppendYTM adds a YouTube Music track to the end of the queue without starting
  * it, which is what Shift+Enter on a search result means. A live track is left
  * alone; an empty queue simply gains its first entry.
@@ -221,9 +237,10 @@ export function PreviewConfig(): $CancellablePromise<$models.PreviewConfig> {
  * current preview. It pauses the main track once for the session and resumes it
  * when the session ends, so arrow navigation never flaps the main track.
  * 
- * A remote reference is refused: the preview player is built without providers,
- * so it could not open one, and the failure would leave the main track paused
- * for a session that never produced a sound.
+ * A YouTube Music reference is refused: the preview player is built with the
+ * built-in sources only (direct URLs and local files), not the YTM provider, so
+ * it could not open one and the failure would leave the main track paused for a
+ * session that never produced a sound.
  */
 export function PreviewStart(path: string): $CancellablePromise<void> {
     return $Call.ByID(3793691400, path);

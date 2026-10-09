@@ -172,7 +172,7 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	loadScripts()
 
 	p, err := molo.New(
-		molo.WithProviders(s.ytmProv, provider.LocalAudio{}),
+		molo.WithProviders(s.ytmProv, provider.NewNetworkProvider(nil), provider.LocalAudio{}),
 		// The same switch the provider was built with: the engine consumes the
 		// Upgrade only when this is set, and the provider offers it only when
 		// it is, so the two cannot drift.
@@ -802,6 +802,56 @@ func (s *PlayerService) AppendYTM(videoID string) error {
 	})
 }
 
+// AddYTMPlaylist resolves a YouTube Music playlist or album and adds its tracks
+// to the queue in catalogue order. The input is the share URL a listener copies
+// ("...?list=PL..."), a browse id, or a bare id. The catalogue metadata of every
+// track is cached as it is resolved, so a queue row shows its real title and art
+// before anything is played; the queue itself holds only "ytm:<videoId>"
+// references, which is all the engine ever sees.
+//
+// When the queue is empty the playlist starts playing; an existing queue is
+// appended to, leaving the current track alone, which is the same rule Add files
+// and Add folder follow.
+func (s *PlayerService) AddYTMPlaylist(input string) error {
+	id := ytmPlaylistID(input)
+	if id == "" {
+		return fmt.Errorf("ytm: no playlist id in %q", input)
+	}
+
+	results, err := s.ytmProv.playlist(s.ctx, id)
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		return fmt.Errorf("ytm: playlist has no playable tracks")
+	}
+
+	refs := make([]string, 0, len(results))
+	for _, r := range results {
+		// Cache the catalogue copy under the same reference the queue will
+		// carry, so queueRows describes each row without a second lookup.
+		s.ytm.put(ytmTrack{
+			ID:           r.VideoID,
+			Title:        r.Title,
+			Artist:       r.Artist,
+			Album:        r.Album,
+			DurationMs:   r.DurationMs,
+			ThumbnailURL: r.Thumbnail,
+			ArtistID:     r.ArtistID,
+		})
+		refs = append(refs, ytmRef(r.VideoID))
+	}
+
+	return s.command(func() error {
+		existing := s.player.Queue()
+		if len(existing) == 0 {
+			return s.player.PlayQueue(refs)
+		}
+
+		return s.player.InsertQueue(len(existing), refs)
+	})
+}
+
 // Options is the static chooser data the UI reads once, because neither list
 // changes at runtime.
 func (s *PlayerService) Options() Options {
@@ -884,9 +934,10 @@ func (s *PlayerService) PlayIndex(index int) error {
 // current preview. It pauses the main track once for the session and resumes it
 // when the session ends, so arrow navigation never flaps the main track.
 //
-// A remote reference is refused: the preview player is built without providers,
-// so it could not open one, and the failure would leave the main track paused
-// for a session that never produced a sound.
+// A YouTube Music reference is refused: the preview player is built with the
+// built-in sources only (direct URLs and local files), not the YTM provider, so
+// it could not open one and the failure would leave the main track paused for a
+// session that never produced a sound.
 func (s *PlayerService) PreviewStart(path string) error {
 	if s.preview == nil {
 		return fmt.Errorf("preview is not available")
