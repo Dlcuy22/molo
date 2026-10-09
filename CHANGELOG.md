@@ -18,6 +18,10 @@ and this project adheres to
   application name, matching the reference client. The Discord IPC client is
   now part of the web UI, so the activity can carry the name field the wire
   format accepts; the `github.com/axrona/go-discordrpc` dependency is dropped.
+- On Windows the process runs at above-normal priority with a 1 ms timer
+  resolution, so the WASAPI render thread wakes on time under heavy CPU load.
+  Linux and macOS are unchanged: PulseAudio and CoreAudio already schedule
+  their own render threads, so the gap this closes is Windows-specific.
 
 ### Added
 

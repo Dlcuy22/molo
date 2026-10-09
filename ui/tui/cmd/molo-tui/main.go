@@ -24,10 +24,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/dlcuy22/molo"
 	"github.com/dlcuy22/molo/analysis"
+	"github.com/dlcuy22/molo/internal/priority"
 	"github.com/dlcuy22/molo/ui/tui"
 )
 
 func main() {
+	// Raise scheduling priority before the engine builds its audio thread, so
+	// the thread inherits it. The report names the platform and the scheduling
+	// state; off Windows it is a no-op, and a refusal there is logged and
+	// playback continues, just without the extra margin.
+	rep, err := priority.Raise()
+	for _, line := range rep.Lines() {
+		fmt.Fprintln(os.Stderr, line)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "molo-tui:", err)
+	}
+
 	os.Exit(run(os.Args[1:]))
 }
 

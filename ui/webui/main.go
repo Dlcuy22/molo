@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/dlcuy22/molo/internal/priority"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -35,6 +36,18 @@ func main() {
 	consoleAttached = attachConsole()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	// Raise scheduling priority before the engine builds its audio thread, so
+	// the thread inherits it. The report names the platform and the scheduling
+	// state; off Windows it is a no-op, and a refusal there is logged and
+	// playback continues, just without the extra margin.
+	rep, err := priority.Raise()
+	for _, line := range rep.Lines() {
+		slog.Info(line)
+	}
+	if err != nil {
+		slog.Warn("priority", "error", err)
+	}
 
 	// Registering the payload types is what gives the frontend a typed event
 	// envelope; an unregistered name still travels, but untyped.

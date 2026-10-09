@@ -14,10 +14,8 @@ require (
 	github.com/tphakala/go-wav v1.1.0
 	github.com/tphakala/simd v1.9.0
 	github.com/yuin/gopher-lua v1.1.2
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.44.0
 )
 
-require (
-	github.com/jfreymuth/pulse v0.1.3 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-)
+require github.com/jfreymuth/pulse v0.1.3 // indirect

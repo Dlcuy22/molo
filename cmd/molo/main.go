@@ -8,6 +8,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	"github.com/dlcuy22/molo"
 	"github.com/dlcuy22/molo/core"
 	"github.com/dlcuy22/molo/decode"
+	"github.com/dlcuy22/molo/internal/priority"
 	"golang.org/x/term"
 )
 
@@ -24,6 +26,18 @@ import (
 const displayInterval = 100 * time.Millisecond
 
 func main() {
+	// Raise scheduling priority before the engine builds its audio thread, so
+	// the thread inherits it. The report names the platform and the scheduling
+	// state; off Windows it is a no-op, and a refusal there is logged and
+	// playback continues, just without the extra margin.
+	rep, err := priority.Raise()
+	for _, line := range rep.Lines() {
+		fmt.Fprintln(os.Stderr, line)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "molo:", err)
+	}
+
 	os.Exit(run(os.Args[1:], realEnv()))
 }
 
