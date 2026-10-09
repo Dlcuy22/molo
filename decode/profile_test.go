@@ -21,14 +21,9 @@ func (f *profiledFactory) Weight() int          { return f.weight }
 // TestProfileOfOpusFactories pins every Opus codec's UI labels and weights, so a
 // change to any of them is a deliberate edit rather than a silent default flip.
 func TestProfileOfOpusFactories(t *testing.T) {
-	friendly, weight := ProfileOf(NewPionOpusFactory())
+	friendly, weight := ProfileOf(NewOpusFactory())
 	if friendly != "Portable" || weight != 90 {
-		t.Fatalf("pion profile = %q/%d, want Portable/90", friendly, weight)
-	}
-
-	friendly, weight = ProfileOf(NewPionOpusExactFactory())
-	if friendly != "Bit-perfect" || weight != 85 {
-		t.Fatalf("pion exact profile = %q/%d, want Bit-perfect/85", friendly, weight)
+		t.Fatalf("opus profile = %q/%d, want Portable/90", friendly, weight)
 	}
 
 	friendly, weight = ProfileOf(NewLibopusfileFactory())
@@ -94,17 +89,17 @@ func TestCodecsSortedByWeightThenRegistration(t *testing.T) {
 }
 
 // TestAutomaticSelectionPrefersHigherWeight covers both registration orders.
-// The second case is the load-bearing one: pion is registered first, so the
+// The second case is the load-bearing one: opus is registered first, so the
 // old last-registration rule would pick libopusfile, and only weight makes
-// pion win. Registering the native factory first matches the Default registry,
+// opus win. Registering the native factory first matches the Default registry,
 // where its init runs before the pure-Go one.
 func TestAutomaticSelectionPrefersHigherWeight(t *testing.T) {
 	cases := []struct {
 		name  string
 		order []Factory
 	}{
-		{"libopusfile first", []Factory{NewLibopusfileFactory(), NewPionOpusFactory()}},
-		{"pion first", []Factory{NewPionOpusFactory(), NewLibopusfileFactory()}},
+		{"libopusfile first", []Factory{NewLibopusfileFactory(), NewOpusFactory()}},
+		{"opus first", []Factory{NewOpusFactory(), NewLibopusfileFactory()}},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -119,8 +114,8 @@ func TestAutomaticSelectionPrefersHigherWeight(t *testing.T) {
 			}
 			defer d.Close()
 
-			if _, ok := d.(*pionOpusDecoder); !ok {
-				t.Fatalf("Open produced %T, want the higher-weight *pionOpusDecoder", d)
+			if _, ok := d.(*opusDecoder); !ok {
+				t.Fatalf("Open produced %T, want the higher-weight *opusDecoder", d)
 			}
 		})
 	}
@@ -191,12 +186,12 @@ func TestAutomaticSelectionProfileBeatsNoProfile(t *testing.T) {
 }
 
 // TestOpenNamedForcesLowerWeightCodec is the whole point of the named path:
-// pion outweighs libopusfile, yet naming the native codec must still open it.
+// opus outweighs libopusfile, yet naming the native codec must still open it.
 func TestOpenNamedForcesLowerWeightCodec(t *testing.T) {
 	requireLibopusfile(t)
 
 	r := NewRegistry()
-	r.Register(NewPionOpusFactory())
+	r.Register(NewOpusFactory())
 	r.Register(NewLibopusfileFactory())
 
 	d, err := r.OpenNamed("opus-libopusfile", fixturePath(t, "stereo_2s.opus"))
@@ -213,7 +208,7 @@ func TestOpenNamedForcesLowerWeightCodec(t *testing.T) {
 func TestOpenNamedEmptyMatchesOpen(t *testing.T) {
 	r := NewRegistry()
 	r.Register(NewLibopusfileFactory())
-	r.Register(NewPionOpusFactory())
+	r.Register(NewOpusFactory())
 
 	auto, err := r.Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
@@ -227,10 +222,10 @@ func TestOpenNamedEmptyMatchesOpen(t *testing.T) {
 	}
 	defer named.Close()
 
-	_, autoPion := auto.(*pionOpusDecoder)
-	_, namedPion := named.(*pionOpusDecoder)
-	if !autoPion || !namedPion {
-		t.Fatalf("types = %T and %T, want both *pionOpusDecoder", auto, named)
+	_, autoOpus := auto.(*opusDecoder)
+	_, namedOpus := named.(*opusDecoder)
+	if !autoOpus || !namedOpus {
+		t.Fatalf("types = %T and %T, want both *opusDecoder", auto, named)
 	}
 	if auto.Info() != named.Info() {
 		t.Fatalf("Info = %+v and %+v, want identical", auto.Info(), named.Info())
@@ -242,14 +237,14 @@ func TestOpenNamedEmptyMatchesOpen(t *testing.T) {
 // open the file.
 func TestOpenNamedUnknownCodecFailsBeforeFileAccess(t *testing.T) {
 	r := NewRegistry()
-	r.Register(NewPionOpusFactory())
+	r.Register(NewOpusFactory())
 	r.Register(NewLibopusfileFactory())
 
 	_, err := r.OpenNamed("nope", "does-not-exist.opus")
 	if !errors.Is(err, ErrUnknownCodec) {
 		t.Fatalf("OpenNamed error = %v, want ErrUnknownCodec", err)
 	}
-	for _, want := range []string{"opus-pion", "opus-libopusfile"} {
+	for _, want := range []string{"opus", "opus-libopusfile"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not name available codec %q", err, want)
 		}

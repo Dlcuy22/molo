@@ -4,7 +4,7 @@
 //   Read Opus audio packets out of a WebM/Matroska bitstream (RFC 8794 framing,
 //   Matroska codec mapping for A_OPUS) without decoding, and reposition to a
 //   granule position through the file's Cues index. It is the WebM counterpart
-//   of oggopus.go: the same opusPacketSource surface, so pionOpusDecoder is
+//   of oggopus.go: the same opusPacketSource surface, so opusDecoder is
 //   reused unchanged and only the container differs.
 //
 // Key Components:
@@ -577,7 +577,7 @@ func (w *webMOpusReader) buildIndex() error {
 		w.total = total
 	}
 	if w.seekPreRoll == 0 {
-		w.seekPreRoll = pionWarmupFast
+		w.seekPreRoll = opusWarmup
 	}
 	if err := w.resetToBlock(w.clusters[0]); err != nil {
 		return err
@@ -1824,17 +1824,17 @@ func (f *WebMOpusFactory) Open(path string) (Decoder, error) {
 	}
 	// newWebMOpusDecoder closes fh through detachSource when the header parse
 	// fails, so a failure here must not close it a second time.
-	return newWebMOpusDecoder(fh, fh, pionWarmupFast, true)
+	return newWebMOpusDecoder(fh, fh, true)
 }
 
 // OpenReader decodes from a stream. A reader that can seek keeps native seek;
 // one that cannot plays forward but refuses to reposition.
 func (f *WebMOpusFactory) OpenReader(r io.Reader) (Decoder, error) {
 	if rs, ok := r.(io.ReadSeeker); ok {
-		return newWebMOpusDecoder(rs, nil, pionWarmupFast, true)
+		return newWebMOpusDecoder(rs, nil, true)
 	}
 
-	return newWebMOpusDecoder(r, nil, pionWarmupFast, false)
+	return newWebMOpusDecoder(r, nil, false)
 }
 
 // Probe reads the Duration element in Info, which sits near the front of a WebM
@@ -1844,11 +1844,11 @@ func (f *WebMOpusFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo
 	return probeWebMOpus(path, opts.Duration)
 }
 
-// newWebMOpusDecoder builds a pionOpusDecoder over the WebM container. It
-// reuses the decoder wholesale: only the container function and the parser
-// label differ from the Ogg path.
-func newWebMOpusDecoder(r io.Reader, closer io.Closer, warmup int64, seekable bool) (*pionOpusDecoder, error) {
-	d, err := newPionOpusDecoderWith(openWebMOpusPackets, pionStreamSource{r: r, closer: closer, seekable: seekable}, warmup, "molo/decode (webmopus)")
+// newWebMOpusDecoder builds an opusDecoder over the WebM container. It reuses
+// the decoder wholesale: only the container function and the parser label
+// differ from the Ogg path.
+func newWebMOpusDecoder(r io.Reader, closer io.Closer, seekable bool) (*opusDecoder, error) {
+	d, err := newOpusDecoderWith(openWebMOpusPackets, opusStreamSource{r: r, closer: closer, seekable: seekable}, "molo/decode (webmopus)")
 	if err != nil {
 		return nil, err
 	}
@@ -1867,17 +1867,17 @@ func openWebMOpusPackets(r io.Reader) (opusPacketSource, error) {
 	return newForwardWebMOpus(r)
 }
 
-// pionStreamSource is a pionSource over an already-open reader, used when the
-// factory opened the file itself rather than through pionPathSource.
-type pionStreamSource struct {
+// opusStreamSource is an opusSource over an already-open reader, used when the
+// factory opened the file itself rather than through opusPathSource.
+type opusStreamSource struct {
 	r        io.Reader
 	closer   io.Closer
 	seekable bool
 }
 
-func (s pionStreamSource) open() (io.Reader, io.Closer, error) { return s.r, s.closer, nil }
+func (s opusStreamSource) open() (io.Reader, io.Closer, error) { return s.r, s.closer, nil }
 
-func (s pionStreamSource) rewindable() bool { return s.seekable }
+func (s opusStreamSource) rewindable() bool { return s.seekable }
 
 // --- probe ---------------------------------------------------------
 

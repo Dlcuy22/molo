@@ -126,9 +126,9 @@ func handleKey(p molo.Player, k key) action {
 		_ = p.Prev()
 	case keySeekForward:
 		target := snap.Position + seekStep
-		// Clamp to a known duration: the pion decoder treats a target past
-		// the end as a failure, and a user holding 'l' near the end of a track
-		// should not be able to end playback with a seek key.
+		// Clamp to a known duration: the decoder treats a target past the end
+		// as a failure, and a user holding 'l' near the end of a track should
+		// not be able to end playback with a seek key.
 		if snap.Duration > 0 && target > snap.Duration {
 			target = snap.Duration
 		}

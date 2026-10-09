@@ -33,7 +33,7 @@ func TestSeekRefusedByForwardOnlyDecoderFallsBack(t *testing.T) {
 	}
 
 	open := func(<-chan struct{}) (decode.Decoder, error) {
-		return decode.NewPionOpusFactory().OpenReader(readerOnly{bytes.NewReader(data)})
+		return decode.NewOpusFactory().OpenReader(readerOnly{bytes.NewReader(data)})
 	}
 	s := newTestStreamer(t, open, Config{ForwardSeekFallback: true})
 	startStreamer(t, s)
@@ -69,7 +69,7 @@ func TestSeekRefusedWithoutFallbackSurfaces(t *testing.T) {
 	}
 
 	open := func(<-chan struct{}) (decode.Decoder, error) {
-		return decode.NewPionOpusFactory().OpenReader(readerOnly{bytes.NewReader(data)})
+		return decode.NewOpusFactory().OpenReader(readerOnly{bytes.NewReader(data)})
 	}
 	s := newTestStreamer(t, open, Config{})
 	startStreamer(t, s)

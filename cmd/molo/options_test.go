@@ -116,12 +116,12 @@ func TestParseArgsRejectsUnknownProbeMode(t *testing.T) {
 }
 
 func TestParseArgsDecoder(t *testing.T) {
-	opts, err := parseArgs([]string{"-decoder", "opus-pion", "a.opus"})
+	opts, err := parseArgs([]string{"-decoder", "opus", "a.opus"})
 	if err != nil {
 		t.Fatalf("parseArgs: %v", err)
 	}
-	if opts.decoder != "opus-pion" {
-		t.Fatalf("decoder = %q, want opus-pion", opts.decoder)
+	if opts.decoder != "opus" {
+		t.Fatalf("decoder = %q, want opus", opts.decoder)
 	}
 }
 

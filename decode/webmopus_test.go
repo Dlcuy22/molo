@@ -1043,8 +1043,8 @@ func TestWebMOpusFactoryContract(t *testing.T) {
 	}
 }
 
-// TestWebMOpusDescriptor pins the diagnostic labels: the codec is still
-// pion/opus, and the parser names the container actually read.
+// TestWebMOpusDescriptor pins the diagnostic labels: the codec is go-opus, and
+// the parser names the container actually read.
 func TestWebMOpusDescriptor(t *testing.T) {
 	d, err := NewWebMOpusFactory().Open(fixturePath(t, "webm_stereo_2s.webm"))
 	if err != nil {
@@ -1053,8 +1053,8 @@ func TestWebMOpusDescriptor(t *testing.T) {
 	defer d.Close()
 
 	decoder, parser := Describe(d)
-	if decoder != "pion/opus" {
-		t.Fatalf("DecoderName = %q, want pion/opus", decoder)
+	if decoder != "go-opus" {
+		t.Fatalf("DecoderName = %q, want go-opus", decoder)
 	}
 	if parser != "molo/decode (webmopus)" {
 		t.Fatalf("ParserName = %q, want molo/decode (webmopus)", parser)
@@ -1237,11 +1237,11 @@ func TestWebMOpusSeekSelectsCorrectCluster(t *testing.T) {
 // 23-cluster corpus when it is present. It is the strongest seek proof but the
 // file is not a checked-in fixture, so it skips when absent.
 //
-// It drives the decoder with a 2 s warm-up rather than the default 80 ms: on
-// this content pion's codec state needs about 2 s to converge, so the fast
-// window leaves a transient that outlives any convergence skip. With the long
-// window the result is bit-exact, which can only happen if the reader lands on
-// the right packet boundary with the right granule mapping.
+// A seek lands without the codec's inter-frame state, so the first frames after
+// the target differ from a straight decode by a bounded transient. The check is
+// that the landing is the requested frame and that the difference converges to
+// a tiny floor within 200 ms; a wrong packet boundary or granule mapping would
+// leave a residual far above that.
 func TestWebMOpusMultiClusterSeekOnRealFixture(t *testing.T) {
 	path := realWebMPath(t)
 
@@ -1255,13 +1255,14 @@ func TestWebMOpusMultiClusterSeekOnRealFixture(t *testing.T) {
 		return decodeAll(t, d)
 	}()
 
+	const convergeFrames = 9600
 	targets := []int64{48000, 30 * 48000, 120 * 48000}
 	for _, at := range targets {
 		fh, err := os.Open(path)
 		if err != nil {
 			t.Fatalf("open: %v", err)
 		}
-		d, err := newWebMOpusDecoder(fh, fh, 96000, true)
+		d, err := newWebMOpusDecoder(fh, fh, true)
 		if err != nil {
 			fh.Close()
 			t.Fatalf("decode: %v", err)
@@ -1274,8 +1275,8 @@ func TestWebMOpusMultiClusterSeekOnRealFixture(t *testing.T) {
 		d.Close()
 
 		want := full[at*2 : (at+48000)*2]
-		if !bytes.Equal(float32sToBytes(want), float32sToBytes(got)) {
-			t.Fatalf("real multi-cluster seek to %d is not bit-exact against a straight decode", at)
+		if tail := rangeMaxAbs(got, want, convergeFrames, 48000); tail > 0.001 {
+			t.Fatalf("real multi-cluster seek to %d: residual after 200 ms = %.6f, want convergence", at, tail)
 		}
 	}
 }

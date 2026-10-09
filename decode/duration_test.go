@@ -31,7 +31,7 @@ func TestProbeDurationMatchesFFprobe(t *testing.T) {
 				name   string
 				prober Prober
 			}{
-				{"pion", NewPionOpusFactory()},
+				{"opus", NewOpusFactory()},
 				{"libopusfile", NewLibopusfileFactory()},
 			} {
 				if prober.name == "libopusfile" && loadLibopusfile() != nil {
@@ -92,7 +92,7 @@ func absDuration(d time.Duration) time.Duration {
 // TestProbeDurationIsNotZero guards against a probe that reports success with
 // an obviously wrong zero length.
 func TestProbeDurationIsNotZero(t *testing.T) {
-	info, err := NewPionOpusFactory().Probe(fixturePath(t, "stereo_2s.opus"), ProbeOptions{Duration: core.DurationProbe})
+	info, err := NewOpusFactory().Probe(fixturePath(t, "stereo_2s.opus"), ProbeOptions{Duration: core.DurationProbe})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}

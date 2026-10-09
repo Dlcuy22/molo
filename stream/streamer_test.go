@@ -16,7 +16,7 @@ var canonicalFormat = core.FrameFormat{Rate: 48000, Ch: 2, Fmt: core.F32}
 func TestReadFramesMatchesStraightDecode(t *testing.T) {
 	want := decodeFixture(t, "short_stereo.opus")
 
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	startStreamer(t, s)
 
 	got := drain(t, s)
@@ -26,7 +26,7 @@ func TestReadFramesMatchesStraightDecode(t *testing.T) {
 }
 
 func TestDoneClosesAtEOS(t *testing.T) {
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	startStreamer(t, s)
 
 	waitWithin(t, 5*time.Second, "EOS", s.Done())
@@ -126,7 +126,7 @@ func TestReadFramesReturnsBufferedTailWhenDecoderFails(t *testing.T) {
 }
 
 func TestCloseIsIdempotentAndStopsReads(t *testing.T) {
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	startStreamer(t, s)
 	<-s.Done()
 
@@ -142,7 +142,7 @@ func TestCloseIsIdempotentAndStopsReads(t *testing.T) {
 }
 
 func TestCloseBeforeStartIsSafe(t *testing.T) {
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close before Start: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestStartHonoursContextCancellation(t *testing.T) {
 }
 
 func TestStartTwiceFails(t *testing.T) {
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	startStreamer(t, s)
 
 	if err := s.Start(context.Background()); err == nil {
@@ -195,7 +195,7 @@ func TestStreamerAppliesPreModulesInOrder(t *testing.T) {
 		&scaleModule{name: "first", factor: 2, log: &order},
 		&scaleModule{name: "second", factor: 3, log: &order},
 	}}
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), cfg)
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), cfg)
 	startStreamer(t, s)
 
 	got := drain(t, s)
@@ -225,7 +225,7 @@ func TestStreamerAppliesPreModulesInOrder(t *testing.T) {
 
 func TestStreamerResetsModulesOnConfigureAndSeek(t *testing.T) {
 	mod := &scaleModule{name: "stateful", factor: 1}
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "stereo_2s.opus")), Config{Modules: []core.Module{mod}})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "stereo_2s.opus")), Config{Modules: []core.Module{mod}})
 	if mod.resets != 1 {
 		t.Fatalf("Reset called %d times at construction, want 1", mod.resets)
 	}
@@ -329,7 +329,7 @@ func (dupModule) Reset() error { return nil }
 func TestPreModulesCanRemapChannelsInPlace(t *testing.T) {
 	full := decodeFixture(t, "short_stereo.opus")
 
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{
 		Modules: []core.Module{monoModule{}, dupModule{}},
 	})
 	startStreamer(t, s)
@@ -348,7 +348,7 @@ func TestPreModulesCanRemapChannelsInPlace(t *testing.T) {
 func TestStatsUnderrunOnShortNonBlockingRead(t *testing.T) {
 	// No Start: the producer has not filled the ring, so a non-blocking read is
 	// guaranteed to come up short while the stream is not at EOS.
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 
 	n, err := s.TryReadFrames(make([]float32, 4096))
 	if err != nil {
@@ -363,7 +363,7 @@ func TestStatsUnderrunOnShortNonBlockingRead(t *testing.T) {
 }
 
 func TestStatsBufferedAndDecodedAdvance(t *testing.T) {
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	startStreamer(t, s)
 
 	// Buffered, not Decoded, is what proves frames reached the ring: Decoded is
@@ -400,7 +400,7 @@ func TestTryReadFramesReturnsDataWithoutBlocking(t *testing.T) {
 }
 
 func TestPositionAdvancesWithConsumption(t *testing.T) {
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 	startStreamer(t, s)
 
 	if got := s.Position(); got != 0 {

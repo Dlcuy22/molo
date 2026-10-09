@@ -27,22 +27,11 @@ func fixturePath(t *testing.T, name string) string {
 	return path
 }
 
-// pionOpener reopens the pure-Go decoder, which is what both the native and the
-// fallback seek paths need. It uses the fast default, whose 80 ms warm-up makes
-// a seek bounded but not byte-exact against a straight decode.
-func pionOpener(path string) Opener {
+// opusOpener reopens the pure-Go decoder, which is what both the native and the
+// fallback seek paths need.
+func opusOpener(path string) Opener {
 	return func(<-chan struct{}) (decode.Decoder, error) {
-		return decode.NewPionOpusFactory().Open(path)
-	}
-}
-
-// pionExactOpener reopens the bit-perfect pure-Go variant. Tests that assert a
-// native seek reproduces a straight decode byte for byte use this one, because
-// that byte identity is exactly what the exact warm-up buys; the fast default
-// has a bounded transient instead.
-func pionExactOpener(path string) Opener {
-	return func(<-chan struct{}) (decode.Decoder, error) {
-		return decode.NewPionOpusExactFactory().Open(path)
+		return decode.NewOpusFactory().Open(path)
 	}
 }
 
@@ -53,12 +42,7 @@ type forwardOnly struct {
 }
 
 func forwardOnlyOpener(path string) Opener {
-	return wrapForwardOnly(decode.NewPionOpusFactory().Open, path)
-}
-
-// forwardOnlyExactOpener is the fallback half of the byte-exact seek tests.
-func forwardOnlyExactOpener(path string) Opener {
-	return wrapForwardOnly(decode.NewPionOpusExactFactory().Open, path)
+	return wrapForwardOnly(decode.NewOpusFactory().Open, path)
 }
 
 func wrapForwardOnly(open func(string) (decode.Decoder, error), path string) Opener {
@@ -110,7 +94,7 @@ func drain(t *testing.T, s *Streamer) []float32 {
 func decodeFixture(t *testing.T, name string) []float32 {
 	t.Helper()
 
-	d, err := decode.NewPionOpusFactory().Open(fixturePath(t, name))
+	d, err := decode.NewOpusFactory().Open(fixturePath(t, name))
 	if err != nil {
 		t.Fatalf("open fixture: %v", err)
 	}

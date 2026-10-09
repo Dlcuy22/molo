@@ -118,8 +118,7 @@ so no Lua runs on the audio thread.
 
 | Name | Label | Weight | Extensions | Notes |
 |---|---|---|---|---|
-| `opus-pion` | Portable | 90 | `.opus`, `.ogg` | Pure Go, 80 ms seek warm-up |
-| `opus-pion-exact` | Bit-perfect | 85 | `.opus`, `.ogg` | 800 ms warm-up, byte-identical after seek |
+| `opus` | Portable | 90 | `.opus`, `.ogg` | Pure Go (go-opus), 80 ms seek warm-up |
 | `opus-libopusfile` | Fastest | 80 | `.opus`, `.ogg` | Via purego, needs `libopusfile.so.0` |
 | `flac` | Lossless | 90 | `.flac` | Bit-exact, normalized to 48 kHz |
 | `wav` | Wav | 90 | `.wav` | Uncompressed |

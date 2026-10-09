@@ -105,7 +105,7 @@ func TestInvalidWatermarksAreRejected(t *testing.T) {
 func TestConcurrentProducerConsumerIsConsistent(t *testing.T) {
 	want := decodeFixture(t, "stereo_2s.opus")
 
-	s := newTestStreamer(t, pionOpener(fixturePath(t, "stereo_2s.opus")), Config{})
+	s := newTestStreamer(t, opusOpener(fixturePath(t, "stereo_2s.opus")), Config{})
 	startStreamer(t, s)
 
 	type result struct {
@@ -147,7 +147,7 @@ func TestConcurrentProducerConsumerIsConsistent(t *testing.T) {
 func TestNoGoroutineLeakAcrossStreamerLives(t *testing.T) {
 	base := runtime.NumGoroutine()
 	for i := 0; i < 5; i++ {
-		s, err := New(pionOpener(fixturePath(t, "short_stereo.opus")), Config{})
+		s, err := New(opusOpener(fixturePath(t, "short_stereo.opus")), Config{})
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}

@@ -40,12 +40,12 @@ func errorsIsEOF(err error) bool {
 	return errors.Is(err, io.EOF)
 }
 
-// TestPionOpenReportsTotalFromGranuleIndex pins the decision to report the real
+// TestOpusOpenReportsTotalFromGranuleIndex pins the decision to report the real
 // total now that the page index is built at open. The index walk costs about a
 // millisecond on the 139 s reference file, which the decoder already paid to
 // enable seeking, so the total is free rather than an extra pass.
-func TestPionOpenReportsTotalFromGranuleIndex(t *testing.T) {
-	d, err := NewPionOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
+func TestOpusOpenReportsTotalFromGranuleIndex(t *testing.T) {
+	d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPionOpenReportsTotalFromGranuleIndex(t *testing.T) {
 	}
 }
 
-func TestPionDecodeFrameCountsForAllFixtures(t *testing.T) {
+func TestOpusDecodeFrameCountsForAllFixtures(t *testing.T) {
 	tests := []struct {
 		fixture    string
 		wantFrames int64
@@ -75,7 +75,7 @@ func TestPionDecodeFrameCountsForAllFixtures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
-			d, err := NewPionOpusFactory().Open(fixturePath(t, tt.fixture))
+			d, err := NewOpusFactory().Open(fixturePath(t, tt.fixture))
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -92,8 +92,8 @@ func TestPionDecodeFrameCountsForAllFixtures(t *testing.T) {
 	}
 }
 
-func TestPionDecodeIsNotSilentOrClipped(t *testing.T) {
-	d, err := NewPionOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
+func TestOpusDecodeIsNotSilentOrClipped(t *testing.T) {
+	d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestPionDecodeIsNotSilentOrClipped(t *testing.T) {
 	}
 }
 
-func TestPionDecodeIsDeterministicBytes(t *testing.T) {
+func TestOpusDecodeIsDeterministicBytes(t *testing.T) {
 	first := decodeFixture(t, "stereo_2s.opus")
 	second := decodeFixture(t, "stereo_2s.opus")
 	if !bytes.Equal(float32sToBytes(first), float32sToBytes(second)) {
@@ -126,10 +126,10 @@ func TestPionDecodeIsDeterministicBytes(t *testing.T) {
 	}
 }
 
-func TestPionStereoAndMonoShareLayout(t *testing.T) {
+func TestOpusStereoAndMonoShareLayout(t *testing.T) {
 	// The engine currency is always 48k/2ch; a mono source must be duplicated
 	// into both channels rather than dropped or interleaved wrongly.
-	factory := NewPionOpusFactory()
+	factory := NewOpusFactory()
 	d, err := factory.Open(fixturePath(t, "mono_1s.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -147,7 +147,7 @@ func TestPionStereoAndMonoShareLayout(t *testing.T) {
 	}
 }
 
-func TestPionOpenReaderMatchesPath(t *testing.T) {
+func TestOpusOpenReaderMatchesPath(t *testing.T) {
 	fromPath := decodeFixture(t, "stereo_2s.opus")
 
 	f, err := os.Open(fixturePath(t, "stereo_2s.opus"))
@@ -156,7 +156,7 @@ func TestPionOpenReaderMatchesPath(t *testing.T) {
 	}
 	defer f.Close()
 
-	d, err := NewPionOpusFactory().OpenReader(f)
+	d, err := NewOpusFactory().OpenReader(f)
 	if err != nil {
 		t.Fatalf("OpenReader: %v", err)
 	}
@@ -173,11 +173,11 @@ type oneShotReader struct{ r io.Reader }
 
 func (o oneShotReader) Read(p []byte) (int, error) { return o.r.Read(p) }
 
-// TestPionOpenReaderAcceptsNonSeekable proves a stream without io.Seeker still
+// TestOpusOpenReaderAcceptsNonSeekable proves a stream without io.Seeker still
 // plays forward, and that it decodes to exactly the same PCM as the seekable
 // path. The forward-only reader is a second container implementation, so byte
 // equality with the indexed reader is the check that it parses packets the same.
-func TestPionOpenReaderAcceptsNonSeekable(t *testing.T) {
+func TestOpusOpenReaderAcceptsNonSeekable(t *testing.T) {
 	fromPath := decodeFixture(t, "short_stereo.opus")
 
 	f, err := os.Open(fixturePath(t, "short_stereo.opus"))
@@ -186,7 +186,7 @@ func TestPionOpenReaderAcceptsNonSeekable(t *testing.T) {
 	}
 	defer f.Close()
 
-	d, err := NewPionOpusFactory().OpenReader(oneShotReader{f})
+	d, err := NewOpusFactory().OpenReader(oneShotReader{f})
 	if err != nil {
 		t.Fatalf("OpenReader on a non-seekable stream: %v", err)
 	}
@@ -204,14 +204,14 @@ func TestPionOpenReaderAcceptsNonSeekable(t *testing.T) {
 	}
 }
 
-func TestPionSeekOnNonSeekableReaderFails(t *testing.T) {
+func TestOpusSeekOnNonSeekableReaderFails(t *testing.T) {
 	f, err := os.Open(fixturePath(t, "short_stereo.opus"))
 	if err != nil {
 		t.Fatalf("open fixture: %v", err)
 	}
 	defer f.Close()
 
-	d, err := NewPionOpusFactory().OpenReader(oneShotReader{f})
+	d, err := NewOpusFactory().OpenReader(oneShotReader{f})
 	if err != nil {
 		t.Fatalf("OpenReader: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestForwardOggOpusMatchesSeekableOnFixtures(t *testing.T) {
 			}
 			defer f.Close()
 
-			d, err := NewPionOpusFactory().OpenReader(oneShotReader{f})
+			d, err := NewOpusFactory().OpenReader(oneShotReader{f})
 			if err != nil {
 				t.Fatalf("OpenReader: %v", err)
 			}
@@ -361,73 +361,6 @@ func TestForwardOggOpusReassemblesContinuedPacket(t *testing.T) {
 	}
 }
 
-// TestPionSeekMatchesStraightDecodeBytes is the load-bearing seek proof: after a
-// seek the decoder must emit exactly the PCM a straight decode produced from
-// that frame, byte for byte. A granule seek starts mid-stream, so this would
-// catch an off-by-pre-skip conversion, a missed pre-roll discard, or a stale
-// position that only showed up as a small phase shift. Only the exact variant
-// makes this guarantee; the fast default is bounded but not bit-exact, which
-// TestPionFastSeekTransientIsBoundedAndConfined pins instead.
-func TestPionSeekMatchesStraightDecodeBytes(t *testing.T) {
-	factory := NewPionOpusExactFactory()
-	full := decodeFixture(t, "stereo_2s.opus")
-
-	targets := []int64{0, 1, 1000, 12345, 30000, 48000, 90000, 96000}
-	for _, at := range targets {
-		d, err := factory.Open(fixturePath(t, "stereo_2s.opus"))
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		seeker, ok := d.(Seeker)
-		if !ok {
-			t.Fatal("pion decoder does not implement Seeker")
-		}
-		if err := seeker.SeekFrame(at); err != nil {
-			d.Close()
-			t.Fatalf("SeekFrame(%d): %v", at, err)
-		}
-
-		// A window that stays inside the straight decode, long enough to span
-		// the pre-roll and several audio pages.
-		frames := min(int64(48000), int64(len(full)/2)-at)
-		got := readExactlyFrames(t, d, int(frames))
-		d.Close()
-
-		want := full[at*2 : (at+frames)*2]
-		if !bytes.Equal(float32sToBytes(got), float32sToBytes(want)) {
-			t.Fatalf("seek to %d differs from the straight decode window", at)
-		}
-	}
-}
-
-// TestPionSeekMatchesStraightDecodeOnReference repeats the byte-identity check
-// on the 139 s file, where audio pages are large and each seek crosses several
-// of them, so a seek that only worked within one page would fail here. It uses
-// the exact variant, the only one that promises byte identity.
-func TestPionSeekMatchesStraightDecodeOnReference(t *testing.T) {
-	path := realOpusPath(t)
-	full := decodeFixturePath(t, path)
-
-	targets := []int64{5000, 48000, 240000, 1440000, 4800000}
-	for _, at := range targets {
-		d, err := NewPionOpusExactFactory().Open(path)
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		if err := d.(Seeker).SeekFrame(at); err != nil {
-			d.Close()
-			t.Fatalf("SeekFrame(%d): %v", at, err)
-		}
-		got := readExactlyFrames(t, d, 96000)
-		d.Close()
-
-		want := full[at*2 : (at+96000)*2]
-		if !bytes.Equal(float32sToBytes(got), float32sToBytes(want)) {
-			t.Fatalf("reference seek to %d differs from the straight decode window", at)
-		}
-	}
-}
-
 // readExactlyFrames reads exactly frames interleaved frames or fails.
 func readExactlyFrames(t *testing.T, d Decoder, frames int) []float32 {
 	t.Helper()
@@ -456,7 +389,7 @@ func readExactlyFrames(t *testing.T, d Decoder, frames int) []float32 {
 func decodeFixturePath(t *testing.T, path string) []float32 {
 	t.Helper()
 
-	d, err := NewPionOpusFactory().Open(path)
+	d, err := NewOpusFactory().Open(path)
 	if err != nil {
 		t.Fatalf("Open %s: %v", path, err)
 	}
@@ -465,10 +398,10 @@ func decodeFixturePath(t *testing.T, path string) []float32 {
 	return decodeAll(t, d)
 }
 
-// TestPionSeekCost measures the native seek at several targets. The old path
+// TestOpusSeekCost measures the native seek at several targets. The old path
 // reopened and decoded from frame zero (about 6.6 ms per audio-second on the
 // reference file); the granule index makes the cost independent of the target.
-func TestPionSeekCost(t *testing.T) {
+func TestOpusSeekCost(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
@@ -482,7 +415,7 @@ func TestPionSeekCost(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			d, err := NewPionOpusFactory().Open(tc.path)
+			d, err := NewOpusFactory().Open(tc.path)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -522,14 +455,14 @@ func TestPionSeekCost(t *testing.T) {
 	}
 }
 
-// TestPionOpenStaysCheap guards the open path: the index is one page-header
+// TestOpusOpenStaysCheap guards the open path: the index is one page-header
 // pass, so opening the 139 s file must stay well below one frame's worth of
 // audio (20 ms) and nowhere near the old linear seek cost.
-func TestPionOpenStaysCheap(t *testing.T) {
+func TestOpusOpenStaysCheap(t *testing.T) {
 	path := realOpusPath(t)
 
 	start := time.Now()
-	d, err := NewPionOpusFactory().Open(path)
+	d, err := NewOpusFactory().Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -565,40 +498,8 @@ func TestSeekGranuleForAddsPreSkip(t *testing.T) {
 	}
 }
 
-func TestPionSeekMatchesPrefixOfFullDecode(t *testing.T) {
-	factory := NewPionOpusExactFactory()
-	full := decodeFixture(t, "stereo_2s.opus")
-
-	d, err := factory.Open(fixturePath(t, "stereo_2s.opus"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-
-	seeker, ok := d.(Seeker)
-	if !ok {
-		t.Fatal("pion decoder does not implement Seeker")
-	}
-	const at = 30000
-	if err := seeker.SeekFrame(at); err != nil {
-		t.Fatalf("SeekFrame: %v", err)
-	}
-	got := decodeAll(t, d)[:48000*2]
-	want := full[at*2 : (at+48000)*2]
-	if !bytes.Equal(float32sToBytes(got), float32sToBytes(want)) {
-		t.Fatal("seek output differs from the same window of a straight-through decode")
-	}
-
-	if err := seeker.SeekFrame(0); err != nil {
-		t.Fatalf("SeekFrame back to zero: %v", err)
-	}
-	if got := decodeAll(t, d); !bytes.Equal(float32sToBytes(got[:1000*2]), float32sToBytes(full[:1000*2])) {
-		t.Fatal("seeking back to the start did not restore the stream head")
-	}
-}
-
-func TestPionSeekPastEndReportsError(t *testing.T) {
-	d, err := NewPionOpusFactory().Open(fixturePath(t, "short_stereo.opus"))
+func TestOpusSeekPastEndReportsError(t *testing.T) {
+	d, err := NewOpusFactory().Open(fixturePath(t, "short_stereo.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -613,8 +514,8 @@ func TestPionSeekPastEndReportsError(t *testing.T) {
 	}
 }
 
-func TestPionCloseIsIdempotentAndStopsReads(t *testing.T) {
-	d, err := NewPionOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
+func TestOpusCloseIsIdempotentAndStopsReads(t *testing.T) {
+	d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -629,7 +530,7 @@ func TestPionCloseIsIdempotentAndStopsReads(t *testing.T) {
 	}
 }
 
-func TestPionAppliesHeaderOutputGain(t *testing.T) {
+func TestOpusAppliesHeaderOutputGain(t *testing.T) {
 	// A -6 dB header gain must scale the decoded PCM by 10^(-6/20), so a file
 	// with the field patched decodes to exactly that fraction of the original.
 	const gainQ78 = -6 * 256
@@ -638,7 +539,7 @@ func TestPionAppliesHeaderOutputGain(t *testing.T) {
 	base := decodeFixture(t, "stereo_2s.opus")
 	path := patchOpusHeadGain(t, fixturePath(t, "stereo_2s.opus"), "gain.opus", gainQ78)
 
-	d, err := NewPionOpusFactory().Open(path)
+	d, err := NewOpusFactory().Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -669,7 +570,7 @@ func TestPionAppliesHeaderOutputGain(t *testing.T) {
 	}
 }
 
-func TestPionRejectsNonOpus(t *testing.T) {
+func TestOpusRejectsNonOpus(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string][]byte{
 		"plain.opus":  []byte("this is not an ogg file at all, not even close"),
@@ -678,15 +579,15 @@ func TestPionRejectsNonOpus(t *testing.T) {
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
 			path := writeFile(t, dir, name, body)
-			if _, err := NewPionOpusFactory().Open(path); err == nil {
+			if _, err := NewOpusFactory().Open(path); err == nil {
 				t.Fatal("Open accepted a non-Opus file")
 			}
 		})
 	}
 }
 
-func TestPionFactoryContract(t *testing.T) {
-	f := NewPionOpusFactory()
+func TestOpusFactoryContract(t *testing.T) {
+	f := NewOpusFactory()
 	if f.Name() == "" {
 		t.Fatal("Name() is empty")
 	}
@@ -710,7 +611,7 @@ func TestPionFactoryContract(t *testing.T) {
 func decodeFixture(t *testing.T, name string) []float32 {
 	t.Helper()
 
-	d, err := NewPionOpusFactory().Open(fixturePath(t, name))
+	d, err := NewOpusFactory().Open(fixturePath(t, name))
 	if err != nil {
 		t.Fatalf("Open %s: %v", name, err)
 	}

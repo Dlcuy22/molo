@@ -6,11 +6,11 @@ require (
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/ebitengine/oto/v3 v3.5.0
 	github.com/ebitengine/purego v0.11.0
-	github.com/pion/opus v0.1.0
 	github.com/tphakala/go-aac v0.7.0
 	github.com/tphakala/go-flac v1.1.0
 	github.com/tphakala/go-m4a v0.5.0
 	github.com/tphakala/go-mp3 v0.1.0
+	github.com/tphakala/go-opus v1.1.0
 	github.com/tphakala/go-wav v1.1.0
 	github.com/tphakala/simd v1.9.0
 	github.com/yuin/gopher-lua v1.1.2

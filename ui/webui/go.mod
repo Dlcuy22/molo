@@ -24,11 +24,11 @@ require (
 	github.com/jfreymuth/pulse v0.1.3 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/pion/opus v0.1.0 // indirect
 	github.com/tphakala/go-aac v0.7.0 // indirect
 	github.com/tphakala/go-flac v1.1.0 // indirect
 	github.com/tphakala/go-m4a v0.5.0 // indirect
 	github.com/tphakala/go-mp3 v0.1.0 // indirect
+	github.com/tphakala/go-opus v1.1.0 // indirect
 	github.com/tphakala/go-wav v1.1.0 // indirect
 	github.com/yuin/gopher-lua v1.1.2 // indirect
 	golang.org/x/sys v0.47.0 // indirect

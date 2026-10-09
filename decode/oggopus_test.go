@@ -885,7 +885,7 @@ func TestOggOpusReaderDoesNotOwnOrLeakInput(t *testing.T) {
 // --- seek cost -----------------------------------------------------
 
 // TestOggOpusReaderSeekCost measures the index-plus-binary-search seek against
-// the pion decode-and-discard path it replaces. Numbers are logged, not
+// the previous decode-and-discard path it replaces. Numbers are logged, not
 // asserted, except that the new path must not be slower overall.
 func TestOggOpusReaderSeekCost(t *testing.T) {
 	path := realOpusPath(t)
@@ -895,9 +895,9 @@ func TestOggOpusReaderSeekCost(t *testing.T) {
 	build := time.Since(buildStart)
 	t.Logf("newOggOpusReader: %v for %d indexed pages", build, len(r.index))
 
-	d, err := NewPionOpusFactory().Open(path)
+	d, err := NewOpusFactory().Open(path)
 	if err != nil {
-		t.Fatalf("open pion decoder: %v", err)
+		t.Fatalf("open opus decoder: %v", err)
 	}
 	defer d.Close()
 	seeker := d.(Seeker)
@@ -918,7 +918,7 @@ func TestOggOpusReaderSeekCost(t *testing.T) {
 
 		start = time.Now()
 		if err := seeker.SeekFrame(frame); err != nil {
-			t.Fatalf("pion SeekFrame at %ds: %v", seconds, err)
+			t.Fatalf("opus SeekFrame at %ds: %v", seconds, err)
 		}
 		discard := time.Since(start)
 

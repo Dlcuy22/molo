@@ -86,11 +86,11 @@ func (m model) codecLabel(name string) string {
 }
 
 // codecLabelFor builds a row label as "{Family} {FriendlyName}". The family is
-// the part of the registry name before its first dash, so verbose variants of
-// one codec collapse to a recognizable prefix: opus-pion and opus-pion-exact
-// both read "Opus ...". A factory without a profile falls back to its registry
-// name, and a name that is already its own family is not repeated, so "alpha"
-// reads "Alpha" rather than "Alpha Alpha".
+// the part of the registry name before its first dash, so verbose names of one
+// codec collapse to a recognizable prefix: opus and opus-libopusfile both read
+// "Opus ...". A factory without a profile falls back to its registry name, and a
+// name that is already its own family is not repeated, so "alpha" reads "Alpha"
+// rather than "Alpha Alpha".
 //
 // showRegistryName appends the registry name, which is the configuration key;
 // it is a developer aid rather than part of the shipped UI.

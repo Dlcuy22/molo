@@ -42,7 +42,7 @@ func TestRegisteredDecodersShareOneContract(t *testing.T) {
 			t.Fatalf("%s has no name or extensions", f.Name())
 		}
 	}
-	for _, want := range []string{"opus-pion", "opus-pion-exact", "opus-libopusfile"} {
+	for _, want := range []string{"opus", "opus-libopusfile"} {
 		if !slices.ContainsFunc(factories, func(f Factory) bool { return f.Name() == want }) {
 			t.Fatalf("factory %s is not registered", want)
 		}
@@ -62,7 +62,7 @@ func TestDefaultRegistryDispatchesOggOpus(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryPrefersPionByHigherWeight(t *testing.T) {
+func TestDefaultRegistryPrefersOpusByHigherWeight(t *testing.T) {
 	// Both factories claim Ogg Opus. The pure-Go one wins automatic selection
 	// by weight (90 over 80), not by registration order, because it has no
 	// runtime library dependency. Anchoring on the resulting decoder means a
@@ -73,8 +73,8 @@ func TestDefaultRegistryPrefersPionByHigherWeight(t *testing.T) {
 	}
 	defer d.Close()
 
-	if _, isPion := d.(*pionOpusDecoder); !isPion {
-		t.Fatalf("Default.Open produced %T, want the pure-Go *pionOpusDecoder", d)
+	if _, isOpus := d.(*opusDecoder); !isOpus {
+		t.Fatalf("Default.Open produced %T, want the pure-Go *opusDecoder", d)
 	}
 }
 

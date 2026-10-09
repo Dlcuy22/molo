@@ -3,8 +3,8 @@
 // Purpose:
 //   Read Opus audio packets out of an Ogg bitstream (RFC 3533) without
 //   decoding, validate the Opus-specific framing (RFC 7845), and reposition to
-//   a granule position with a binary search over a page index. The pion
-//   container reader is forward-only, so its seek decodes and discards from the
+//   a granule position with a binary search over a page index. A forward-only
+//   container reader would have to seek by decoding and discarding from the
 //   start of the file; this reader walks page headers once and then jumps
 //   straight to one page per seek.
 //

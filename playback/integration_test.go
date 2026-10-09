@@ -36,7 +36,7 @@ func startStreamer(t *testing.T, name string) *stream.Streamer {
 
 	path := fixturePath(t, name)
 	open := func(<-chan struct{}) (decode.Decoder, error) {
-		return decode.NewPionOpusFactory().Open(path)
+		return decode.NewOpusFactory().Open(path)
 	}
 
 	s, err := stream.New(open, stream.Config{})
@@ -81,7 +81,7 @@ func TestIntegrationStreamPlaysToCompletion(t *testing.T) {
 
 	if got := s.Position(); got < totalFrames || got > totalFrames+5760 {
 		// The pure-Go decoder emits up to one extra Opus packet past the
-		// granule total, the same tail decode/opus_pion_test.go allows.
+		// granule total, the same tail decode/opus_test.go allows.
 		t.Fatalf("Position() = %d, want within [%d, %d]", got, totalFrames, totalFrames+5760)
 	}
 	if err := s.Stats().Underruns; err != 0 {

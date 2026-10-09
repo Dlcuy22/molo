@@ -312,7 +312,7 @@ func (f *fakePlayer) Settings() molo.Settings {
 func (f *fakePlayer) ApplySettings(s molo.Settings) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if s.Decoder != "" && s.Decoder != "opus-pion" && s.Decoder != "opus-libopusfile" {
+	if s.Decoder != "" && s.Decoder != "opus" && s.Decoder != "opus-libopusfile" {
 		return fmt.Errorf("%w: decoder", molo.ErrInvalidSetting)
 	}
 	f.settings = s

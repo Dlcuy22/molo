@@ -43,80 +43,57 @@ func repagedFixture(t *testing.T, name string, packetsPerPage int) string {
 	return writeOgg(t, name, pages...)
 }
 
-// TestPionSeekDecodedPacketsBounded is the load-bearing budget test: a seek may
-// not decode more than the variant's warm-up window, the count must not grow
-// with the page span, and the fast variant must decode strictly fewer packets
-// than the exact one. Without the skip the decoder decodes every packet from the
-// landing page to the target, which for a 1 s page is roughly twice the window.
-func TestPionSeekDecodedPacketsBounded(t *testing.T) {
+// TestOpusSeekDecodedPacketsBounded is the load-bearing budget test: a seek may
+// not decode more than the warm-up window, and the count must not grow with the
+// page span. Without the skip the decoder decodes every packet from the landing
+// page to the target, which for a 1 s page is roughly twice the window.
+func TestOpusSeekDecodedPacketsBounded(t *testing.T) {
 	const (
 		frame         = 72000 // 1.5 s
 		packetSamples = 960
 	)
-	variants := []struct {
-		name   string
-		build  func() Factory
-		warmup int64
-	}{
-		{"fast", func() Factory { return NewPionOpusFactory() }, pionWarmupFast},
-		{"exact", func() Factory { return NewPionOpusExactFactory() }, pionWarmupExact},
-	}
 
 	spans := []int{4, 50}
-	decoded := map[string]map[int]int{}
-	for _, v := range variants {
-		decoded[v.name] = map[int]int{}
-		for _, span := range spans {
-			t.Run(v.name+"/packets_per_page_"+itoa(int64(span)), func(t *testing.T) {
-				path := repagedFixture(t, "stereo_2s.opus", span)
-
-				d, err := v.build().Open(path)
-				if err != nil {
-					t.Fatalf("Open: %v", err)
-				}
-				defer d.Close()
-
-				if err := d.(Seeker).SeekFrame(frame); err != nil {
-					t.Fatalf("SeekFrame: %v", err)
-				}
-				got := d.(*pionOpusDecoder).decodedPackets
-				decoded[v.name][span] = got
-
-				// The warm-up window in packets, plus a small allowance for the
-				// packet that straddles the boundary.
-				bound := int(v.warmup/packetSamples) + 2
-				if got > bound {
-					t.Fatalf("seek decoded %d packets, want at most %d (warm-up %d, page span %d)",
-						got, bound, v.warmup, span*packetSamples)
-				}
-				if got == 0 {
-					t.Fatal("seek decoded nothing, so the warm-up requirement was not met")
-				}
-				t.Logf("%s, page span %d packets: decoded %d during seek", v.name, span, got)
-			})
-		}
-	}
-
-	// The exact window is ten times the fast one, so every span must show the
-	// fast variant decoding strictly fewer packets.
 	for _, span := range spans {
-		if fast, exact := decoded["fast"][span], decoded["exact"][span]; fast >= exact {
-			t.Fatalf("page span %d: fast decoded %d, exact decoded %d; fast must be strictly fewer",
-				span, fast, exact)
-		}
+		t.Run("packets_per_page_"+itoa(int64(span)), func(t *testing.T) {
+			path := repagedFixture(t, "stereo_2s.opus", span)
+
+			d, err := NewOpusFactory().Open(path)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer d.Close()
+
+			if err := d.(Seeker).SeekFrame(frame); err != nil {
+				t.Fatalf("SeekFrame: %v", err)
+			}
+			got := d.(*opusDecoder).decodedPackets
+
+			// The warm-up window in packets, plus a small allowance for the
+			// packet that straddles the boundary.
+			bound := int(opusWarmup/packetSamples) + 2
+			if got > bound {
+				t.Fatalf("seek decoded %d packets, want at most %d (warm-up %d, page span %d)",
+					got, bound, opusWarmup, span*packetSamples)
+			}
+			if got == 0 {
+				t.Fatal("seek decoded nothing, so the warm-up requirement was not met")
+			}
+			t.Logf("page span %d packets: decoded %d during seek", span, got)
+		})
 	}
 }
 
-// TestPionSeekDecodedPacketsDoNotScaleWithPageSpan contrasts two streams whose
+// TestOpusSeekDecodedPacketsDoNotScaleWithPageSpan contrasts two streams whose
 // pages both span more than the warm-up window. Neither can be decoded from its
 // landing page cheaply, so if the count tracked the page span they would differ;
 // with the skip both are capped by the window and decode the same amount.
-func TestPionSeekDecodedPacketsDoNotScaleWithPageSpan(t *testing.T) {
+func TestOpusSeekDecodedPacketsDoNotScaleWithPageSpan(t *testing.T) {
 	smallPath := repagedFixture(t, "stereo_2s.opus", 40)
 	largePath := repagedFixture(t, "stereo_2s.opus", 50)
 
 	count := func(path string) int {
-		d, err := NewPionOpusFactory().Open(path)
+		d, err := NewOpusFactory().Open(path)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -125,7 +102,7 @@ func TestPionSeekDecodedPacketsDoNotScaleWithPageSpan(t *testing.T) {
 			t.Fatalf("SeekFrame: %v", err)
 		}
 
-		return d.(*pionOpusDecoder).decodedPackets
+		return d.(*opusDecoder).decodedPackets
 	}
 
 	small := count(smallPath)
@@ -136,22 +113,23 @@ func TestPionSeekDecodedPacketsDoNotScaleWithPageSpan(t *testing.T) {
 	}
 }
 
-// TestPionSeekMatchesStraightDecodeEverywhere is the correctness proof: after a
-// seek the first delivered frame must be exactly the requested frame and its
-// PCM must equal a straight decode that discarded to the same frame. It covers
-// the start, a target inside the warm-up window, the middle, and the end. It
-// uses the exact variant because only it promises byte identity.
-func TestPionSeekMatchesStraightDecodeEverywhere(t *testing.T) {
-	factory := NewPionOpusExactFactory()
+// TestOpusSeekLandsOnRequestedFrame is the seek correctness proof: after a seek
+// the first delivered frame must be the requested frame, so a straight decode
+// from that frame matches to within the bounded warm-up transient. It covers the
+// start, a target inside the warm-up window, the middle, and the end.
+func TestOpusSeekLandsOnRequestedFrame(t *testing.T) {
 	full := decodeFixture(t, "stereo_2s.opus")
 
-	targets := []int64{0, 1, 5000, pionWarmupExact - 1000, pionWarmupExact, 30000, 48000, 90000, 96000}
+	// The transient is confined to the first 200 ms (9600 frames); past that the
+	// landing must track the straight decode to a tiny floor.
+	const convergeFrames = 9600
+	targets := []int64{0, 1, 5000, opusWarmup - 1000, opusWarmup, 30000, 48000, 90000, 96000}
 	for _, at := range targets {
 		if at >= int64(len(full)/2) {
 			continue
 		}
 		t.Run(itoa(at), func(t *testing.T) {
-			d, err := factory.Open(fixturePath(t, "stereo_2s.opus"))
+			d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -163,20 +141,18 @@ func TestPionSeekMatchesStraightDecodeEverywhere(t *testing.T) {
 			frames := min(int64(20000), int64(len(full)/2)-at)
 			got := readExactlyFrames(t, d, int(frames))
 			want := full[at*2 : (at+frames)*2]
-			if !bytes.Equal(float32sToBytes(got), float32sToBytes(want)) {
-				t.Fatalf("seek to %d differs from the straight decode", at)
+
+			if tail := rangeMaxAbs(got, want, int(convergeFrames), int(frames)); tail > 0.001 {
+				t.Fatalf("seek to %d: residual after 200 ms = %.6f, want the landing to converge", at, tail)
 			}
 		})
 	}
 }
 
-// TestPionSeekBackToStartAfterSkip ensures a skip-heavy seek does not corrupt
-// the reader for a subsequent seek to the head, where the skip is a no-op. It
-// uses the exact variant so the comparison can stay byte-identical.
-func TestPionSeekBackToStartAfterSkip(t *testing.T) {
-	full := decodeFixture(t, "stereo_2s.opus")
-
-	d, err := NewPionOpusExactFactory().Open(fixturePath(t, "stereo_2s.opus"))
+// TestOpusSeekBackToStartAfterSkip ensures a skip-heavy seek does not corrupt
+// the reader for a subsequent seek to the head, where the skip is a no-op.
+func TestOpusSeekBackToStartAfterSkip(t *testing.T) {
+	d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -188,8 +164,12 @@ func TestPionSeekBackToStartAfterSkip(t *testing.T) {
 	if err := d.(Seeker).SeekFrame(0); err != nil {
 		t.Fatalf("SeekFrame(0): %v", err)
 	}
+
+	// The head is decoded from the very first packet with no warm-up discard,
+	// so it must reproduce a straight decode exactly.
 	got := readExactlyFrames(t, d, 5000)
-	if !bytes.Equal(float32sToBytes(got), float32sToBytes(full[:5000*2])) {
+	want := decodeFixture(t, "stereo_2s.opus")[:5000*2]
+	if !bytes.Equal(float32sToBytes(got), float32sToBytes(want)) {
 		t.Fatal("seek back to the start after a skip did not restore the head")
 	}
 }

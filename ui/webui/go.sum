@@ -26,8 +26,6 @@ github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHP
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
-github.com/pion/opus v0.1.0 h1:GgK/a3DNDrffKjUFsK39rZKqfv7bQ2S2eqRKt0BnqAE=
-github.com/pion/opus v0.1.0/go.mod h1:t5Xog2n682JnawoykACE6nKVmupFvmJvkpM7x6bTv6g=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/tphakala/go-aac v0.7.0 h1:QuwkvhNXNaAS0CaGgpkrErXV8rmekGTi+nPIFNQZQ5s=
@@ -38,6 +36,8 @@ github.com/tphakala/go-m4a v0.5.0 h1:MsGA8OutWHaxZGV6H7oEbvOiCCKAmmxTG3P3+hjF6UY
 github.com/tphakala/go-m4a v0.5.0/go.mod h1:CZ4zF1xbkzCKD+amTQhzzYtghcXKSKZEDNixgRzU6sk=
 github.com/tphakala/go-mp3 v0.1.0 h1:3nY1WwY3E9lSK22d1AtaAvQXqMSfDQlPtqD+Ym/Yc+c=
 github.com/tphakala/go-mp3 v0.1.0/go.mod h1:h8c9IC7aD14TKrq+hnjOMd31B+0GLXtX9TJXXNItisg=
+github.com/tphakala/go-opus v1.1.0 h1:SbXQjwI/ZYy6wPXd0fafLTurkUbAhBpaYnvXYtn8uIo=
+github.com/tphakala/go-opus v1.1.0/go.mod h1:57hQHipntY2+xK7sycF4CYVSXDLW3V+AiX77iOJlojQ=
 github.com/tphakala/go-wav v1.1.0 h1:U70YwkAFH4CFjoJ6z+oMl/UUtXAx1Dik54vJTJkE+3w=
 github.com/tphakala/go-wav v1.1.0/go.mod h1:uHyG52/VxaMf7e3AxS/lJ+DDZoADPuIlxsij1iWUi/U=
 github.com/tphakala/simd v1.9.0 h1:EURkGIeEMZ7V96i2TJZvLIiXj6RZebe3xdf4n4Bhynk=

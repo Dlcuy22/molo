@@ -42,10 +42,10 @@ func settingsEqual(a, b molo.Settings) bool {
 // is in force before anything plays.
 func TestWithDecoderIsReflectedInSettings(t *testing.T) {
 	pipeline := dsp.Pipeline{Post: []dsp.Spec{{Kind: "crossfeed"}}}
-	p := newTestPlayer(t, molo.WithDecoder("opus-pion"), molo.WithPipeline(pipeline))
+	p := newTestPlayer(t, molo.WithDecoder("opus"), molo.WithPipeline(pipeline))
 
-	if got := p.Settings().Decoder; got != "opus-pion" {
-		t.Fatalf("Settings().Decoder = %q, want opus-pion", got)
+	if got := p.Settings().Decoder; got != "opus" {
+		t.Fatalf("Settings().Decoder = %q, want opus", got)
 	}
 	if got := p.Pipeline(); !reflect.DeepEqual(got, pipeline) {
 		t.Fatalf("Pipeline() = %+v, want the configured %+v", got, pipeline)
@@ -157,7 +157,7 @@ func TestApplySettingsAcceptsAKnownDecoder(t *testing.T) {
 }
 
 func TestApplySettingsRejectsAnUnknownDecoderAndChangesNothing(t *testing.T) {
-	p := newTestPlayer(t, molo.WithDecoder("opus-pion"))
+	p := newTestPlayer(t, molo.WithDecoder("opus"))
 	before := p.Settings()
 
 	next := before
@@ -237,7 +237,7 @@ func TestApplySettingsVolumeTakesEffectImmediately(t *testing.T) {
 // the live-swap commands and validates their names synchronously, matching the
 // non-blocking command contract.
 func TestFacadeSwapDecoderAndBackendRejectBadNames(t *testing.T) {
-	p := newTestPlayer(t, molo.WithDecoder("opus-pion"))
+	p := newTestPlayer(t, molo.WithDecoder("opus"))
 
 	if err := p.SwapDecoder("not-a-codec"); err == nil {
 		t.Fatal("SwapDecoder(not-a-codec) returned nil, want a validation error")
@@ -246,7 +246,7 @@ func TestFacadeSwapDecoderAndBackendRejectBadNames(t *testing.T) {
 		t.Fatal("SwapBackend(not-a-backend) returned nil, want a validation error")
 	}
 	// A rejected swap changes nothing.
-	if got := p.Settings(); got.Decoder != "opus-pion" {
+	if got := p.Settings(); got.Decoder != "opus" {
 		t.Fatalf("a rejected swap changed the decoder preference: %q", got.Decoder)
 	}
 
@@ -274,7 +274,7 @@ func TestFacadeSwapDecoderDoesNotBlock(t *testing.T) {
 	p := newTestPlayer(t)
 
 	done := make(chan error, 1)
-	go func() { done <- p.SwapDecoder("opus-pion") }()
+	go func() { done <- p.SwapDecoder("opus") }()
 
 	select {
 	case err := <-done:
@@ -308,7 +308,7 @@ func TestApplySettingsDoesNotBlock(t *testing.T) {
 	p := newTestPlayer(t)
 
 	next := p.Settings()
-	next.Decoder = "opus-pion"
+	next.Decoder = "opus"
 	next.Volume = 0.5
 
 	done := make(chan error, 1)

@@ -91,15 +91,15 @@ func TestNewReturnsAPlayer(t *testing.T) {
 func TestHandWrittenOption(t *testing.T) {
 	p, err := molo.New(
 		molo.WithBackend("facade-test"),
-		func(c *molo.Config) { c.Decoder = "opus-pion" },
+		func(c *molo.Config) { c.Decoder = "opus" },
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
 
-	if got := p.Settings().Decoder; got != "opus-pion" {
-		t.Fatalf("Settings().Decoder = %q, want opus-pion", got)
+	if got := p.Settings().Decoder; got != "opus" {
+		t.Fatalf("Settings().Decoder = %q, want opus", got)
 	}
 }
 

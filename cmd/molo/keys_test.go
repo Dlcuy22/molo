@@ -153,9 +153,9 @@ func TestHandleKeySeekNeverGoesNegative(t *testing.T) {
 	}
 }
 
-// TestHandleKeyForwardSeekClampsToDuration guards the other edge: the pion
-// decoder reports a seek past the end as a failure, so a forward seek with a
-// known duration must stop at the end instead of ending playback.
+// TestHandleKeyForwardSeekClampsToDuration guards the other edge: the decoder
+// reports a seek past the end as a failure, so a forward seek with a known
+// duration must stop at the end instead of ending playback.
 func TestHandleKeyForwardSeekClampsToDuration(t *testing.T) {
 	p := newFakePlayer()
 	p.snap = molo.Snapshot{State: molo.Playing, Position: 0, Duration: 2 * time.Second, Volume: 1}

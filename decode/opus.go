@@ -1,13 +1,16 @@
-// Opus decoding through github.com/pion/opus. This is the pure-Go path: it
-// needs no runtime shared library and can therefore also decode from an
+// Opus decoding through github.com/tphakala/go-opus, a pure-Go port of libopus.
+// It needs no runtime shared library and can therefore also decode from an
 // arbitrary io.Reader.
 //
-// The Ogg container is parsed by the native reader in oggopus.go, which walks
-// the page headers once at open and indexes them, so a seek is a binary search
-// plus a short decode forward instead of a reopen and decode-from-zero.
-// pion/opus is used for the codec only.
+// The container is parsed by this package's own readers: oggopus.go walks the
+// page headers once at open and indexes them, so a seek is a binary search plus
+// a short decode forward instead of a reopen and decode-from-zero. webmopus.go
+// drives the same decoder over WebM/Matroska. go-opus is used for the codec only.
 //
-// Dependencies: github.com/pion/opus.
+// go-opus is a fixed-point decoder, so it emits int16; this file converts to the
+// interleaved float32 every Decoder emits.
+//
+// Dependencies: github.com/tphakala/go-opus.
 
 package decode
 
@@ -22,142 +25,83 @@ import (
 	"os"
 
 	"github.com/dlcuy22/molo/core"
-	"github.com/pion/opus"
+	goopus "github.com/tphakala/go-opus/opus"
 )
 
 // opusTagsTag identifies the mandatory comment header of an Ogg Opus stream.
 var opusTagsTag = []byte("OpusTags")
 
 // maxOpusPacketSamples is Opus's 120 ms ceiling: 48000 * 0.12 frames, two
-// channels interleaved. One allocation at open covers every packet.
+// channels interleaved. Two buffers this size, the codec's int16 output and its
+// float32 form, are allocated once at open and cover every packet.
 const maxOpusPacketSamples = 48000 * 12 / 100 * 2
 
-// The warm-up window is how far before a seek target the reader starts. It is
-// passed to SeekGranule so the chosen page precedes the target and the codec
-// rebuilds inter-frame state from real packets before the target is reached.
-// The landing page plus the warm-up skip bound a seek's decoded packets by this
-// window instead of by the distance to the target, so the window is the one
-// knob that trades seek cost against how exactly the landing PCM matches a
-// straight decode.
-//
-// The two values below are the two points on that curve, exposed as two
-// registry entries:
-//
-//   - pionWarmupFast is the RFC 7845 section 4.6 nominal pre-roll, 3840 samples
-//     (80 ms). libopusfile uses this window too and documents that the first
-//     frames may differ from a straight decode. Measured on this repository's
-//     fixtures, the difference is a bounded transient (peak around -20 dBFS)
-//     whose RMS falls below -60 dBFS within 100 ms; exact float32 equality is
-//     reached by roughly 600 ms. It is the default because a seek costs about
-//     1 ms on 1 s pages.
-//   - pionWarmupExact is 38400 samples (800 ms). pion's CELT coarse-energy
-//     predictor carries state across roughly 30 frames, and only a window this
-//     large makes the seeked PCM byte-for-byte equal to a straight decode on
-//     these fixtures. It costs about 5x the fast seek, so it is an explicit
-//     opt-in.
-const (
-	pionWarmupFast  = 3840
-	pionWarmupExact = 38400
-)
+// opusWarmup is how far before a seek target the decoder starts, in 48 kHz
+// samples per channel. The codec rebuilds its inter-frame state from real
+// packets over this window before the target is reached. It is the RFC 7845
+// section 4.6 nominal pre-roll, which libopusfile also uses; both document that
+// the first frames after the jump may differ from a straight decode.
+const opusWarmup = 3840 // 80 ms
 
-// init registers both pure-Go variants. Only the fast one carries a weight
-// above libopusfile, so it stays the automatic default; the exact variant is
-// selected by name. Both need no runtime library, unlike the libopusfile path.
+// init registers the pure-Go Opus decoder. It needs no runtime library, unlike
+// the libopusfile path.
 func init() {
-	Register(NewPionOpusFactory())
-	Register(NewPionOpusExactFactory())
+	Register(NewOpusFactory())
 }
 
-// PionOpusFactory decodes Ogg Opus without cgo, using the fast warm-up window.
-type PionOpusFactory struct{}
+// OpusFactory decodes Ogg Opus in pure Go.
+type OpusFactory struct{}
 
-// NewPionOpusFactory returns a factory for the pure-Go Ogg Opus decoder that
-// uses the fast warm-up window.
-func NewPionOpusFactory() *PionOpusFactory { return &PionOpusFactory{} }
+// NewOpusFactory returns a factory for the pure-Go Ogg Opus decoder.
+func NewOpusFactory() *OpusFactory { return &OpusFactory{} }
 
-func (f *PionOpusFactory) Name() string { return "opus-pion" }
+func (f *OpusFactory) Name() string { return "opus" }
 
 // FriendlyName is the label a UI shows for this codec.
-func (f *PionOpusFactory) FriendlyName() string { return "Portable" }
+func (f *OpusFactory) FriendlyName() string { return "Portable" }
 
 // Weight makes this the automatic default over libopusfile: it needs no
-// runtime shared library. It is also above the exact variant, so adding the
-// bit-perfect option cannot move the default.
-func (f *PionOpusFactory) Weight() int { return 90 }
+// runtime shared library.
+func (f *OpusFactory) Weight() int { return 90 }
 
-func (f *PionOpusFactory) Exts() []string { return []string{".opus", ".ogg"} }
+func (f *OpusFactory) Exts() []string { return []string{".opus", ".ogg"} }
 
 // Match accepts any Ogg stream; Open then rejects non-Opus payloads. Checking
 // deeper would mean seeking, which sniffing must not do.
-func (f *PionOpusFactory) Match(magic []byte) bool { return matchOgg(magic) }
+func (f *OpusFactory) Match(magic []byte) bool { return matchOgg(magic) }
 
-func (f *PionOpusFactory) Open(path string) (Decoder, error) {
-	return newPionOpusDecoder(pionPathSource(path), pionWarmupFast)
+func (f *OpusFactory) Open(path string) (Decoder, error) {
+	return newOpusDecoder(opusPathSource(path))
 }
 
 // OpenReader decodes from a stream rather than a path. A reader that can seek
 // keeps native seek; one that cannot plays forward but refuses to reposition.
-func (f *PionOpusFactory) OpenReader(r io.Reader) (Decoder, error) {
-	return newPionOpusDecoder(pionReaderSource{r}, pionWarmupFast)
+func (f *OpusFactory) OpenReader(r io.Reader) (Decoder, error) {
+	return newOpusDecoder(opusReaderSource{r})
 }
 
 // Probe reads the tail of the file for the final granule position. It never
 // decodes audio, so even a probe on a large file stays cheap.
-func (f *PionOpusFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo, error) {
+func (f *OpusFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo, error) {
 	return probeOggOpus(path, opts.Duration, oggTailWindow)
 }
 
-// PionOpusExactFactory is the same pure-Go codec with the large warm-up window
-// that makes a seek's PCM bit-exact against a straight decode. Its weight is
-// below PionOpusFactory's, so it is never chosen automatically.
-type PionOpusExactFactory struct{}
-
-// NewPionOpusExactFactory returns a factory for the pure-Go Ogg Opus decoder
-// whose large warm-up window makes a seek bit-exact.
-func NewPionOpusExactFactory() *PionOpusExactFactory { return &PionOpusExactFactory{} }
-
-func (f *PionOpusExactFactory) Name() string { return "opus-pion-exact" }
-
-// FriendlyName is the label a UI shows for this codec.
-func (f *PionOpusExactFactory) FriendlyName() string { return "Bit-perfect" }
-
-// Weight keeps this below the fast pure-Go factory: it is bit-exact after a
-// seek but its warm-up makes a seek several times more expensive, so it must
-// never win automatic selection.
-func (f *PionOpusExactFactory) Weight() int { return 85 }
-
-func (f *PionOpusExactFactory) Exts() []string { return []string{".opus", ".ogg"} }
-
-func (f *PionOpusExactFactory) Match(magic []byte) bool { return matchOgg(magic) }
-
-func (f *PionOpusExactFactory) Open(path string) (Decoder, error) {
-	return newPionOpusDecoder(pionPathSource(path), pionWarmupExact)
-}
-
-func (f *PionOpusExactFactory) OpenReader(r io.Reader) (Decoder, error) {
-	return newPionOpusDecoder(pionReaderSource{r}, pionWarmupExact)
-}
-
-func (f *PionOpusExactFactory) Probe(path string, opts ProbeOptions) (core.StreamInfo, error) {
-	return probeOggOpus(path, opts.Duration, oggTailWindow)
-}
-
-// matchOgg is the shared content check for both pure-Go factories.
+// matchOgg is the shared content check for the Ogg Opus factories.
 func matchOgg(magic []byte) bool {
 	return len(magic) >= 4 && string(magic[:4]) == oggCapture
 }
 
-// pionSource supplies the container stream. open is called once, when the
+// opusSource supplies the container stream. open is called once, when the
 // decoder is built; a seek repositions the stream in place rather than
 // reopening, because the native reader owns its io.ReadSeeker.
-type pionSource interface {
+type opusSource interface {
 	open() (io.Reader, io.Closer, error)
 	rewindable() bool
 }
 
-type pionPathSource string
+type opusPathSource string
 
-func (p pionPathSource) open() (io.Reader, io.Closer, error) {
+func (p opusPathSource) open() (io.Reader, io.Closer, error) {
 	f, err := os.Open(string(p))
 	if err != nil {
 		return nil, nil, err
@@ -168,17 +112,17 @@ func (p pionPathSource) open() (io.Reader, io.Closer, error) {
 
 // A path is measured at open by the reader itself, so a seek can always reuse
 // the same file handle.
-func (p pionPathSource) rewindable() bool { return true }
+func (p opusPathSource) rewindable() bool { return true }
 
-type pionReaderSource struct{ r io.Reader }
+type opusReaderSource struct{ r io.Reader }
 
-func (s pionReaderSource) open() (io.Reader, io.Closer, error) {
+func (s opusReaderSource) open() (io.Reader, io.Closer, error) {
 	return s.r, nil, nil
 }
 
 // A reader is seekable only when it declares io.Seeker; the decoder uses the
 // same io.ReadSeeker for every seek, so nothing needs to rewind.
-func (s pionReaderSource) rewindable() bool {
+func (s opusReaderSource) rewindable() bool {
 	_, ok := s.r.(io.Seeker)
 
 	return ok
@@ -213,25 +157,20 @@ func openOpusPackets(r io.Reader) (opusPacketSource, error) {
 // without a second decoder implementation.
 type opusContainer func(io.Reader) (opusPacketSource, error)
 
-type pionOpusDecoder struct {
-	src pionSource
+type opusDecoder struct {
+	src opusSource
 
 	srcCloser io.Closer
 	reader    opusPacketSource
-	dec       opus.Decoder
+	dec       *goopus.Decoder
 
-	// container opens the packet source. It is Ogg for the Opus factories and
+	// container opens the packet source. It is Ogg for the Opus factory and
 	// the WebM reader for the WebM factory, so the decoder below is shared.
 	container opusContainer
 
 	// parserName labels the container for Descriptor, so the same decoder
 	// reports the container it actually consumed.
 	parserName string
-
-	// warmup is the seek pre-roll in granules: the profile's fast/exact window.
-	// It is per-decoder rather than a package constant because the two registry
-	// entries are the same codec at two points on the cost/accuracy curve.
-	warmup int64
 
 	// gain is the linear form of the header's Q7.8 dB output gain.
 	gain float32
@@ -243,7 +182,11 @@ type pionOpusDecoder struct {
 
 	// pending holds gain-applied, pre-skip-trimmed frames not yet delivered.
 	pending []float32
-	decBuf  []float32
+
+	// i16 is the codec's fixed-point output; decBuf is the float32 form after
+	// conversion, gain and trim. go-opus emits int16, so both buffers exist.
+	i16    []int16
+	decBuf []float32
 
 	// decodedPackets counts codec invocations. A seek uses it to prove that
 	// packets which contribute nothing to the output are skipped rather than
@@ -259,19 +202,19 @@ type pionOpusDecoder struct {
 	closed bool
 }
 
-func newPionOpusDecoder(src pionSource, warmup int64) (*pionOpusDecoder, error) {
-	return newPionOpusDecoderWith(openOpusPackets, src, warmup, "molo/decode (oggopus)")
+func newOpusDecoder(src opusSource) (*opusDecoder, error) {
+	return newOpusDecoderWith(openOpusPackets, src, "molo/decode (oggopus)")
 }
 
-// newPionOpusDecoderWith builds the decoder over an explicit container. The
-// Ogg path calls it through newPionOpusDecoder, so its behaviour is unchanged;
-// the WebM path supplies openWebMOpusPackets and its own parser label.
-func newPionOpusDecoderWith(container opusContainer, src pionSource, warmup int64, parserName string) (*pionOpusDecoder, error) {
-	d := &pionOpusDecoder{
+// newOpusDecoderWith builds the decoder over an explicit container. The Ogg
+// path calls it through newOpusDecoder, so its behaviour is unchanged; the WebM
+// path supplies openWebMOpusPackets and its own parser label.
+func newOpusDecoderWith(container opusContainer, src opusSource, parserName string) (*opusDecoder, error) {
+	d := &opusDecoder{
 		src:        src,
 		container:  container,
 		parserName: parserName,
-		warmup:     warmup,
+		i16:        make([]int16, maxOpusPacketSamples),
 		decBuf:     make([]float32, maxOpusPacketSamples),
 	}
 	if err := d.openSource(); err != nil {
@@ -283,7 +226,7 @@ func newPionOpusDecoderWith(container opusContainer, src pionSource, warmup int6
 
 // openSource builds the container reader and a fresh codec at the start of the
 // stream. It runs once; a seek reuses the reader instead of reopening it.
-func (d *pionOpusDecoder) openSource() error {
+func (d *opusDecoder) openSource() error {
 	r, closer, err := d.src.open()
 	if err != nil {
 		return err
@@ -299,7 +242,7 @@ func (d *pionOpusDecoder) openSource() error {
 		// would send a reader down the wrong path.
 		return fmt.Errorf("decode: parse Opus container %s: %w", d.parserName, err)
 	}
-	dec, err := opus.NewDecoderWithOutput(48000, 2)
+	dec, err := goopus.NewDecoder(48000, 2)
 	if err != nil {
 		d.detachSource()
 
@@ -331,7 +274,7 @@ func totalFrames(reader opusPacketSource) int64 {
 
 // detachSource releases the reader of a failed open so a retry starts clean
 // instead of leaving a half-built decoder holding the old handle.
-func (d *pionOpusDecoder) detachSource() {
+func (d *opusDecoder) detachSource() {
 	if d.srcCloser != nil {
 		d.srcCloser.Close()
 		d.srcCloser = nil
@@ -339,7 +282,7 @@ func (d *pionOpusDecoder) detachSource() {
 	d.reader = nil
 }
 
-func (d *pionOpusDecoder) Info() core.StreamInfo {
+func (d *opusDecoder) Info() core.StreamInfo {
 	return core.StreamInfo{
 		Format: core.FrameFormat{Rate: 48000, Ch: 2, Fmt: core.F32},
 		// The page index built at open already carries the final granule, so
@@ -350,14 +293,14 @@ func (d *pionOpusDecoder) Info() core.StreamInfo {
 }
 
 // DecoderName names the Opus implementation behind this decoder.
-func (d *pionOpusDecoder) DecoderName() string { return "pion/opus" }
+func (d *opusDecoder) DecoderName() string { return "go-opus" }
 
 // ParserName names the container reader this decoder consumes. It is this
 // package's native reader for whichever container was opened: oggopus or
 // webmopus.
-func (d *pionOpusDecoder) ParserName() string { return d.parserName }
+func (d *opusDecoder) ParserName() string { return d.parserName }
 
-func (d *pionOpusDecoder) ReadFrames(dst []float32) (int, error) {
+func (d *opusDecoder) ReadFrames(dst []float32) (int, error) {
 	if d.closed {
 		return 0, ErrClosed
 	}
@@ -394,7 +337,7 @@ func (d *pionOpusDecoder) ReadFrames(dst []float32) (int, error) {
 
 // fill decodes packets until one produces audible frames, applying the header
 // gain and consuming any outstanding pre-skip first.
-func (d *pionOpusDecoder) fill() error {
+func (d *opusDecoder) fill() error {
 	for {
 		packet, _, err := d.reader.ReadPacket()
 		if err != nil {
@@ -416,21 +359,25 @@ func (d *pionOpusDecoder) fill() error {
 	}
 }
 
-// decodePacket runs the codec on one packet into decBuf and returns the frame
-// count. Every codec call goes through here so the decoded-packet budget is
-// measured in one place.
-func (d *pionOpusDecoder) decodePacket(packet []byte) (int, error) {
+// decodePacket runs the codec on one packet into i16, converts to float32 in
+// decBuf, and returns the frame count. Every codec call goes through here so
+// the decoded-packet budget is measured in one place.
+func (d *opusDecoder) decodePacket(packet []byte) (int, error) {
 	d.decodedPackets++
 
-	n, err := d.dec.DecodeToFloat32(packet, d.decBuf)
+	n, err := d.dec.Decode(packet, d.i16)
 	if err != nil {
 		return 0, fmt.Errorf("decode: opus packet: %w", err)
+	}
+	// go-opus is fixed-point and emits int16; the decoder contract is float32.
+	for i := 0; i < n*2; i++ {
+		d.decBuf[i] = float32(d.i16[i]) * (1.0 / 32768.0)
 	}
 
 	return n, nil
 }
 
-func (d *pionOpusDecoder) scale(samples []float32) []float32 {
+func (d *opusDecoder) scale(samples []float32) []float32 {
 	if d.gain == 1 {
 		return samples
 	}
@@ -443,7 +390,7 @@ func (d *pionOpusDecoder) scale(samples []float32) []float32 {
 
 // trim drops decoded frames that belong to the encoder's pre-skip. A short
 // first packet is fully consumed and the remainder is carried to the next.
-func (d *pionOpusDecoder) trim(samples []float32) []float32 {
+func (d *opusDecoder) trim(samples []float32) []float32 {
 	if d.skip <= 0 {
 		return samples
 	}
@@ -466,7 +413,7 @@ func (d *pionOpusDecoder) trim(samples []float32) []float32 {
 // reader jumps to a page at or before it, packets that end before the codec's
 // warm-up window are advanced over without decoding, and only the short
 // remainder is decoded and discarded. No reopen and no decode from zero.
-func (d *pionOpusDecoder) SeekFrame(frame int64) error {
+func (d *opusDecoder) SeekFrame(frame int64) error {
 	if d.closed {
 		return ErrClosed
 	}
@@ -479,21 +426,19 @@ func (d *pionOpusDecoder) SeekFrame(frame int64) error {
 
 	preSkip := int64(d.reader.PreSkip())
 	target := seekGranuleFor(frame, preSkip)
-	if err := d.reader.SeekGranule(target, d.warmup); err != nil {
+	if err := d.reader.SeekGranule(target, opusWarmup); err != nil {
 		return fmt.Errorf("decode: seek to frame %d: %w", frame, err)
 	}
 
 	// The jump lands before the target, so the codec starts without the state
-	// earlier packets built. The existing decoder is reset in place: Init is the
-	// OPUS_RESET_STATE equivalent and clears coarse energy, overlap, the
+	// earlier packets built. The existing decoder is reset in place: Reset is
+	// the OPUS_RESET_STATE equivalent and clears coarse energy, overlap, the
 	// postfilter, the range decoder and the SILK resamplers, so reusing it is a
 	// fresh decode without a fresh allocation. It is warmed from the pre-roll
 	// page on the way to the target. Position is a granule lower bound for the
 	// next packet, so subtracting pre-skip yields a playable frame at or before
 	// the target; the discard loop closes the rest of the gap.
-	if err := d.dec.Init(48000, 2); err != nil {
-		return fmt.Errorf("decode: reset Opus decoder: %w", err)
-	}
+	d.dec.Reset()
 	d.pending = nil
 	d.skip = 0
 	d.pos = d.reader.Position() - preSkip
@@ -502,7 +447,7 @@ func (d *pionOpusDecoder) SeekFrame(frame int64) error {
 	// only to be thrown away. Advance over it packet by packet instead; the
 	// packet that straddles the window is decoded, then the discard loop below
 	// closes the remaining gap.
-	if err := d.skipWarmup(frame, target-d.warmup); err != nil {
+	if err := d.skipWarmup(frame, target-opusWarmup); err != nil {
 		return err
 	}
 
@@ -522,7 +467,7 @@ func (d *pionOpusDecoder) SeekFrame(frame int64) error {
 // decodes the landing page as before. From an exact start the sum stays exact
 // across page boundaries and spanning packets, so no re-anchoring is needed. A
 // packet whose TOC yields no duration is decoded.
-func (d *pionOpusDecoder) skipWarmup(frame, limit int64) error {
+func (d *opusDecoder) skipWarmup(frame, limit int64) error {
 	if limit <= 0 || !d.reader.PositionExact() {
 		return nil
 	}
@@ -556,7 +501,7 @@ func (d *pionOpusDecoder) skipWarmup(frame, limit int64) error {
 
 // discardFromPacket decodes one already-read packet and then hands off to the
 // ordinary discard loop, which reads the packets that follow.
-func (d *pionOpusDecoder) discardFromPacket(frame int64, packet []byte) error {
+func (d *opusDecoder) discardFromPacket(frame int64, packet []byte) error {
 	n, err := d.decodePacket(packet)
 	if err != nil {
 		return err
@@ -576,7 +521,7 @@ func seekGranuleFor(frame, preSkip int64) int64 { return frame + preSkip }
 // discardTo decodes forward until exactly frame playable frames are accounted
 // for. The frames before the target are dropped; frames past it are kept in
 // pending so the refill does not decode them twice.
-func (d *pionOpusDecoder) discardTo(frame int64) error {
+func (d *opusDecoder) discardTo(frame int64) error {
 	for d.pos < frame {
 		if len(d.pending) == 0 {
 			if err := d.fill(); err != nil {
@@ -603,7 +548,7 @@ func (d *pionOpusDecoder) discardTo(frame int64) error {
 	return nil
 }
 
-func (d *pionOpusDecoder) Close() error {
+func (d *opusDecoder) Close() error {
 	d.closed = true
 	d.pending = nil
 	d.reader = nil

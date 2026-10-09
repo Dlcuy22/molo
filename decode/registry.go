@@ -130,7 +130,7 @@ type Prober interface {
 
 // Codec describes one registered factory for a UI that has to offer a choice.
 type Codec struct {
-	Name         string // "opus-pion"  <- configuration key
+	Name         string // "opus"  <- configuration key
 	FriendlyName string // "Portable"   <- UI label
 	Weight       int    // 90
 	Exts         []string

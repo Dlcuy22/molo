@@ -37,14 +37,14 @@ func TestDebugFormatters(t *testing.T) {
 		got  string
 		want string
 	}{
-		{"decoder", formatDecoderLine("pion/opus", "pion/opus/pkg/oggreader"), "decoder  pion/opus  parser  pion/opus/pkg/oggreader"},
+		{"decoder", formatDecoderLine("go-opus", "molo/decode (oggopus)"), "decoder  go-opus  parser  molo/decode (oggopus)"},
 		{"meta", formatMetaLine("embedded-tags"), "meta     embedded-tags"},
 		{"state", formatStateLine(molo.Playing), "state    playing"},
 		{"eos", formatEOSLine("/music/stereo_2s.opus"), "eos      stereo_2s.opus"},
 		{"seek", formatSeekLine(12*time.Second, 42*time.Second, 3*time.Millisecond), "seek     0:12 -> 0:42  took 3ms"},
 		{"error", formatErrorLine(errFailed), "error    test failure"},
 		{"track", formatTrackLine("/music/a.opus"), "track    a.opus"},
-		{"codec", formatCodecLine("opus-pion"), "codec    opus-pion"},
+		{"codec", formatCodecLine("opus"), "codec    opus"},
 		{"codec auto", formatCodecLine(""), "codec    auto"},
 	}
 	for _, tc := range cases {

@@ -59,9 +59,9 @@ cut.
   and low watermarks, and 100 ms chunks.
 - Decoders for Ogg Opus, WebM/Matroska Opus, FLAC, WAV, MP3, M4A, and AAC,
   selected by extension or by header magic.
-- Three Opus implementations with different seek trade-offs: a portable pure-Go
-  `opus-pion`, a bit-perfect `opus-pion-exact`, and a `opus-libopusfile` path
-  through `ebitengine/purego` behind a build tag.
+- Two Opus implementations with different trade-offs: a portable pure-Go `opus`
+  (a fixed-point port of libopus via `tphakala/go-opus`), and an
+  `opus-libopusfile` path through `ebitengine/purego` behind a build tag.
 - Codec profiles (friendly name and weight), automatic selection by weight, and
   named selection through `OpenNamed` and `player -codecs`.
 - Native seeking where the format supports it, with latest-wins collapsing so a

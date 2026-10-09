@@ -78,7 +78,7 @@ func appendPacket(lacing, body, packet []byte) ([]byte, []byte) {
 	return lacing, append(body, packet...)
 }
 
-// TestPionSeekAcrossSpanningPageStaysBounded composes the warm-up skip with the
+// TestOpusSeekAcrossSpanningPageStaysBounded composes the warm-up skip with the
 // reader's continued-packet drop. A seek whose landing page opens mid-packet
 // cannot reconstruct that packet, so its first deliverable frame is the next
 // packet. PositionExact is false for such a landing, which makes the decoder
@@ -87,13 +87,13 @@ func appendPacket(lacing, body, packet []byte) ([]byte, []byte) {
 // that the discarded prefix is not decoded as audio, and that no packet before
 // the landing page is re-decoded. The drop itself is pinned by
 // TestOggOpusReaderSeekSkipsIncompleteLeadingPacket, which this must not break.
-func TestPionSeekAcrossSpanningPageStaysBounded(t *testing.T) {
+func TestOpusSeekAcrossSpanningPageStaysBounded(t *testing.T) {
 	path, _, _ := spanningFixture(t, "stereo_2s.opus")
 	packetSamples := 960
 
 	for _, at := range []int64{0, 960, 20000, 40000} {
 		t.Run(itoa(at), func(t *testing.T) {
-			d, err := NewPionOpusFactory().Open(path)
+			d, err := NewOpusFactory().Open(path)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -105,7 +105,7 @@ func TestPionSeekAcrossSpanningPageStaysBounded(t *testing.T) {
 			// packet to the target, so the decoded count is bounded by the
 			// target distance, never by an earlier page.
 			bound := int(at)/packetSamples + 4
-			if decoded := d.(*pionOpusDecoder).decodedPackets; decoded > bound {
+			if decoded := d.(*opusDecoder).decodedPackets; decoded > bound {
 				t.Fatalf("spanning-page seek decoded %d packets, want at most %d (target %d frames)",
 					decoded, bound, at)
 			}

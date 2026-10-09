@@ -22,119 +22,59 @@ func registeredFactory(t *testing.T, name string) Factory {
 	return nil
 }
 
-// TestPionVariantsAreRegisteredWithDistinctProfiles pins the registry contract
-// for the two pure-Go variants: both claim Ogg Opus, both expose a profile, and
-// only the fast one carries the higher weight that keeps it the default. The
-// exact variant is an explicit opt-in, not an automatic choice.
-func TestPionVariantsAreRegisteredWithDistinctProfiles(t *testing.T) {
-	cases := []struct {
-		name     string
-		friendly string
-		weight   int
-	}{
-		{"opus-pion", "Portable", 90},
-		{"opus-pion-exact", "Bit-perfect", 85},
+// TestOpusFactoryIsRegisteredWithProfile pins the registry contract for the
+// pure-Go decoder: it claims Ogg Opus, exposes a profile, and carries the
+// higher weight that makes it the automatic default over libopusfile.
+func TestOpusFactoryIsRegisteredWithProfile(t *testing.T) {
+	f := registeredFactory(t, "opus")
+	if _, ok := f.(Profile); !ok {
+		t.Fatal("opus does not implement Profile")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := registeredFactory(t, tc.name)
-			if _, ok := f.(Profile); !ok {
-				t.Fatalf("%s does not implement Profile", tc.name)
-			}
-			friendly, weight := ProfileOf(f)
-			if friendly != tc.friendly || weight != tc.weight {
-				t.Fatalf("profile = %q/%d, want %q/%d", friendly, weight, tc.friendly, tc.weight)
-			}
-			for _, ext := range []string{".opus", ".ogg"} {
-				if !slices.Contains(f.Exts(), ext) {
-					t.Fatalf("Exts() = %v, missing %s", f.Exts(), ext)
-				}
-			}
-			if !f.Match([]byte("OggS\x00\x02")) {
-				t.Fatal("Match rejected an OggS header")
-			}
-			if f.Match([]byte("RIFF....WAVE")) {
-				t.Fatal("Match accepted a WAVE header")
-			}
-		})
+	friendly, weight := ProfileOf(f)
+	if friendly != "Portable" || weight != 90 {
+		t.Fatalf("profile = %q/%d, want Portable/90", friendly, weight)
 	}
-
-	_, fastWeight := ProfileOf(registeredFactory(t, "opus-pion"))
-	_, exactWeight := ProfileOf(registeredFactory(t, "opus-pion-exact"))
-	if fastWeight <= exactWeight {
-		t.Fatalf("fast weight %d must exceed exact weight %d so the default does not move", fastWeight, exactWeight)
+	for _, ext := range []string{".opus", ".ogg"} {
+		if !slices.Contains(f.Exts(), ext) {
+			t.Fatalf("Exts() = %v, missing %s", f.Exts(), ext)
+		}
+	}
+	if !f.Match([]byte("OggS\x00\x02")) {
+		t.Fatal("Match rejected an OggS header")
+	}
+	if f.Match([]byte("RIFF....WAVE")) {
+		t.Fatal("Match accepted a WAVE header")
 	}
 }
 
-// TestOpenNamedPionVariants opens both variants by name and checks the warm-up
-// window each one actually installs. The window is what separates the two, so
-// asserting it on the decoder is the end-to-end proof, not just the metadata.
-func TestOpenNamedPionVariants(t *testing.T) {
-	cases := []struct {
-		name     string
-		friendly string
-		warmup   int64
-	}{
-		{"opus-pion", "Portable", pionWarmupFast},
-		{"opus-pion-exact", "Bit-perfect", pionWarmupExact},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d, err := Default.OpenNamed(tc.name, fixturePath(t, "stereo_2s.opus"))
-			if err != nil {
-				t.Fatalf("OpenNamed(%s): %v", tc.name, err)
-			}
-			defer d.Close()
-
-			p, ok := d.(*pionOpusDecoder)
-			if !ok {
-				t.Fatalf("OpenNamed(%s) produced %T, want *pionOpusDecoder", tc.name, d)
-			}
-			if p.warmup != tc.warmup {
-				t.Fatalf("%s warmup = %d, want %d", tc.name, p.warmup, tc.warmup)
-			}
-			if friendly, _ := ProfileOf(registeredFactory(t, tc.name)); friendly != tc.friendly {
-				t.Fatalf("%s friendly name = %q, want %q", tc.name, friendly, tc.friendly)
-			}
-		})
-	}
-}
-
-// TestPionDefaultCodecIsStillFast anchors the unchanged default: automatic
-// selection opens the fast variant (80 ms window), and only it is marked
-// Default among the Opus codecs.
-func TestPionDefaultCodecIsStillFast(t *testing.T) {
+// TestOpusDefaultCodecIsThePureGoOne anchors the default: automatic selection
+// opens the pure-Go decoder, and only it is marked Default among the Opus
+// codecs. The exact variant is gone, so there is nothing left to keep below it.
+func TestOpusDefaultCodecIsThePureGoOne(t *testing.T) {
 	d, err := Default.Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Default.Open: %v", err)
 	}
 	defer d.Close()
 
-	p, ok := d.(*pionOpusDecoder)
-	if !ok {
-		t.Fatalf("Default.Open produced %T, want *pionOpusDecoder", d)
-	}
-	if p.warmup != pionWarmupFast {
-		t.Fatalf("default warmup = %d, want the fast %d", p.warmup, pionWarmupFast)
+	if _, ok := d.(*opusDecoder); !ok {
+		t.Fatalf("Default.Open produced %T, want *opusDecoder", d)
 	}
 
 	seen := map[string]Codec{}
 	for _, c := range Default.Codecs() {
 		seen[c.Name] = c
 	}
-	for _, name := range []string{"opus-pion", "opus-pion-exact", "opus-libopusfile"} {
+	for _, name := range []string{"opus", "opus-libopusfile"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("Codecs() is missing %s", name)
 		}
 	}
-	if !seen["opus-pion"].Default {
-		t.Fatal("opus-pion is not marked Default for .opus/.ogg")
+	if !seen["opus"].Default {
+		t.Fatal("opus is not marked Default for .opus/.ogg")
 	}
-	if seen["opus-pion-exact"].Default {
-		t.Fatal("opus-pion-exact is marked Default; the bit-perfect variant must stay an opt-in")
-	}
-	if seen["opus-pion"].Weight != 90 || seen["opus-pion-exact"].Weight != 85 {
-		t.Fatalf("weights changed: fast=%d exact=%d", seen["opus-pion"].Weight, seen["opus-pion-exact"].Weight)
+	if seen["opus"].Weight != 90 {
+		t.Fatalf("opus weight = %d, want 90", seen["opus"].Weight)
 	}
 }
 
@@ -150,13 +90,13 @@ func rangeMaxAbs(a, b []float32, from, to int) float64 {
 	return peak
 }
 
-// TestPionFastSeekTransientIsBoundedAndConfined is the fast variant's
-// correctness property. An 80 ms warm-up cannot rebuild the CELT coarse-energy
-// state exactly, so the samples right after the target differ from a straight
-// decode; that transient is bounded and decays below a strict floor within the
-// first 200 ms. It must not be bit-exact (that would mean the exact warm-up was
-// used) and must not leave a residual difference across the whole window.
-func TestPionFastSeekTransientIsBoundedAndConfined(t *testing.T) {
+// TestOpusSeekTransientIsBoundedAndConfined is the decoder's seek correctness
+// property. An 80 ms warm-up cannot rebuild the CELT coarse-energy state
+// exactly, so the samples right after the target differ from a straight decode;
+// that transient is bounded and decays below a strict floor within the first
+// 200 ms. It must not be bit-exact (that would mean the warm-up was skipped
+// entirely) and must not leave a residual difference across the whole window.
+func TestOpusSeekTransientIsBoundedAndConfined(t *testing.T) {
 	const (
 		windowFrames = 24000 // 500 ms read after each seek
 		headFrames   = 4800  // 100 ms
@@ -175,7 +115,7 @@ func TestPionFastSeekTransientIsBoundedAndConfined(t *testing.T) {
 		t.Run(tc.fixture+"/"+itoa(tc.at), func(t *testing.T) {
 			full := decodeFixture(t, tc.fixture)
 
-			d, err := NewPionOpusFactory().Open(fixturePath(t, tc.fixture))
+			d, err := NewOpusFactory().Open(fixturePath(t, tc.fixture))
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -189,72 +129,62 @@ func TestPionFastSeekTransientIsBoundedAndConfined(t *testing.T) {
 
 			headPeak := rangeMaxAbs(got, want, 0, min(headFrames, n))
 			if headPeak == 0 {
-				t.Fatal("fast seek was bit-exact; the 80 ms warm-up cannot reproduce a straight decode")
+				t.Fatal("seek was bit-exact; the 80 ms warm-up cannot reproduce a straight decode")
 			}
 			if headPeak > 0.2 {
-				t.Fatalf("fast transient peak = %.4f, want a bounded click", headPeak)
+				t.Fatalf("seek transient peak = %.4f, want a bounded click", headPeak)
 			}
 
 			// From 100 ms the difference must be far below the transient, and
 			// by 200 ms it must be confined to a tiny floor.
 			if mid := rangeMaxAbs(got, want, min(headFrames, n), n); mid > 0.01 {
-				t.Fatalf("fast difference after 100 ms = %.5f, want the transient confined to the start", mid)
+				t.Fatalf("difference after 100 ms = %.5f, want the transient confined to the start", mid)
 			}
 			if tail := rangeMaxAbs(got, want, min(tailFrames, n), n); tail > 0.001 {
-				t.Fatalf("fast difference after 200 ms = %.6f, want convergence", tail)
+				t.Fatalf("difference after 200 ms = %.6f, want convergence", tail)
 			}
 			t.Logf("headPeak=%.5f", headPeak)
 		})
 	}
 }
 
-// TestPionVariantsSurviveSeekSequence runs A -> B -> A on one decoder and
-// compares each landing against a straight decode at that target. A decoder
-// whose reused codec state leaks between seeks would diverge at the second A.
-// The exact variant must reproduce the straight decode byte for byte; the fast
-// variant must stay inside its confined transient.
-func TestPionVariantsSurviveSeekSequence(t *testing.T) {
-	cases := []struct {
-		name  string
-		fast  bool
-		build func() Factory
-	}{
-		{"opus-pion", true, func() Factory { return NewPionOpusFactory() }},
-		{"opus-pion-exact", false, func() Factory { return NewPionOpusExactFactory() }},
+// TestOpusSeekSurvivesSeekSequence runs A -> B -> A on one decoder and compares
+// each landing against a straight decode at that target. A decoder whose reused
+// codec state leaks between seeks would diverge at the second A.
+func TestOpusSeekSurvivesSeekSequence(t *testing.T) {
+	full := decodeFixture(t, "stereo_2s.opus")
+	d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			full := decodeFixture(t, "stereo_2s.opus")
-			d, err := tc.build().Open(fixturePath(t, "stereo_2s.opus"))
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer d.Close()
-			seeker := d.(Seeker)
+	defer d.Close()
+	seeker := d.(Seeker)
 
-			// A -> B -> A, where B is far enough that stale state would show.
-			for _, pass := range []int64{10000, 48000, 10000} {
-				if err := seeker.SeekFrame(pass); err != nil {
-					t.Fatalf("SeekFrame(%d): %v", pass, err)
-				}
-				const frames = 12000
-				got := readExactlyFrames(t, d, frames)
-				want := full[pass*2 : (pass+frames)*2]
+	// A -> B -> A, where B is far enough that stale state would show.
+	for _, pass := range []int64{10000, 48000, 10000} {
+		if err := seeker.SeekFrame(pass); err != nil {
+			t.Fatalf("SeekFrame(%d): %v", pass, err)
+		}
+		const frames = 12000
+		got := readExactlyFrames(t, d, frames)
+		want := full[pass*2 : (pass+frames)*2]
 
-				if tc.fast {
-					if peak := rangeMaxAbs(got, want, 0, frames); peak > 0.2 {
-						t.Fatalf("seek %d: fast transient peak %.5f is unbounded", pass, peak)
-					}
-					if tail := rangeMaxAbs(got, want, 9600, frames); tail > 0.001 {
-						t.Fatalf("seek %d: fast residual after 200 ms = %.6f; state leaked across seeks", pass, tail)
-					}
+		if peak := rangeMaxAbs(got, want, 0, frames); peak > 0.2 {
+			t.Fatalf("seek %d: transient peak %.5f is unbounded", pass, peak)
+		}
+		if tail := rangeMaxAbs(got, want, 9600, frames); tail > 0.001 {
+			t.Fatalf("seek %d: residual after 200 ms = %.6f; state leaked across seeks", pass, tail)
+		}
+	}
 
-					continue
-				}
-				if !bytes.Equal(float32sToBytes(got), float32sToBytes(want)) {
-					t.Fatalf("seek %d: exact variant diverged from the straight decode; state leaked across seeks", pass)
-				}
-			}
-		})
+	// A final seek back to the head must reproduce the straight decode's head,
+	// proving the reader and codec both reset rather than carrying the last
+	// landing's state forward.
+	if err := seeker.SeekFrame(0); err != nil {
+		t.Fatalf("SeekFrame(0): %v", err)
+	}
+	head := readExactlyFrames(t, d, 2000)
+	if !bytes.Equal(float32sToBytes(head), float32sToBytes(full[:2000*2])) {
+		t.Fatal("seek back to the head did not restore the straight decode")
 	}
 }

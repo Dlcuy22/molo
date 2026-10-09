@@ -2,18 +2,18 @@ package decode
 
 import "testing"
 
-// TestDescribeNamesPionOpus proves the pure-Go decoder can name the pieces it
+// TestDescribeNamesOpus proves the pure-Go decoder can name the pieces it
 // is built from, and that the labels reach the caller through the helper.
-func TestDescribeNamesPionOpus(t *testing.T) {
-	d, err := NewPionOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
+func TestDescribeNamesOpus(t *testing.T) {
+	d, err := NewOpusFactory().Open(fixturePath(t, "stereo_2s.opus"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer d.Close()
 
 	decoder, parser := Describe(d)
-	if decoder != "pion/opus" {
-		t.Fatalf("DecoderName = %q, want %q", decoder, "pion/opus")
+	if decoder != "go-opus" {
+		t.Fatalf("DecoderName = %q, want %q", decoder, "go-opus")
 	}
 	if parser != "molo/decode (oggopus)" {
 		t.Fatalf("ParserName = %q, want %q", parser, "molo/decode (oggopus)")

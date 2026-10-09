@@ -13,9 +13,8 @@ func TestCodecLabelFormat(t *testing.T) {
 		want          string
 	}{
 		// The shipped Opus and FLAC rows, which is the whole point of the
-		// family prefix: three Opus variants sort visually under "Opus".
-		{"opus-pion", "Portable", "Opus Portable"},
-		{"opus-pion-exact", "Bit-perfect", "Opus Bit-perfect"},
+		// family prefix: the Opus codecs sort visually under "Opus".
+		{"opus", "Portable", "Opus Portable"},
 		{"opus-libopusfile", "Fastest", "Opus Fastest"},
 		{"flac", "Lossless", "Flac Lossless"},
 		// A name that is its own family must not repeat itself.

@@ -93,7 +93,7 @@ func TestCodecPickerListsEveryCodec(t *testing.T) {
 func TestNewModelLoadsDefaultCodecs(t *testing.T) {
 	m := newModel(newFakePlayer())
 
-	for _, want := range []string{"opus-pion", "opus-libopusfile"} {
+	for _, want := range []string{"opus", "opus-libopusfile"} {
 		found := false
 		for _, c := range m.codecs {
 			if c.Name == want {

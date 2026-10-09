@@ -426,7 +426,7 @@ func WithProbeMode(mode core.DurationMode) Option {
 	return func(c *Config) { c.ProbeMode = &mode }
 }
 
-// WithDecoder picks the decoder by registry name, for example "opus-pion" or
+// WithDecoder picks the decoder by registry name, for example "opus" or
 // "opus-libopusfile". Empty means automatic selection, where the codec with the
 // highest weight wins. It is the starting value; ApplySettings can change it
 // while the player runs.
