@@ -3,10 +3,6 @@
 // A one-pole attack and release envelope detector supporting peak and RMS
 // modes. It provides sample-by-sample and frame-based envelope tracking for
 // dynamics processors.
-//
-// Clean-room note: this file implements the standard peak and RMS one-pole
-// envelope detector from public signal processing theory. It is not a
-// translation of any GPL or LGPL C code.
 
 package dsp
 

@@ -127,8 +127,8 @@ func TestFormatProgressStates(t *testing.T) {
 }
 
 // TestFormatProgressUnknownDurationHasNoPercent is the load-bearing assertion
-// behind requirement 3: an unknown duration must never be shown as a bogus
-// percentage or a zero-looking total.
+// behind the no-bogus-percentage rule: an unknown duration must never be shown
+// as a bogus percentage or a zero-looking total.
 func TestFormatProgressUnknownDurationHasNoPercent(t *testing.T) {
 	const want = "playing  0:03 / --:--  vol 100%  a.opus"
 

@@ -1,5 +1,3 @@
-// Clean-room note: tests verify EasyEffects preset parsing against independent fixtures.
-
 package dsp
 
 import (

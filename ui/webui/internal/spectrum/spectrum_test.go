@@ -218,7 +218,7 @@ func noise(amp float64, n int) []float32 {
 	return out
 }
 
-// TestFramesAreTemporallySmooth pins the EasyEffects-like motion: the display
+// TestFramesAreTemporallySmooth pins the display motion: the display
 // shows each fresh analysis directly, with no follower lagging it, so on
 // stationary noise the frame-to-frame movement is only the periodogram's own
 // flicker between heavily overlapping windows. It must stay small (correlated,
@@ -262,8 +262,8 @@ func TestBandsAreSmoothAcrossFrequency(t *testing.T) {
 	}
 }
 
-// TestPeakHoldsStillOnStationaryInput pins the EasyEffects-style axis
-// hysteresis: once settled on unchanging audio, the scale must not wander.
+// TestPeakHoldsStillOnStationaryInput pins the axis hysteresis: once settled
+// on unchanging audio, the scale must not wander.
 //
 // The measure is the mean absolute move from the settled peak, not the worst
 // single frame. The periodogram itself fluctuates frame to frame on noise (the

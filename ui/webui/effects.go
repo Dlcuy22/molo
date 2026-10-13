@@ -95,7 +95,7 @@ type EffectMetersInfo struct {
 // PresetImportResult reports what an EasyEffects preset import installed. The
 // stages count is the chain the preset replaced; the warnings name every
 // setting the importer skipped, so a user is not left guessing why a preset
-// sounds different from EasyEffects.
+// does not sound as authored.
 type PresetImportResult struct {
 	Stages   int      `json:"stages"`
 	Warnings []string `json:"warnings"`

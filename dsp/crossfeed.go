@@ -8,8 +8,7 @@
 // outputs, and a normalising gain that compensates the bass lift the shelf
 // would otherwise add.
 //
-// The coefficients follow the published bs2b design equations, and the
-// processing order matches the reference so the two are sample-comparable:
+// The coefficients follow the published bs2b design equations:
 //
 //	lo  = a0_lo * x + b1_lo * lo
 //	hi  = a0_hi * x + a1_hi * x[-1] + b1_hi * hi
@@ -17,14 +16,8 @@
 //
 // The arithmetic is float64 with float32 buffers, because the one-pole
 // recurrence is where a float32 state would drift and the engine's samples are
-// float32 anyway. The state persists across parameter changes, as it does in
-// the reference: only Configure or Reset clears it.
-//
-// Clean-room note: this file implements the algorithm from its published
-// description. It is not a translation of the C reference, and it does not
-// reproduce the reference's tuning range clamps in the same place. It exposes
-// the cutoff that the current Easy Effects crossfeed accidentally ignores, so
-// the control behaves as its label says.
+// float32 anyway. The state persists across parameter changes: only Configure
+// or Reset clears it.
 
 package dsp
 
@@ -51,8 +44,7 @@ const (
 )
 
 // Crossfeed tuning range. The cutoff is the low-pass corner; the feed is a
-// level in dB whose tenths select how much signal is sent across, so 4.5 sends
-// the reference's 45 tenths.
+// level in dB stored as tenths, so 4.5 dB is 45 tenths.
 const (
 	crossfeedMinCutoff = 300.0
 	crossfeedMaxCutoff = 2000.0
@@ -68,7 +60,7 @@ func NewCrossfeedFactory() *CrossfeedFactory { return &CrossfeedFactory{} }
 
 func (f *CrossfeedFactory) Kind() string { return "crossfeed" }
 
-// Impl names the reference algorithm this implementation follows.
+// Impl names the algorithm this implementation follows.
 func (f *CrossfeedFactory) Impl() string { return "crossfeed-bs2b" }
 
 func (f *CrossfeedFactory) FriendlyName() string { return "Bauer Crossfeed" }

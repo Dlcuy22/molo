@@ -4,9 +4,6 @@
 // formulae using the bilinear transform. This consciously duplicates the
 // designBiquad implementation in script/kernel.go because package dsp cannot
 // import script without an import cycle.
-//
-// Clean-room note: all filter forms are derived directly from the public RBJ
-// cookbook equations. No GPL or LGPL C code was consulted or translated.
 
 package dsp
 

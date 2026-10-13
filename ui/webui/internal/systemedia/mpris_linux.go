@@ -10,8 +10,8 @@
 // PropertiesChanged signal. Media keys, headset buttons and lock-screen
 // controls all speak this.
 //
-// Hand-rolled on godbus (BSD) rather than a GPL server package, which is why
-// the package exists at all.
+// Hand-rolled on godbus rather than a media-player framework, so the
+// integration adds no server dependency of its own.
 package systemedia
 
 import (

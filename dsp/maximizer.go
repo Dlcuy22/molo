@@ -1,8 +1,7 @@
 // Lookahead peak maximizer implementation.
 //
-// Clean-room note: this file implements the lookahead peak limiter concept
-// described in the DAFX'02 dynamics processing literature. It is not a
-// translation of zam-plugins or any GPL/LGPL codebase.
+// Implements the lookahead peak limiter concept described in the DAFX'02
+// dynamics processing literature.
 
 package dsp
 

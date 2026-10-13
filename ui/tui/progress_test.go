@@ -73,7 +73,7 @@ func TestFormatProgressStates(t *testing.T) {
 }
 
 // TestFormatProgressUnknownDuration is the load-bearing assertion behind the
-// "never a bogus percentage" requirement: a zero duration means the probe has
+// "never a bogus percentage" rule: a zero duration means the probe has
 // not answered, so the total is indeterminate and no percentage may appear.
 func TestFormatProgressUnknownDuration(t *testing.T) {
 	cases := []struct {

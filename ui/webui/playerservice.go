@@ -40,12 +40,12 @@ const (
 	eventEffectMeters = "molo:effect-meters"
 )
 
-// spectrumInterval is the visualizer analysis period: ~60 Hz, matching
-// EasyEffects' default spectrumFpsCap. The runner slides its 8192-sample
-// window by the wall-clock time since the previous frame, so each analysis
-// advances ~800 new samples with heavy window overlap: consecutive spectra
-// correlate and the motion reads as continuous with no follower lagging it,
-// regardless of how coarsely the tap below delivers the audio.
+// spectrumInterval is the visualizer analysis period: ~60 Hz. The runner
+// slides its 8192-sample window by the wall-clock time since the previous
+// frame, so each analysis advances ~800 new samples with heavy window overlap:
+// consecutive spectra correlate and the motion reads as continuous with no
+// follower lagging it, regardless of how coarsely the tap below delivers the
+// audio.
 const spectrumInterval = 16 * time.Millisecond
 
 // positionInterval is the snapshot refresh period. The engine reports discrete

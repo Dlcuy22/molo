@@ -77,7 +77,7 @@ func TestOpusSeekDecodedPacketsBounded(t *testing.T) {
 					got, bound, opusWarmup, span*packetSamples)
 			}
 			if got == 0 {
-				t.Fatal("seek decoded nothing, so the warm-up requirement was not met")
+				t.Fatal("seek decoded nothing, so the warm-up rule was not met")
 			}
 			t.Logf("page span %d packets: decoded %d during seek", span, got)
 		})

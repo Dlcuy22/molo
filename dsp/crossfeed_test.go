@@ -48,7 +48,7 @@ func newCrossfeedRef(rate int, cutoffHz, feedDB float64) *crossfeedRef {
 	}
 }
 
-// process applies the reference to interleaved stereo in place.
+// process applies the design to interleaved stereo in place.
 func (r *crossfeedRef) process(buf []float32) {
 	for i := 0; i+1 < len(buf); i += 2 {
 		l := float64(buf[i])
@@ -133,9 +133,9 @@ func TestCrossfeedLeakageFallsAsFeedRises(t *testing.T) {
 	// The right channel carries 660 Hz only. After crossfeed, 440 Hz appears
 	// in it: that is the leakage the effect exists to create.
 	//
-	// Feed is inverse to strength. The reference presets say so: Jmeier at
-	// 9.5 dB is "little change", Cmoy at 6 dB is stronger, and the default
-	// 4.5 dB sits between them, so a higher feed must leak less.
+	// Feed is inverse to strength: Jmeier at 9.5 dB is "little change", Cmoy
+	// at 6 dB is stronger, and the default 4.5 dB sits between them, so a
+	// higher feed must leak less.
 	leak := func(feed float64) float64 {
 		cf := newTestCrossfeed(t, rate, Values{CrossfeedFeed: feed})
 		buf := twoTone(frames, rate)
@@ -278,7 +278,7 @@ func TestCrossfeedSetIsAtomicAndValidated(t *testing.T) {
 
 func TestCrossfeedFeedTenthsRoundTrip(t *testing.T) {
 	// The feed is stored in dB and compiled to tenths. A stored value must
-	// select the same tenths the reference preset names: 4.5 dB is 45.
+	// select the same tenths the preset names: 4.5 dB is 45.
 	for _, tc := range []struct {
 		feed   float64
 		tenths int

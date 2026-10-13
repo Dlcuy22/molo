@@ -1,7 +1,6 @@
-// Clean-room note: this file implements the FFT kernel as a thin wrapper over
-// github.com/tphakala/simd/f32 (radix-4 STFT with SIMD vectorization) with an
-// independent scalar Cooley-Tukey radix-2 fallback for architectures without
-// AVX/NEON vector extensions. It is not a translation of any GPL/LGPL C code.
+// FFT kernel: a thin wrapper over github.com/tphakala/simd/f32 (radix-4 STFT
+// with SIMD vectorization) with an independent scalar Cooley-Tukey radix-2
+// fallback for architectures without AVX/NEON vector extensions.
 
 package dsp
 

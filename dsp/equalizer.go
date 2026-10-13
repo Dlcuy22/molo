@@ -1,8 +1,6 @@
 // Parametric equalizer implementation using RBJ cookbook biquad filters.
 //
-// Clean-room note: filter equations follow Robert Bristow-Johnson's public
-// Audio EQ Cookbook and match EasyEffects APO/DR mode. This does not use or
-// translate LSP RLC(BT) curve code, so response curves differ from RLC(BT).
+// Filter equations follow Robert Bristow-Johnson's public Audio EQ Cookbook.
 // Split-channel processing is not implemented; all bands apply to both channels.
 
 package dsp

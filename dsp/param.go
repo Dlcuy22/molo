@@ -91,8 +91,8 @@ const ParamBypass = "bypass"
 
 // ParamInputGain and ParamOutputGain are the standard per-effect gains in dB,
 // applied before and after the effect's own processing. They exist so a preset
-// maps one to one with the reference chain and so one stage can be trimmed
-// without touching the master volume.
+// maps one to one onto a stage and so one stage can be trimmed without
+// touching the master volume.
 const (
 	ParamInputGain  = "input-gain"
 	ParamOutputGain = "output-gain"

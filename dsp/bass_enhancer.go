@@ -3,10 +3,6 @@
 // Bass enhancer generates higher harmonics from the low-frequency band based on
 // the missing-fundamental psychoacoustic principle, allowing low bass to be
 // perceived on speakers and headphones that cannot reproduce deep fundamentals.
-//
-// Clean-room note: this file implements the missing-fundamental harmonic
-// synthesis concept from published psychoacoustic literature. It is not derived
-// from Calf, TAP Tubewarmth, or any other GPL/LGPL source.
 
 package dsp
 

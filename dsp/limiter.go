@@ -1,10 +1,7 @@
 // Lookahead limiter implementation.
 //
-// Clean-room note: this file implements the algorithm from public dynamics
-// processing concepts. It is not a translation of LSP or any GPL/LGPL code.
-//
-// Limitation note: mode and oversampling parameters are accepted for preset
-// compatibility but are not implemented; preset values are inert.
+// Mode and oversampling parameters are accepted for preset compatibility but
+// are not implemented; preset values are inert.
 
 package dsp
 

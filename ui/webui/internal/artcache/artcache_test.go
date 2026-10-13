@@ -36,8 +36,8 @@ func TestLoadMissingIsNil(t *testing.T) {
 	}
 }
 
-// TestDirFollowsXDGCacheOnLinux pins the platform rule the task asks for: the
-// cache lives under the XDG cache root, not the temp directory.
+// TestDirFollowsXDGCacheOnLinux pins the platform rule: the cache lives under
+// the XDG cache root, not the temp directory.
 func TestDirFollowsXDGCacheOnLinux(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", root)

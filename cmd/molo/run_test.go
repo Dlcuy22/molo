@@ -112,7 +112,7 @@ func TestRunPlaysToCompletionNonInteractive(t *testing.T) {
 	if !strings.Contains(out, "playing") {
 		t.Fatalf("stdout = %q, want a plain playing line", out)
 	}
-	// Requirement 4: no control codes when stdout is not a terminal.
+	// Non-TTY output must carry no control codes.
 	if strings.ContainsAny(out, "\r\x1b") {
 		t.Fatalf("non-TTY output contains control codes: %q", out)
 	}

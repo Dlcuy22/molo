@@ -30,9 +30,8 @@ type Config struct {
 	Bars int
 
 	// FFT is the transform length. It must be a power of two. 8192 gives a
-	// 5.9 Hz bin at 48 kHz, which resolves bass notes the way EasyEffects'
-	// 8192-point spectrum does; a shorter frame smears the low end across
-	// neighbouring bars.
+	// 5.9 Hz bin at 48 kHz, which resolves bass notes cleanly; a shorter frame
+	// smears the low end across neighbouring bars.
 	FFT int
 
 	// SampleRate is the rate of the tapped audio. The engine's canonical format
@@ -152,8 +151,7 @@ type Runner struct {
 	// display allocates nothing after New.
 	smooth []float64
 	// centers holds each bar's center frequency, log-spaced across the
-	// configured range the way EasyEffects resamples its FFT onto log-spaced
-	// display points.
+	// configured range.
 	centers []float64
 
 	// peak is the smoothed recent maximum in dB, which the dynamic scale is
@@ -299,11 +297,10 @@ func (r *Runner) Frame() []float64 {
 		r.trackPeak()
 		r.emptyTicks = 0
 
-		// The display shows the fresh analysis directly, the way EasyEffects
-		// replaces its series every frame with no follower in between: the
-		// window slides one small step per call, so the motion is already
-		// continuous. A per-bar attack/release here only adds lag, which reads
-		// as a slow display trailing the beat.
+		// The display shows the fresh analysis directly, with no follower in
+		// between: the window slides one small step per call, so the motion is
+		// already continuous. A per-bar attack/release here only adds lag,
+		// which reads as a slow display trailing the beat.
 		for b := range r.out {
 			r.out[b] = r.bandValue(b)
 		}
@@ -460,13 +457,11 @@ func (r *Runner) toDB() {
 }
 
 // sampleBands resamples the bin magnitude curve at each bar's center
-// frequency with linear interpolation, the way EasyEffects resamples its FFT
-// onto log-spaced display points (it uses a Steffen spline; on 4097 bins a
-// line between neighbours is within a fraction of a dB and, like the spline,
-// never overshoots). Taking the loudest bin instead would pull every wide bar
-// toward its noisiest bin and read hot; averaging would bury a tonal peak
-// among quiet neighbours. Interpolation reads the curve where the bar
-// actually is.
+// frequency with linear interpolation onto log-spaced display points. On 4097
+// bins a line between neighbours is within a fraction of a dB and never
+// overshoots. Taking the loudest bin instead would pull every wide bar toward
+// its noisiest bin and read hot; averaging would bury a tonal peak among quiet
+// neighbours. Interpolation reads the curve where the bar actually is.
 func (r *Runner) sampleBands() {
 	hzPerBin := float64(r.cfg.SampleRate) / float64(r.cfg.FFT)
 	top := len(r.mags) - 1
@@ -501,11 +496,10 @@ func (r *Runner) sampleBands() {
 
 // trackPeak follows the recent loudest band with a deadband: inside ~1% of
 // the display range the scale holds still, so periodogram noise never
-// shimmers it the way EasyEffects' axis hysteresis avoids relayouts. Outside
-// the band it eases up toward a new maximum and decays slowly, so a quiet
-// passage is amplified and a loud one is not pinned at the ceiling for long.
-// The floor it decays toward keeps the next quiet track from being scaled
-// against a peak from the previous, louder one.
+// shimmers it. Outside the band it eases up toward a new maximum and decays
+// slowly, so a quiet passage is amplified and a loud one is not pinned at the
+// ceiling for long. The floor it decays toward keeps the next quiet track from
+// being scaled against a peak from the previous, louder one.
 func (r *Runner) trackPeak() {
 	peak := math.Inf(-1)
 	for _, db := range r.bands {
@@ -521,10 +515,9 @@ func (r *Runner) trackPeak() {
 
 		return
 	}
-	// EasyEffects only moves its dynamic axis when the data moves more than
-	// ~1%, so the scale never shimmers with periodogram noise. Same deadband
-	// here, measured against the display range: inside it the scale holds
-	// perfectly still.
+	// The dynamic axis only moves when the data moves more than ~1%, so the
+	// scale never shimmers with periodogram noise. The deadband is measured
+	// against the display range: inside it the scale holds perfectly still.
 	if math.Abs(peak-r.peak)/r.cfg.RangeDB <= 0.01 {
 		return
 	}

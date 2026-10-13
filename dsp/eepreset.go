@@ -1,5 +1,5 @@
-// Clean-room note: this file reads the EasyEffects preset JSON format specification.
-// It is an independent clean-room implementation and does not copy EasyEffects code.
+// EasyEffects preset import. The preset JSON format is the input contract;
+// this file parses it into a Pipeline.
 
 package dsp
 

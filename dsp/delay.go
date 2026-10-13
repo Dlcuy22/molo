@@ -1,6 +1,4 @@
-// Clean-room note: this file implements a fixed-size ring buffer using standard
-// circular-buffer lookahead-delay techniques. It is not a translation of any
-// GPL or LGPL C code.
+// Fixed-size ring buffer for integer and fractional lookahead delays.
 
 package dsp
 

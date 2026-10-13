@@ -64,8 +64,8 @@ func TestFadeInRampsFromSilenceToUnity(t *testing.T) {
 	}
 	// Sample 479 (the last before the 480-sample ramp completes) should be
 	// just under unity, and the following sample (index 480) is past the ramp
-	// so it holds at unity. Here we only have 480 samples total, so the last
-	// is 479/480.
+	// so it holds at unity. The buffer is 480 samples total, so the last is
+	// 479/480.
 	want := float32(479.0 / 480.0)
 	if math.Abs(float64(buf[len(buf)-2]-want)) > 1e-4 {
 		t.Fatalf("last ramped sample = %v, want ~%v", buf[len(buf)-2], want)

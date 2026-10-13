@@ -22,7 +22,7 @@ const subdir = "molo-art"
 
 // Dir returns the directory the cache lives in, creating it on first use. On
 // Linux it is the XDG cache directory ($XDG_CACHE_HOME/molo/art, defaulting to
-// ~/.cache/molo/art); on Windows it is the temporary directory, as requested.
+// ~/.cache/molo/art); on Windows it is the temporary directory.
 func Dir() (string, error) {
 	dir := fallbackDir()
 	if runtime.GOOS != "windows" {

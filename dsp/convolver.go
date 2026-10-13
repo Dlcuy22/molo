@@ -1,7 +1,5 @@
-// Clean-room note: this file implements uniform-partitioned overlap-add
-// convolution from published signal processing literature. It is an
-// independent clean-room implementation and is not a translation of
-// zita-convolver, EasyEffects, or any GPL/LGPL codebase.
+// Uniform-partitioned overlap-add convolution, following the published signal
+// processing literature.
 
 package dsp
 

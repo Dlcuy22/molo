@@ -1,6 +1,5 @@
-// Clean-room note: impulse response loading and formatting in this file is an
-// independent implementation based on the standard RIFF/WAVE container
-// specification. It does not use or translate any GPL/LGPL source code.
+// Impulse response loading and formatting, based on the standard RIFF/WAVE
+// container specification.
 
 package dsp
 
