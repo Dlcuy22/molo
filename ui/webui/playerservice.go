@@ -140,6 +140,13 @@ type PlayerService struct {
 	// transport simply stays inert.
 	systemMedia systemMediaState
 
+	// appSettingsMu guards the persisted settings document, which the panel
+	// edits and the settings file stores. The engine's own copy is the source
+	// of truth for playback; this is the UI's view of it, kept so a save writes
+	// the whole document rather than one field.
+	appSettingsMu sync.Mutex
+	appSettings   AppSettings
+
 	log *slog.Logger
 }
 
@@ -157,6 +164,7 @@ func newPlayerService() *PlayerService {
 		ytm:             ytmIndex,
 		ytmProv:         newYTMProvider(ytmIndex, ytmSeamlessSwap, nil),
 		searchCache:     make(map[string][]YTMResult),
+		appSettings:     loadAppSettings(),
 		ctx:             ctx,
 		cancel:          cancel,
 		log:             slog.Default(),
@@ -187,6 +195,11 @@ func (s *PlayerService) ServiceStartup(_ context.Context, _ application.ServiceO
 	if err := s.rebuildRunner(); err != nil {
 		return err
 	}
+
+	// Restore the persisted settings onto the engine before anything plays, so
+	// a remembered crossfade is in force from the first handoff rather than
+	// only after the panel is opened.
+	s.applyAppSettingsLocked()
 
 	// The preview player is a second instance over the same process-wide oto
 	// context, which oto mixes. It is built here so a failure to construct it
