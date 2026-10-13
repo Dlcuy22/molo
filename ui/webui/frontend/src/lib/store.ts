@@ -20,6 +20,7 @@ import type {
   SpectrumConfig,
   YTMResult,
   DiscordStatus,
+  AppSettings,
 } from "../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 import type { Param } from "../../bindings/github.com/dlcuy22/molo/ui/webui/internal/spectrum/models";
 import type { EffectKind, EffectStage } from "./effect-types";
@@ -89,6 +90,17 @@ export const cover = writable<string>("");
  *  on and whether the IPC socket is open. It is read on connect and refreshed
  *  after a toggle, so the settings panel can show a truthful state line. */
 export const discordStatus = writable<DiscordStatus>({ enabled: false, connected: false });
+
+/** appSettings is the persisted settings document the Ctrl+I panel edits. It is
+ *  read once on connect and written back whole through SetAppSettings, so the
+ *  store and the file always describe the same document. The default mirrors
+ *  the Go side: crossfade off at the default duration. */
+export const appSettings = writable<AppSettings>({
+  version: 1,
+  playback: { crossfade: { enabled: false, durationMs: 5000, skipSameAlbum: true } },
+  stream: {},
+  general: {},
+});
 
 /** queueCoverCache memoises the palette's per-track artwork by cover id, so a
  *  row scrolled back into view, or a shared album cover, is not re-fetched.
@@ -350,6 +362,7 @@ export function connect(): () => void {
   PlayerService.SpectrumSchema().then(spectrumSchema.set);
   PlayerService.PreviewConfig().then(previewConfig.set);
   PlayerService.DiscordStatus().then(discordStatus.set);
+  PlayerService.AppSettings().then(appSettings.set);
   if (isEffectWindow) {
     void syncEffectChain();
     PlayerService.EffectKinds().then((kinds) => {
@@ -447,6 +460,21 @@ export const commands = {
   setPreviewConfig: (cfg: PreviewConfig) => {
     previewConfig.set(cfg);
     PlayerService.SetPreviewConfig(cfg).catch(() => {});
+  },
+
+  // setAppSettings writes the whole settings document. It mirrors the value
+  // locally first so the panel reacts on the click, then persists through Go.
+  // The normalized document Go returns is mirrored back, so a clamped value
+  // does not leave the panel showing something the file does not hold.
+  setAppSettings: (next: AppSettings) => {
+    appSettings.set(next);
+    PlayerService.SetAppSettings(next)
+      .then((stored) => {
+        if (stored) appSettings.set(stored);
+      })
+      .catch((err) => {
+        player.update((s) => ({ ...s, error: errorText(err) }));
+      });
   },
 
   // Effect commands. openEffectWindow is the main window's entry point; the

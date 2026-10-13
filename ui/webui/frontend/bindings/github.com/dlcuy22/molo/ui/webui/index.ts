@@ -7,7 +7,9 @@ export {
 };
 
 export type {
+    AppSettings,
     CodecOption,
+    CrossfadeSettings,
     DiscordStatus,
     EffectChainInfo,
     EffectKindInfo,
@@ -16,12 +18,15 @@ export type {
     EffectReadingInfo,
     EffectStageInfo,
     EffectVisualInfo,
+    GeneralSettings,
     Options,
+    PlaybackSettings,
     PresetImportResult,
     PreviewConfig,
     PreviewState,
     QueueRow,
     Snapshot,
     SpectrumConfig,
+    StreamSettings,
     YTMResult
 } from "./models.js";

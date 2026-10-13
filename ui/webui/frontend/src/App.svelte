@@ -10,6 +10,7 @@
   import Controls from "./lib/components/Controls.svelte";
   import DiscordPanel from "./lib/components/DiscordPanel.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
+  import SettingsPanel from "./lib/components/settings/SettingsPanel.svelte";
 
   // The one subscription to the Go push stream. connect returns its own
   // teardown, so a hot reload does not leave a second listener behind.
@@ -32,9 +33,20 @@
   let previewOnOpen = $state(false);
   const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
   const shortcutLabel = isMac ? "⌘P" : "Ctrl P";
+  // The settings panel is opened with Ctrl+I (Cmd+I on macOS) and is a modal
+  // overlay of its own, independent of the palette.
+  let settingsOpen = $state(false);
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      // Ctrl+I opens settings. It is checked before the palette chords so the
+      // two modals cannot both be open at once.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "i") {
+        e.preventDefault();
+        settingsOpen = !settingsOpen;
+
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.altKey && key === "p") {
         e.preventDefault();
         if (paletteOpen) {
@@ -222,4 +234,6 @@
     startPreview={previewOnOpen}
     onclose={closePalette}
   />
+
+  <SettingsPanel open={settingsOpen} onclose={() => (settingsOpen = false)} />
 </div>

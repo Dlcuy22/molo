@@ -47,6 +47,14 @@ export function AddYTMPlaylist(input: string): $CancellablePromise<void> {
 }
 
 /**
+ * AppSettings returns the persisted settings the panel renders. It is a plain
+ * read: the panel calls it once on open and mirrors edits locally.
+ */
+export function AppSettings(): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1575056406);
+}
+
+/**
  * AppendYTM adds a YouTube Music track to the end of the queue without starting
  * it, which is what Shift+Enter on a search result means. A live track is left
  * alone; an empty queue simply gains its first entry.
@@ -291,6 +299,20 @@ export function SearchYTMSongs(query: string): $CancellablePromise<$models.YTMRe
  */
 export function SeekTo(ms: number): $CancellablePromise<void> {
     return $Call.ByID(1112987009, ms);
+}
+
+/**
+ * SetAppSettings replaces the persisted settings, applies the playback half to
+ * the engine, and writes the document to disk. It returns the normalized
+ * document that was stored, so the caller can mirror exactly what was
+ * persisted rather than the value it sent (which may have been clamped).
+ * 
+ * Applying first means a failed disk write still leaves the engine running what
+ * the user chose; the write is best effort, so a read-only config directory
+ * only costs persistence across a restart, never the setting in this session.
+ */
+export function SetAppSettings(next: $models.AppSettings): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(3755042598, next);
 }
 
 /**
