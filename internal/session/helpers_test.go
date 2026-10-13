@@ -421,6 +421,37 @@ func (d *toneDecoder) SeekFrame(frame int64) error {
 
 func (d *toneDecoder) Close() error { return nil }
 
+// burstDecoder yields one small chunk of frames and then reports end of
+// stream, so a streamer over it holds a bounded, partial ring that never
+// refills to the high watermark. It lets a test exercise a short outgoing read
+// without the streamer's producer filling the buffer.
+type burstDecoder struct {
+	frames int
+	mu     sync.Mutex
+	sent   bool
+}
+
+func (d *burstDecoder) Info() core.StreamInfo {
+	return core.StreamInfo{Format: canonicalFormat, TotalFrames: int64(d.frames)}
+}
+
+func (d *burstDecoder) ReadFrames(dst []float32) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.sent {
+		return 0, io.EOF
+	}
+	d.sent = true
+	n := min(d.frames, len(dst)/canonicalFormat.Ch)
+	for i := range dst[:n*canonicalFormat.Ch] {
+		dst[i] = 0.25
+	}
+
+	return n, nil
+}
+
+func (d *burstDecoder) Close() error { return nil }
+
 // testConfig returns a Config wired to synthetic seams. The caller overrides
 // the pieces it cares about.
 func testConfig() Config {

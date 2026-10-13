@@ -230,6 +230,7 @@ type runtimeSettings struct {
 	backend   string
 	probeMode core.DurationMode
 	pipeline  dsp.Pipeline
+	crossfade CrossfadeSettings
 
 	// pipelineGen counts accepted pipeline changes. A build captures it
 	// together with the pipeline it built, and the control loop installs that
@@ -416,6 +417,25 @@ func (r *runtimeSettings) probeDurationMode() core.DurationMode {
 	defer r.mu.Unlock()
 
 	return r.probeMode
+}
+
+// crossfadeSettings returns the crossfade in force. It is read on every
+// handoff decision and on the snapshot tick, so it is a short-lived lock and a
+// value copy, not a pointer a caller could mutate.
+func (r *runtimeSettings) crossfadeSettings() CrossfadeSettings {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.crossfade
+}
+
+// setCrossfade stores the crossfade. The value is already validated by the
+// caller; it is kept here beside the rest of the runtime settings so the
+// control loop reads one consistent set.
+func (r *runtimeSettings) setCrossfade(c CrossfadeSettings) {
+	r.mu.Lock()
+	r.crossfade = c
+	r.mu.Unlock()
 }
 
 // command is one queued public call. Commands are values, so a caller never
@@ -618,6 +638,9 @@ type Session struct {
 	// seamlessCh carries a finished source upgrade from its worker to the
 	// control loop, which decides when the one engine worker can take it.
 	seamlessCh chan *seekRequest
+	// prefetchCh carries a finished crossfade prefetch build to the control
+	// loop, which installs it once the ramp moment arrives.
+	prefetchCh chan *prefetchState
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -703,6 +726,48 @@ type Session struct {
 	// owned by the control goroutine and called from retireLive, so a track the
 	// user left stops its upgrade instead of downloading until session Close.
 	upgradeCancel context.CancelFunc
+
+	// prefetch is the next track being built early for a crossfade, or nil.
+	// It is owned by the control goroutine. The build runs on a worker and
+	// reports on prefetchCh; the controller decides whether to blend into it
+	// or, when the moment never came, to close it.
+	prefetch *prefetchState
+
+	// xfading is true while a crossfade ramp is sounding. The control loop sets
+	// it when it publishes the ramp and clears it when the ramp completes or is
+	// aborted, so a manual transition can tell "the user asked to move" from
+	// "the tail is blending".
+	xfading bool
+
+	// prefetchGen counts prefetch requests. A worker captures it with its build
+	// so a result that lands after the prefetch was cancelled is closed instead
+	// of installed.
+	prefetchGen uint64
+
+	// xfadeStarts counts blends actually started. It is a test seam: the
+	// control loop increments it in beginCrossfade, so a test can prove the
+	// same-album skip suppressed the blend rather than inferring it from
+	// timing. A real session never reads it, and it is atomic because a test
+	// reads it from its own goroutine while the control loop runs.
+	xfadeStarts atomic.Int64
+
+	// prefetchFail records the queue index whose prefetch last failed to build,
+	// so the tick does not rebuild a track that will not open on every poll.
+	// It is reset whenever the queue moves.
+	prefetchFail int
+}
+
+// prefetchState is the next track built ahead of the crossfade. result carries
+// the finished build; when it lands the controller installs the streamer but
+// keeps the current track sounding until the ramp moment.
+type prefetchState struct {
+	gen    uint64
+	seq    uint64
+	index  int
+	path   string
+	album  string
+	result openResult
+	ready  bool
 }
 
 // requestKind selects what a queued engine step does. A plain seek and a
@@ -813,9 +878,11 @@ func New(cfg Config) (*Session, error) {
 		seekCh:  make(chan seekResult, 1),
 
 		seamlessCh: make(chan *seekRequest, 1),
+		prefetchCh: make(chan *prefetchState, 1),
 	}
 	s.runtime.set(cfg.Decoder, cfg.Backend, *cfg.ProbeMode)
 	s.runtime.setPipeline(cfg.Pipeline)
+	s.runtime.setCrossfade(DefaultCrossfade())
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.provider = newRoutedProvider(s.chain, s.gain, s.tap, s.feed, s.closing)
 
@@ -1382,6 +1449,22 @@ func (s *Session) SwapBackend(name string) error {
 // next buffer, so it is safe to call while audio is running.
 func (s *Session) SetVolume(v float64) { s.gain.SetVolume(v) }
 
+// Crossfade returns the crossfade settings in force. It is a value copy, so a
+// caller that mutates what it gets cannot reach the engine.
+func (s *Session) Crossfade() CrossfadeSettings {
+	return s.runtime.crossfadeSettings()
+}
+
+// SetCrossfade replaces the crossfade settings. An out-of-range duration is
+// clamped to the accepted range rather than rejected, matching the gain's
+// behaviour, so a UI can send what it holds without pre-clamping. The change
+// applies to the next handoff; a crossfade already in flight is left to finish.
+func (s *Session) SetCrossfade(c CrossfadeSettings) error {
+	s.runtime.setCrossfade(ValidateCrossfade(c))
+
+	return nil
+}
+
 // Tap is the real-time audio feed a visualizer reads. The engine writes mono
 // downmixed frames after the gain and before the device, so a consumer sees
 // exactly what is heard.
@@ -1475,6 +1558,8 @@ func (s *Session) run() {
 			s.handleSeek(res)
 		case req := <-s.seamlessCh:
 			s.requestSeamless(req)
+		case pf := <-s.prefetchCh:
+			s.handlePrefetch(pf)
 		case <-ticker.C:
 			s.pollDevice()
 		}
@@ -1552,6 +1637,7 @@ func (s *Session) apply(c command) {
 		s.installChain(c.effects, c.pipelineGen, c.keys)
 		s.signalInstalled(c.installed)
 	case cmdShuffle:
+		s.cancelCrossfade()
 		s.setShuffle(c.on)
 	}
 }
@@ -1700,6 +1786,12 @@ func (s *Session) insertQueue(index int, refs []string, play bool) {
 	s.setQueue(next)
 	s.updateView(func(v *view) { v.queueLen = len(next) })
 
+	// An insert can land between the current track and the prefetched one, so
+	// the prefetch may no longer be the track that plays next. cancelCrossfade
+	// also tears down any blend in flight, so the mixed streamer is never left
+	// half-closed behind the queue edit.
+	s.cancelCrossfade()
+
 	// An insert while shuffled extends the queue, so it must extend the order
 	// the unshuffle restores too; otherwise turning shuffle off would drop the
 	// newly added refs. A Play or PlayQueue that replaces the whole queue resets
@@ -1834,6 +1926,9 @@ func (s *Session) startIndex(index int) {
 	if index < 0 || index >= len(s.queue) {
 		return
 	}
+	// A manual jump is a hard cut: any blend in flight or prefetch waiting is
+	// dropped so it cannot keep mixing behind the track the user chose.
+	s.cancelCrossfade()
 	path := s.queue[index]
 	s.index = index
 	s.detach()
@@ -1879,6 +1974,9 @@ func (s *Session) park() {
 // it. Setting the provider to nil first means an in-flight read returns
 // silence rather than the ErrClosed that a planned close produces.
 func (s *Session) retireLive() {
+	// A blend or prefetch belongs to the track being retired, so it is dropped
+	// here, the one point every teardown passes through.
+	s.cancelCrossfade()
 	s.inFlight = false
 	// Any target that has not started belongs to the stream being retired, so
 	// it is dropped rather than applied to the next track. An in-flight worker
@@ -2309,6 +2407,12 @@ func (s *Session) handleFeed(ev feedEvent) {
 	switch ev.kind {
 	case feedExhausted:
 		s.emit(TrackEnded{})
+		// A prefetch that is already built and ready is promoted with no gap
+		// and no rebuild. That is the gapless path the same-album skip relies
+		// on, and the fallback when a blend could not start in time.
+		if s.promoteReadyPrefetch() {
+			return
+		}
 		s.retireLive()
 
 		if s.index+1 < len(s.queue) {
@@ -2319,6 +2423,17 @@ func (s *Session) handleFeed(ev feedEvent) {
 		s.setState(StateStopped)
 		if s.device != nil && s.deviceStarted {
 			_ = s.device.Pause()
+		}
+	case feedCrossfadeDone:
+		// The ramp finished. The outgoing track is done, so the same end-of-
+		// track signal is emitted before the incoming one is promoted.
+		s.emit(TrackEnded{})
+		if !s.promoteReadyPrefetch() {
+			// No incoming track to promote: tear the ramp down so the audio
+			// thread stops mixing with the gains saturated at the incoming
+			// side. The outgoing streamer is already at its end, so its own
+			// exhaustion path reports the rest.
+			s.cancelCrossfade()
 		}
 	case feedError:
 		s.fail(ev.err, true)
@@ -2338,6 +2453,7 @@ func (s *Session) pollDevice() {
 		return
 	}
 	s.pollUnderruns()
+	s.pollCrossfade()
 }
 
 // pollUnderruns samples the streamer's cumulative underrun counter and reports
@@ -2411,6 +2527,10 @@ func (s *Session) requestSeek(d time.Duration) {
 	if live == nil {
 		return
 	}
+
+	// A seek abandons the position the ramp was measured against, so any blend
+	// or prefetch is dropped before the reposition.
+	s.cancelCrossfade()
 
 	// Park before reading the origin and before the reposition: the device must
 	// not be mid-read while the streamer flushes, and the audio it had queued is
