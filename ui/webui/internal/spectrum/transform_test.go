@@ -3,6 +3,7 @@ package spectrum
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 // TestTransformSelectsSIMDWhenAvailable pins that the fast path is actually
@@ -96,6 +97,13 @@ func runBarsWith(t *testing.T, cfg Config, build func(int) (Transform, error)) [
 	}
 	r.an = mustTransform(t, build, cfg.FFT)
 
+	// Pace off a fake clock that advances with the published audio, not the
+	// wall clock. The scalar and vectorized transforms run at very different
+	// speeds, so real elapsed time would advance each run's window by a
+	// different amount and the two bar sets would not be comparable.
+	tap.clock = &testClock{t: time.Unix(1, 0)}
+	r.now = tap.clock.now
+
 	// Fill the window and settle the peak, then read the steady bars.
 	step := cfg.SampleRate / 60
 	for i := 0; i < 300; i++ {
@@ -118,13 +126,21 @@ func mustTransform(t *testing.T, build func(int) (Transform, error), size int) T
 	return tr
 }
 
-// toneTap is a looping multi-tone source for the parity test.
+// toneTap is a looping multi-tone source for the parity test. clock, when set,
+// advances with each publish so the runner paces off the same timeline the
+// audio arrives on.
 type toneTap struct {
 	pos   int
 	avail int
+	clock *testClock
 }
 
-func (t *toneTap) publish(n int) { t.avail += n }
+func (t *toneTap) publish(n int) {
+	t.avail += n
+	if t.clock != nil {
+		t.clock.advance(n)
+	}
+}
 
 func (t *toneTap) Read(dst []float32) int {
 	if t.avail <= 0 {
