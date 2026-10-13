@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0]
 
 ### Changed
 
@@ -25,6 +25,25 @@ and this project adheres to
 
 ### Added
 
+- Track crossfade in the engine and the desktop app. A `CrossfadeSettings`
+  runtime setting (`SetCrossfade`/`Crossfade` on the facade) fades the end of a
+  track into the start of the next over 1 to 12 seconds, with an equal-power
+  curve so the blend holds its level. The engine builds the next track early and
+  mixes the two streamers for the length of the ramp, so the effects, the master
+  gain and the visualizer all see one blended signal. A manual Next, Prev, Seek
+  or Stop cancels the blend and hard-cuts, matching a DJ leaving the transition
+  to the user. Two consecutive tracks from the same album are handed over
+  gaplessly instead of blended, the way Spotify and Apple Music treat a
+  continuous album.
+- A settings panel in the desktop app, opened with Ctrl+I (Cmd+I on macOS). It
+  is a square overlay with a tab per category (General, Playback, Stream), a
+  shared row shape, and reusable switch, slider, text and picker controls. Only
+  Playback carries a setting today, the crossfade; General and Stream say they
+  are empty rather than inventing controls.
+- Persisted application settings in `settings.json` under the platform config
+  directory (`os.UserConfigDir()/molo`), beside the Discord choice and the
+  effects folder. The write is atomic (a temp file and a rename), and a missing
+  or malformed file falls back to the defaults instead of failing startup.
 - Direct http/https audio streaming as a built-in source. A URL reference is
   read through ranged GETs by the new `provider.NetworkProvider`, so a seek is a
   range request rather than a whole-file re-download, and the engine still
@@ -69,6 +88,13 @@ and this project adheres to
 
 ### Fixed
 
+- A crossfade no longer drops a whole buffer to silence when the outgoing
+  track's probed duration is longer than its real audio and it ends part-way
+  through the blend. The outgoing ending is the end of one side of the blend,
+  not of the blend: its remaining frames are silence and the incoming track
+  keeps fading in over them, so the handoff has no audible skip. The incoming
+  side is also required to have audio buffered before the ramp starts, and a
+  blend is not begun while a seek or swap is repositioning the live streamer.
 - Guard the ADTS sample-rate table against a reserved `sampling_frequency_index`,
   which could index past the table and panic on a malformed file.
 
@@ -123,5 +149,6 @@ cut.
   and seeking are unaffected; only the length is unknown.
 - The built-in effect set is small: gain and crossfeed are the two that ship.
 
-[Unreleased]: https://github.com/Dlcuy22/player/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/Dlcuy22/player/releases/tag/v1.0.0
+[Unreleased]: https://github.com/dlcuy22/molo/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/dlcuy22/molo/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/dlcuy22/molo/releases/tag/v1.0.0
