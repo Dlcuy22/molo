@@ -352,6 +352,18 @@ func (f *fakePlayer) ApplySettings(s molo.Settings) error {
 	return nil
 }
 
+// Crossfade and SetCrossfade satisfy the facade. The TUI does not drive the
+// overlap yet, so the fake keeps no state for it.
+func (f *fakePlayer) Crossfade() molo.CrossfadeSettings {
+	return molo.CrossfadeSettings{}
+}
+
+func (f *fakePlayer) SetCrossfade(c molo.CrossfadeSettings) error {
+	f.record("SetCrossfade")
+
+	return nil
+}
+
 // Pipeline, ApplyPipeline, EffectSchema and EffectKinds satisfy the facade's
 // effect surface. The model does not drive them yet, so they keep just enough
 // state for a test that checks the fake stays a valid Player.

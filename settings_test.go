@@ -233,6 +233,28 @@ func TestApplySettingsVolumeTakesEffectImmediately(t *testing.T) {
 	}
 }
 
+// TestFacadeCrossfadeRoundTrips proves the facade re-exports the crossfade
+// surface and its bounds, so a UI outside the module never imports
+// internal/session to render the control.
+func TestFacadeCrossfadeRoundTrips(t *testing.T) {
+	p := newTestPlayer(t)
+
+	if got := p.Crossfade(); got != molo.DefaultCrossfade() {
+		t.Fatalf("Crossfade() = %+v, want the default", got)
+	}
+	if molo.MinCrossfadeMs != 1000 || molo.MaxCrossfadeMs != 12000 {
+		t.Fatalf("crossfade bounds = %d..%d, want 1000..12000", molo.MinCrossfadeMs, molo.MaxCrossfadeMs)
+	}
+
+	want := molo.CrossfadeSettings{Enabled: true, DurationMs: 8000, SkipSameAlbum: false}
+	if err := p.SetCrossfade(want); err != nil {
+		t.Fatalf("SetCrossfade: %v", err)
+	}
+	if got := p.Crossfade(); got != want {
+		t.Fatalf("Crossfade() = %+v, want %+v", got, want)
+	}
+}
+
 // TestFacadeSwapDecoderAndBackendRejectBadNames proves the facade re-exports
 // the live-swap commands and validates their names synchronously, matching the
 // non-blocking command contract.

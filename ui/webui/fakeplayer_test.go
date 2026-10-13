@@ -256,6 +256,14 @@ func (f *fakePlayer) Settings() molo.Settings { return molo.Settings{} }
 
 func (f *fakePlayer) ApplySettings(s molo.Settings) error { return nil }
 
+func (f *fakePlayer) Crossfade() molo.CrossfadeSettings { return molo.CrossfadeSettings{} }
+
+func (f *fakePlayer) SetCrossfade(c molo.CrossfadeSettings) error {
+	f.record("crossfade")
+
+	return nil
+}
+
 func (f *fakePlayer) Pipeline() dsp.Pipeline { return dsp.Pipeline{} }
 
 func (f *fakePlayer) ApplyPipeline(p dsp.Pipeline) error {

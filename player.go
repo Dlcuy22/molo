@@ -304,6 +304,13 @@ type Player interface {
 	// worrying about partial state. It never blocks on disk or the device.
 	ApplySettings(s Settings) error
 
+	// Crossfade returns the track-overlap settings in force.
+	Crossfade() CrossfadeSettings
+	// SetCrossfade replaces the track-overlap settings. An out-of-range
+	// duration is clamped rather than rejected. The change applies to the next
+	// handoff, so it is safe to call while audio is running.
+	SetCrossfade(c CrossfadeSettings) error
+
 	// Pipeline returns the effect chain in effect.
 	Pipeline() dsp.Pipeline
 	// ApplyPipeline validates every stage before applying any of them,
