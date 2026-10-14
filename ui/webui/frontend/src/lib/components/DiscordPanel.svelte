@@ -2,7 +2,7 @@
   import { Browser } from "@wailsio/runtime";
   import { DiscordLogo, MusicNotes } from "phosphor-svelte";
   import { commands, cover, discordStatus, player, artistAvatar } from "../store";
-  import { displayTitle, formatTime, isRemoteRef, ytmVideoId } from "../format";
+  import { displayArtist, displayTitle, formatTime, isRemoteRef, ytmVideoId } from "../format";
 
   // The preview mirrors the card Discord draws from the activity: the verb and
   // the artist on the header line, the cover with the artist avatar as a small
@@ -13,7 +13,7 @@
 
   const title = $derived(displayTitle(snap.title, snap.path));
   const isRemote = $derived(isRemoteRef(snap.path));
-  const listeningTo = $derived(snap.artist.trim() || "Unknown artist");
+  const listeningTo = $derived(displayArtist(snap.artist) || "Unknown artist");
 
   // The listen link exists only for a remote track; a local file has no watch
   // page, so the button is not offered rather than pointing nowhere.

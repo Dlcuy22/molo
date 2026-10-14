@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	ytm "github.com/dlcuy22/ytm-go"
@@ -55,6 +56,78 @@ func TestPresenceTrackLocalHasNoListenButton(t *testing.T) {
 	}
 	if got.Buttons[0].URL != projectURL {
 		t.Fatalf("button url = %q, want the project url", got.Buttons[0].URL)
+	}
+}
+
+// TestPresenceTrackTrimsTopicSuffix pins the yt-dlp fix: an auto-generated
+// "- Topic" channel name is trimmed from both the artist line and its tooltip.
+func TestPresenceTrackTrimsTopicSuffix(t *testing.T) {
+	snap := Snapshot{
+		Path:   "/music/Doppelganger - kessoku band.opus",
+		Title:  "Doppelganger",
+		Artist: "kessoku band - Topic",
+		Album:  "Doppelganger / Re:Re:",
+	}
+
+	got := presenceTrack(snap, "", "")
+
+	if got.Artist != "kessoku band" {
+		t.Fatalf("Artist = %q, want the suffix trimmed", got.Artist)
+	}
+	if got.SmallText != "kessoku band" {
+		t.Fatalf("SmallText = %q, want the suffix trimmed", got.SmallText)
+	}
+}
+
+// TestTrimArtistTopic pins the suffix rule across the shapes it must handle.
+func TestTrimArtistTopic(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"kessoku band - Topic", "kessoku band"},
+		{"kessoku band - topic", "kessoku band"},
+		{"  kessoku band - Topic  ", "kessoku band"},
+		{"kessoku band", "kessoku band"},
+		{"Eve", "Eve"},
+		// A real name that merely contains the word is left alone.
+		{"Topic", "Topic"},
+		{"A Topic Band", "A Topic Band"},
+		// A name that is only the suffix would trim to empty, so it is kept.
+		{"- Topic", "- Topic"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := trimArtistTopic(tc.in); got != tc.want {
+			t.Errorf("trimArtistTopic(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestAlbumForCachesTheLookup pins the album resolver: it calls the watch
+// endpoint once, caches the name, and does not call again.
+func TestAlbumForCachesTheLookup(t *testing.T) {
+	index := newYTMIndex()
+	index.put(ytmTrack{ID: "abc123", Title: "A Song", Artist: "An Artist"})
+
+	calls := 0
+	p := &ytmProvider{
+		index: index,
+		loadSong: func(_ context.Context, _ string) (*ytm.Song, error) {
+			calls++
+
+			return &ytm.Song{ID: "abc123", Album: &ytm.Playlist{Name: "An Album"}}, nil
+		},
+	}
+
+	if got := p.albumFor(context.Background(), "ytm:abc123"); got != "An Album" {
+		t.Fatalf("albumFor = %q, want An Album", got)
+	}
+	if got := p.albumFor(context.Background(), "ytm:abc123"); got != "An Album" {
+		t.Fatalf("second albumFor = %q, want An Album", got)
+	}
+	if calls != 1 {
+		t.Fatalf("loadSong calls = %d, want 1 (cached)", calls)
 	}
 }
 

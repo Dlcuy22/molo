@@ -69,6 +69,25 @@ export function ytmVideoId(path: string): string {
   return isRemoteRef(path) ? path.slice("ytm:".length) : "";
 }
 
+/** displayArtist drops the " - Topic" suffix YouTube's auto-generated artist
+ *  channels carry, which yt-dlp copies into a local file's artist tag. Only the
+ *  exact suffix is removed, and a name that would become empty is kept. It
+ *  mirrors the Go side so the preview matches what Discord shows. */
+export function displayArtist(artist: string): string {
+  const trimmed = artist.trim();
+  const suffix = " - Topic";
+  if (
+    trimmed.length > suffix.length &&
+    trimmed.slice(trimmed.length - suffix.length).toLowerCase() === suffix.toLowerCase()
+  ) {
+    const base = trimmed.slice(0, trimmed.length - suffix.length).trim();
+
+    return base !== "" ? base : trimmed;
+  }
+
+  return trimmed;
+}
+
 /** baseName is path.basename for the browser: the last segment, POSIX or
  *  Windows separators both handled. A remote reference has no file name, so it
  *  yields nothing rather than "ytm:abc123" shown as a title. */

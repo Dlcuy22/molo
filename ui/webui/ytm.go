@@ -105,6 +105,11 @@ type ytmTrack struct {
 	Album      string
 	DurationMs int64
 
+	// AlbumLoaded records that the album was looked up, so an artist or track
+	// with no album is not re-requested on every play. It is separate from Album
+	// because "" is both "no album" and "not looked up yet".
+	AlbumLoaded bool
+
 	// ArtistID is the browse id of the first credited artist. It is the key the
 	// avatar lookup uses, and it is kept even when no avatar has been resolved
 	// yet, so the lookup can happen later.
@@ -178,15 +183,35 @@ func (x *ytmIndex) put(t ytmTrack) {
 	if len(t.Thumb) == 0 {
 		t.Thumb = prev.Thumb
 	}
-	// The artist id and its resolved avatar are filled in by a later, separate
-	// lookup, so a subsequent search hit that carries neither must not erase
-	// them.
+	// The album name, the artist id and its resolved avatar are filled in by
+	// later, separate lookups, so a subsequent search hit that carries none of
+	// them must not erase what is already known.
+	if t.Album == "" {
+		t.Album = prev.Album
+	}
+	if !t.AlbumLoaded {
+		t.AlbumLoaded = prev.AlbumLoaded
+	}
 	if t.ArtistID == "" {
 		t.ArtistID = prev.ArtistID
 	}
 	if t.ArtistThumbURL == "" {
 		t.ArtistThumbURL = prev.ArtistThumbURL
 	}
+	x.entries[ref] = t
+}
+
+// setAlbum records the resolved album name on an existing entry, marking it
+// looked up so a track with no album is not queried again.
+func (x *ytmIndex) setAlbum(ref, album string) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	t, ok := x.entries[ref]
+	if !ok {
+		return
+	}
+	t.Album = album
+	t.AlbumLoaded = true
 	x.entries[ref] = t
 }
 
@@ -274,14 +299,15 @@ type ytmProvider struct {
 	// Open keeps the whole-track fetch exactly as before.
 	seamless bool
 
-	// resolve, search, loadArtist and loadPlaylist are the network calls,
-	// indirected so a test can drive the provider and the service without
+	// resolve, search, loadArtist, loadPlaylist and loadSong are the network
+	// calls, indirected so a test can drive the provider and the service without
 	// touching YouTube. In production they are the client's own methods; the
 	// client itself is not kept, because nothing else on it is used.
 	resolve      func(context.Context, string) (*ytm.Streams, error)
 	search       func(context.Context, string, string, bool) (*ytm.SearchResults, error)
 	loadArtist   func(context.Context, string) (*ytm.Artist, error)
 	loadPlaylist func(context.Context, string, *ytm.BuiltInContinuation) (*ytm.Playlist, error)
+	loadSong     func(context.Context, string) (*ytm.Song, error)
 }
 
 func newYTMProvider(index *ytmIndex, seamless bool, log *slog.Logger) *ytmProvider {
@@ -303,6 +329,7 @@ func newYTMProvider(index *ytmIndex, seamless bool, log *slog.Logger) *ytmProvid
 		loadPlaylist: func(ctx context.Context, id string, cont *ytm.BuiltInContinuation) (*ytm.Playlist, error) {
 			return client.LoadPlaylist(ctx, id, cont, nil, nil, false)
 		},
+		loadSong: client.LoadSong,
 	}
 }
 
@@ -515,6 +542,38 @@ func (p *ytmProvider) artistArtFor(ctx context.Context, ref string) string {
 	}
 
 	return url
+}
+
+// albumFor returns the album name for a cached track, looking it up once and
+// caching the outcome. The search and playlist responses name the artist and
+// the cover but carry no album name, so the one call that does (the watch
+// endpoint) is made lazily, off the playback path. A track with no album is
+// cached too, so it is not queried on every play.
+func (p *ytmProvider) albumFor(ctx context.Context, ref string) string {
+	t, ok := p.index.lookup(ref)
+	if !ok {
+		return ""
+	}
+	if t.AlbumLoaded {
+		return t.Album
+	}
+	if t.Album != "" {
+		return t.Album
+	}
+	if p.loadSong == nil {
+		return ""
+	}
+
+	song, err := p.loadSong(ctx, t.ID)
+	if err != nil || song == nil {
+		// Do not mark a transient failure as "no album": leave it unresolved so
+		// a later play can try again.
+		return ""
+	}
+	album := ytmAlbum(song.Album)
+	p.index.setAlbum(ref, album)
+
+	return album
 }
 
 // thumbFor fetches one thumbnail, best effort. Art is decorative, so a failure

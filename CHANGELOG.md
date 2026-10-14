@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Discord Rich Presence now shows the album for a YouTube Music track. The
+  search and playlist responses carry the album id but not its name, so the name
+  is resolved once through the watch endpoint and cached, filling the cover
+  tooltip that was previously empty.
+
+### Fixed
+
+- Discord Rich Presence no longer shows the " - Topic" suffix on an artist name.
+  YouTube's auto-generated channels carry it and yt-dlp copies it into a local
+  file's artist tag; only the exact trailing suffix is removed, so a real artist
+  whose name contains the word is untouched.
+
 ## [1.1.0]
 
 ### Changed

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -267,19 +268,42 @@ func (s *PlayerService) syncPresence(snap Snapshot) {
 	}()
 }
 
+// topicSuffix is the tag YouTube's auto-generated artist channels carry. yt-dlp
+// copies the channel name verbatim into the artist tag, so a local download of
+// a "Provided to YouTube by ..." track reads "kessoku band - Topic". The suffix
+// is noise to a listener, so it is trimmed for display.
+const topicSuffix = " - Topic"
+
+// trimArtistTopic drops a trailing " - Topic" from an artist credit. The match
+// is case-insensitive and only the exact suffix is removed, so a real artist
+// whose name merely contains the word is untouched. A name that would become
+// empty is left as it was.
+func trimArtistTopic(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if len(trimmed) > len(topicSuffix) &&
+		strings.EqualFold(trimmed[len(trimmed)-len(topicSuffix):], topicSuffix) {
+		if base := strings.TrimSpace(trimmed[:len(trimmed)-len(topicSuffix)]); base != "" {
+			return base
+		}
+	}
+
+	return trimmed
+}
+
 // presenceTrack builds the activity from the snapshot, with the image fields
 // supplied by the caller. Duration is carried as a fallback only: the manager
 // prefers the live engine value, because the probe may not have answered when
 // this snapshot was taken. It is a free function so the mapping is testable
 // without a service.
 func presenceTrack(snap Snapshot, largeImage, smallImage string) discordrpc.TrackInfo {
+	artist := trimArtistTopic(snap.Artist)
 	info := discordrpc.TrackInfo{
 		Title:        snap.Title,
-		Artist:       snap.Artist,
+		Artist:       artist,
 		LargeImage:   largeImage,
 		LargeText:    snap.Album,
 		SmallImage:   smallImage,
-		SmallText:    snap.Artist,
+		SmallText:    artist,
 		DurationMs:   snap.Duration,
 		ActivityType: 2, // Listening
 	}
@@ -299,15 +323,22 @@ func presenceTrack(snap Snapshot, largeImage, smallImage string) discordrpc.Trac
 	return info
 }
 
-// resolvePresenceArt resolves the cover and avatar for a track, then re-sends
-// the activity. It runs off the pump; a failure leaves the text-only presence
-// in place rather than clearing it.
+// resolvePresenceArt resolves the cover, avatar and album for a track, then
+// re-sends the activity. It runs off the pump; a failure leaves the text-only
+// presence in place rather than clearing it.
 func (s *PlayerService) resolvePresenceArt(snap Snapshot) {
 	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 	defer cancel()
 
 	large := s.coverURL(ctx, snap)
 	small := s.artistURL(ctx, snap)
+	// A remote track's album is not in the search response, so it is resolved
+	// here. A local file's album already rides in its tags.
+	if snap.Album == "" && isYTMRef(snap.Path) {
+		if album := s.ytmProv.albumFor(ctx, snap.Path); album != "" {
+			snap.Album = album
+		}
+	}
 
 	s.presence.mu.Lock()
 	mgr := s.presence.manager
