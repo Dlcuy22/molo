@@ -5,8 +5,6 @@
 // Compared with the pure-Go decoder this one knows its total frame count at
 // open and seeks natively, at the cost of a runtime dependency. Pre-skip and
 // output gain are applied inside libopusfile and must not be re-applied here.
-//
-// Dependencies: github.com/ebitengine/purego, libopusfile.so.0 on Linux.
 
 //go:build darwin || linux || netbsd
 

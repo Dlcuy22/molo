@@ -1,22 +1,3 @@
-// HTTP range-backed reader for the Network provider.
-//
-// A remote audio file is read through ranged GETs rather than downloaded whole.
-// The container readers in the decode package seek across the source to build
-// their index and to seek, so a network source has to answer ReadAt and Seek.
-// Ranged reads are the honest way to serve that without holding a whole track in
-// memory.
-//
-// Reads are served from a bounded cache of fixed-size blocks. The container
-// readers seek constantly while indexing (an Ogg page index walks every page
-// header; a WebM index walks the clusters), so without a cache each page header
-// would be its own request. With it, an index walk costs one request per block
-// the file spans, not one per page. The cache is bounded so a long file's index
-// walk does not quietly accumulate into a whole-file buffer.
-//
-// A server that ignores Range and replies 200 is handled by buffering the whole
-// body, bounded by maxFallbackBody, so the source stays seekable even though the
-// server does not cooperate.
-
 package provider
 
 import (
@@ -51,10 +32,26 @@ var (
 	errSeekOutOfRange = errors.New("provider: seek out of range")
 )
 
-// httpRangeReader is an io.ReaderAt and io.ReadSeeker over an HTTP resource. It
-// is safe for the sequential use a single decoder makes of it; the mutex guards
-// the block cache and the read cursor against the seek-then-read pattern the
-// container readers use, not concurrent readers. Each decoder gets its own
+// httpRangeReader is an io.ReaderAt and io.ReadSeeker over an HTTP resource,
+// served by ranged GETs rather than a whole-file download. The container readers
+// in [github.com/dlcuy22/molo/decode] seek across the source to build their index,
+// so a network source has to answer ReadAt and Seek without holding a whole track
+// in memory.
+//
+// Reads come from a bounded cache of fixed-size blocks. The container readers
+// seek constantly while indexing (an Ogg page index walks every page header, a
+// WebM index walks the clusters), so without a cache each page header would be
+// its own request; with it an index walk costs one request per block the file
+// spans. The bound keeps a long file's index walk from accumulating into a
+// whole-file buffer.
+//
+// A server that ignores Range and replies 200 is handled by buffering the whole
+// body, bounded by maxFallbackBody, so the source stays seekable even though the
+// server does not cooperate.
+//
+// It is safe for the sequential use a single decoder makes of it; the mutex
+// guards the block cache and the read cursor against the seek-then-read pattern
+// the container readers use, not concurrent readers. Each decoder gets its own
 // instance.
 type httpRangeReader struct {
 	ctx    context.Context

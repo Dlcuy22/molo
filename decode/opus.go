@@ -9,8 +9,6 @@
 //
 // go-opus is a fixed-point decoder, so it emits int16; this file converts to the
 // interleaved float32 every Decoder emits.
-//
-// Dependencies: github.com/tphakala/go-opus.
 
 package decode
 

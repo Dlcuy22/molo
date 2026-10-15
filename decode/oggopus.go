@@ -1,40 +1,20 @@
 // Native Ogg Opus container reader with granule-index seeks.
 //
-// Purpose:
-//   Read Opus audio packets out of an Ogg bitstream (RFC 3533) without
-//   decoding, validate the Opus-specific framing (RFC 7845), and reposition to
-//   a granule position with a binary search over a page index. A forward-only
-//   container reader would have to seek by decoding and discarding from the
-//   start of the file; this reader walks page headers once and then jumps
-//   straight to one page per seek.
+// It reads Opus audio packets out of an Ogg bitstream (RFC 3533) without
+// decoding, validates the Opus-specific framing (RFC 7845), and repositions to a
+// granule position with a binary search over a page index. Walking page headers
+// once and jumping to one page per seek replaces seeking by decode-and-discard
+// from the start of the file.
 //
-// Key Components:
-//   - newOggOpusReader(): parses OpusHead, skips OpusTags, builds the page index
-//   - oggOpusReader.ReadPacket(): reassembles one packet over pages
-//   - oggOpusReader.SeekGranule(): binary search, then repositions for reading
-//   - oggOpusReader.Position(): granule lower bound for the next packet
+// Granule domain (RFC 7845 section 4): the granule counts decoded samples at
+// 48 kHz and includes the pre-skip, so a stream's playable length is
+// lastGranule - preSkip and a seek to playable frame f targets granule
+// f + preSkip. A page spanned by a packet that completes on a later page has no
+// granule (the field is the two's complement -1) and is never indexed.
 //
-// Granule domain (RFC 7845 section 4):
-//   The granule counts decoded samples at 48 kHz and includes the pre-skip, so
-//   a stream's playable length is lastGranule - preSkip and a seek to playable
-//   frame f targets granule f + preSkip. A page spanned by a packet that
-//   completes on a later page has no granule; the field is the two's complement
-//   -1 and such pages are never indexed. Only pages where at least one packet
-//   completes carry a usable position.
-//
-// Dependencies:
-//   - Reuses the Ogg framing constants and helpers from ogg_probe.go; it does
-//     not change or duplicate that probe path.
-//
-// Error Types:
-//   - errOggOpusNotOpus: the first packet is not an OpusHead
-//   - errOggOpusChecksum: a page consumed for reading failed its CRC
-//   - errOggOpusBadPage: Ogg framing is malformed
-//   - errOggOpusUnsupportedMapping: a channel mapping family other than 0
-//
-// Ownership:
-//   The reader never owns, closes, or spawns goroutines around the io.ReadSeeker
-//   it is given. The caller keeps that responsibility.
+// The reader reuses the Ogg framing constants and helpers from ogg_probe.go. It
+// never owns, closes, or spawns goroutines around the io.ReadSeeker it is given;
+// the caller keeps that responsibility.
 
 package decode
 
@@ -523,7 +503,7 @@ func (o *oggOpusReader) loadNextPage() error {
 	o.pageLoaded = true
 	o.segIndex = 0
 	o.bodyIndex = 0
-	// A continued first packet with no buffered prefix is data we joined
+	// A continued first packet with no buffered prefix is data joined
 	// mid-packet: RFC 7845 section 3 forbids decoding it, so skip to the first
 	// packet boundary. This is the post-seek case. The skip lasts until the
 	// skipped packet completes; a page that starts fresh ends it.

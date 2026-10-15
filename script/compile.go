@@ -5,19 +5,9 @@ import (
 	"math"
 )
 
-// Compiling turns a declared graph into a plan.
-//
-// The cycle rule is the interesting part. A combinatorial loop (a node reaches
-// itself without passing through a delay) is rejected at build time: the run
-// loop has no fixed point to solve, and a script that asks for one is asking
-// for something the model cannot express. A loop that passes through a delay is
-// legal, because the delay's tap reads the line before it is written, which
-// contributes the one sample of memory that breaks the algebra.
-
 // cloneGraph copies a declared graph into per-effect nodes. The factory's graph
-// is a read-only template: every effect that is built from it owns its own
-// nodes, so one instance's filter state and control writes cannot leak into
-// another's.
+// is a read-only template: every effect built from it owns its own nodes, so one
+// instance's filter state and control writes cannot leak into another's.
 func cloneGraph(g *graph) *graph {
 	out := &graph{
 		nodes:      make([]*node, len(g.nodes)),
@@ -71,6 +61,11 @@ func cloneGraph(g *graph) *graph {
 // compile validates a declared graph for a sample rate and channel count and
 // produces the flat plan. It runs in Configure, so every allocation here is off
 // the audio thread.
+//
+// A loop that reaches itself without passing through a delay is rejected: the
+// run loop has no fixed point for it. A loop through a delay is legal, because
+// the delay's tap reads the line before it is written, which contributes the
+// one sample of memory that breaks the algebra.
 func compile(g *graph, rate, ch int) (*plan, error) {
 	if len(g.nodes) == 0 {
 		return &plan{ch: ch, rate: rate}, nil
@@ -82,8 +77,6 @@ func compile(g *graph, rate, ch int) (*plan, error) {
 		ch = 1
 	}
 
-	// Each effect owns a private copy of the graph, so state and control
-	// writes never bleed between instances built from one factory.
 	cg := cloneGraph(g)
 
 	if err := foldConstants(cg); err != nil {

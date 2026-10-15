@@ -1,3 +1,5 @@
+package decode
+
 // M4A/MP4 decoding through github.com/tphakala/go-m4a's container reader and
 // github.com/tphakala/go-aac's frame decoder. This is the AAC path only: an MP4
 // holding Opus or FLAC is rejected by the codec constructor, which is the honest
@@ -17,7 +19,6 @@
 // length. What leaves ReadFrames is the playable signal the edit list describes.
 //
 // Dependencies: github.com/tphakala/go-m4a, github.com/tphakala/go-aac.
-package decode
 
 import (
 	"errors"
@@ -31,7 +32,6 @@ import (
 	m4a "github.com/tphakala/go-m4a"
 )
 
-// init registers the AAC-in-MP4 decoder.
 func init() {
 	Register(NewM4aFactory())
 }
@@ -404,7 +404,7 @@ func m4aReadInto(rd *m4a.Reader, buf *[]byte) ([]byte, error) {
 		n, err := rd.ReadFrameInto(*buf)
 		if errors.Is(err, io.ErrShortBuffer) {
 			// The reader reports the required size and reads nothing; a value
-			// not larger than the buffer we already gave it cannot be grown.
+			// not larger than the current buffer cannot be grown.
 			if n <= len(*buf) {
 				return nil, fmt.Errorf("decode: M4A access unit needs %d bytes", n)
 			}

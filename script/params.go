@@ -32,12 +32,11 @@ type paramDecl struct {
 // that clamps everything away.
 func (d paramDecl) hasRange() bool { return d.Min != 0 || d.Max != 0 }
 
-// store is the control-side parameter set. It is a deliberate reimplementation
-// of dsp.paramStore's behaviour, not a copy of its code: dsp exposes no
-// validator, so a script package that wants the same rules has to own them.
-// The rules are the same because the UI and presets depend on them: a number
-// clamps into its range, an enum must be one of its options, an unknown key is
-// an error, and every declared default is filled.
+// store is the control-side parameter set. dsp exposes no validator, so the
+// script package owns the rules dsp.paramStore applies, because the UI and
+// presets depend on them: a number clamps into its range, an enum must be one
+// of its options, an unknown key is an error, and every declared default is
+// filled.
 type store struct {
 	mu     sync.Mutex
 	schema []dsp.Param

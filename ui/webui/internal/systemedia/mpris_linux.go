@@ -12,6 +12,7 @@
 //
 // Hand-rolled on godbus rather than a media-player framework, so the
 // integration adds no server dependency of its own.
+
 package systemedia
 
 import (

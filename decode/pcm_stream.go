@@ -1,10 +1,9 @@
 // Shared plumbing for decoders that adapt a byte-stream codec library.
 //
 // Several codecs (go-flac, go-aac, go-mp3, go-wav) expose the same shape: an
-// io.Reader of interleaved integer PCM. Their decoders in this package differ
-// only in how they produce that PCM and how they seek. This file holds the two
-// pieces they would otherwise each reimplement: the ReadFrames delivery loop
-// and the constants that bound it.
+// io.Reader of interleaved integer PCM. This file holds the two pieces their
+// decoders would otherwise each reimplement: the ReadFrames delivery loop and
+// the constants that bound it.
 
 package decode
 
@@ -34,8 +33,7 @@ func rawFrames() []byte { return make([]byte, pcmRawReadBytes) }
 // slice between fills.
 func outBlock() []float32 { return make([]float32, pcmOutFrames*2) }
 
-// byteSource is the minimal decode surface a byte-stream codec library exposes:
-// read interleaved PCM, and (only for the seekable ones) reposition.
+// byteSource is the minimal decode surface a byte-stream codec library exposes.
 type byteSource interface {
 	io.Reader
 }

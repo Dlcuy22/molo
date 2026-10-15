@@ -35,18 +35,17 @@ type feedEvent struct {
 
 // routedProvider is the stable Provider the device is opened against once.
 //
-// It exists because playback.Device has no way to swap its Provider: a device
-// is opened against one Provider for its whole life. If the session handed the
-// device a *stream.Streamer directly, every track change would need a new
-// device. Instead this indirection points at whichever streamer is current, so
-// the device is reused across tracks and the underlying audio server is
-// opened exactly once.
+// playback.Device has no way to swap its Provider: a device is opened against
+// one Provider for its whole life. If the session handed the device a
+// *stream.Streamer directly, every track change would need a new device. This
+// indirection points at whichever streamer is current, so the device is reused
+// across tracks and the underlying audio server is opened exactly once.
 //
 // The provider never returns io.EOF while a session is alive: when a track is
 // exhausted it reports that to the controller and answers with silence until
-// the next track is installed. That keeps a push backend's player from
-// entering its terminal end-of-source state, which is what makes Stop followed
-// by Play work on the same device.
+// the next track is installed. That keeps a push backend's player from entering
+// its terminal end-of-source state, which is what makes Stop followed by Play
+// work on the same device.
 type routedProvider struct {
 	gain *dsp.Gain
 
@@ -77,10 +76,9 @@ type routedProvider struct {
 	mix []float32
 
 	// feed carries exhaustion and error notifications to the controller. The
-	// sends here block briefly if the controller is busy, which is safe: the
-	// controller's loop never performs blocking I/O, and it selects on this
-	// channel. Losing a notification would strand the session, so they are
-	// never dropped.
+	// send blocks briefly if the controller is busy, which is safe because the
+	// controller's loop never performs blocking I/O. Losing a notification
+	// would strand the session, so they are never dropped.
 	feed chan<- feedEvent
 
 	// done is closed when the session shuts down. It releases a send that
@@ -137,12 +135,11 @@ func (p *routedProvider) setCurrent(s *stream.Streamer) {
 
 // beginCrossfade publishes a ramp from the current streamer to next. It is
 // called from the control loop; the audio thread picks the pair up on its next
-// buffer. The caller has already installed next as the "to" streamer and is
-// responsible for closing it if the ramp is aborted.
+// buffer. The caller is responsible for closing next if the ramp is aborted.
 //
-// It reports whether a ramp was actually published, so the caller sets its
-// "blending" flag only when there is a blend to complete: a rejected request
-// must not latch the session out of later ones.
+// It reports whether a ramp was published, so the caller sets its "blending"
+// flag only when there is a blend to complete: a rejected request must not
+// latch the session out of later ones.
 func (p *routedProvider) beginCrossfade(from, to *stream.Streamer, total int64) bool {
 	if from == nil || to == nil || total <= 0 {
 		return false
@@ -237,22 +234,20 @@ func (p *routedProvider) ReadFrames(dst []float32) (int, error) {
 // readCrossfade fills dst with the blend of the outgoing and incoming streams.
 // It reads the outgoing stream blocking (it is what the device is playing) and
 // the incoming one non-blocking, so a slow build on the incoming side cannot
-// stall the audio thread: a short or empty read there simply contributes
-// silence and the outgoing track keeps sounding.
+// stall the audio thread: a short or empty read there contributes silence and
+// the outgoing track keeps sounding.
 //
 // The blend covers exactly the frames the outgoing produced, so a short read
 // from it is passed on as a short read, never padded with silence that would
 // clip audio the producer has not handed over yet. The one exception is a
 // terminal outgoing read: when the outgoing track ends before the ramp does
-// (its probed duration was longer than its real audio, which is common for a
-// network source), its remaining frames are silence and the incoming side keeps
-// fading in over them. Dropping the whole buffer to silence the moment the
-// outgoing ends is heard as a skip at the handoff, which is the bug this guards
-// against.
+// (its probed duration was longer than its real audio, common for a network
+// source), its remaining frames are silence and the incoming side keeps fading
+// in over them. Dropping the whole buffer to silence the moment the outgoing
+// ends is heard as a skip at the handoff, which is the bug this guards against.
 //
 // It reports the frames mixed. Once the ramp reaches its end it notifies the
-// controller that the blend is done, once, and the controller promotes the
-// incoming streamer and clears the crossfade.
+// controller that the blend is done, once.
 func (p *routedProvider) readCrossfade(x *crossfade, dst []float32) (int, error) {
 	ch := canonical.Ch
 	want := len(dst) / ch

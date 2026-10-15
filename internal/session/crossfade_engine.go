@@ -5,28 +5,23 @@ import (
 )
 
 // prefetchMarginMs is how far before the crossfade window the next track's
-// build starts. Building a track opens a decoder, starts its producer and fills
-// its ring, which for a local file is a few milliseconds and for a network
-// source can be much longer; the margin is generous so the incoming track is
-// ready and buffered before the ramp needs it. If it is not ready in time the
-// handoff falls back to the ordinary end-of-track path, so a slow source costs
-// the blend, never the audio.
+// build starts. Building opens a decoder, starts its producer and fills its
+// ring, which can be slow for a network source, so the margin is generous. If
+// the track is not ready in time the handoff falls back to the ordinary
+// end-of-track path, so a slow source costs the blend, never the audio.
 const prefetchMarginMs = 4000
 
 // crossfadePrebufferMs is the incoming track's ring level required before the
-// blend starts. The producer fills the ring toward its high watermark (about
-// 300 ms at the default ring size) as soon as the track is built, so this is
-// normally satisfied long before the ramp; it is a guard against starting a
-// fade-in into a cold stream, which would clip the head of the incoming track.
-// The value is well under the default ring so a custom, smaller ring still
-// blends; the readCrossfade mix covers any shortfall regardless.
+// blend starts. Starting a fade-in into a cold stream would clip the head of
+// the incoming track; the producer fills the ring as soon as the track is
+// built, so this is normally satisfied long before the ramp. The value is well
+// under the default ring so a custom, smaller ring still blends.
 const crossfadePrebufferMs = 100
 
 // pollCrossfade advances the crossfade state machine. It runs on the control
-// tick while a track is live. It is deliberately simple: the engine's position
-// and the probed duration decide when to build the next track early and when to
-// start the blend, and every other transition (a manual Next, a seek, a stop)
-// cancels the whole thing.
+// tick while a track is live. The engine's position and the probed duration
+// decide when to build the next track early and when to start the blend; every
+// other transition (a manual Next, a seek, a stop) cancels the whole thing.
 func (s *Session) pollCrossfade() {
 	if s.xfading {
 		return
@@ -91,17 +86,14 @@ func (s *Session) pollCrossfade() {
 		return
 	}
 	// The incoming track must already have audio buffered before the blend
-	// starts: beginning a ramp into a cold stream would fade in silence for the
-	// first few buffers. Its producer fills the ring as soon as it is built, so
-	// by the ramp moment this is normally long satisfied.
+	// starts, or the ramp fades in silence for its first buffers.
 	if s.prefetch.result.streamer.Stats().Buffered < int64(crossfadePrebufferMs)*int64(canonical.Rate)/1000 {
 		return
 	}
 
 	// A same-album handoff is left unblended: the album was sequenced to run
-	// together, so the next track starts as this one ends with no overlap. The
-	// prefetch is kept, and the ordinary end-of-track path promotes it with no
-	// gap.
+	// together. The prefetch is kept, and the ordinary end-of-track path
+	// promotes it with no gap.
 	if cfg.SkipSameAlbum && s.sameAlbumHandoff() {
 		return
 	}
@@ -110,9 +102,9 @@ func (s *Session) pollCrossfade() {
 }
 
 // crossfadeRemaining reports how much of the current track is left, in output
-// frames. It is the heard position subtracted from the probed duration, so it
-// matches what the listener still has rather than how far the decoder has read
-// ahead. It reports false when the duration is not known.
+// frames: the heard position subtracted from the probed duration, so it matches
+// what the listener still has rather than how far the decoder has read ahead.
+// It reports false when the duration is not known.
 func (s *Session) crossfadeRemaining(live *stream.Streamer) (int64, bool) {
 	s.mu.Lock()
 	duration := s.v.duration
@@ -144,9 +136,8 @@ func (s *Session) crossfadeRampFrames(cfg CrossfadeSettings) int64 {
 }
 
 // sameAlbumHandoff reports whether the next queued track is from the same album
-// as the current one. It needs both albums to be known and equal; if either is
-// empty the tracks are treated as different, because an unknown album is not
-// evidence that two tracks belong together.
+// as the current one. An empty album on either side is treated as different: an
+// unknown album is not evidence that two tracks belong together.
 func (s *Session) sameAlbumHandoff() bool {
 	if s.prefetch == nil || s.prefetch.album == "" {
 		return false
@@ -161,9 +152,8 @@ func (s *Session) sameAlbumHandoff() bool {
 
 // startPrefetch builds the next queued track early, off the control loop. The
 // built streamer is not installed: the current track keeps sounding and the
-// incoming one simply fills its own ring, ready for the ramp. Its catalogue
-// album is resolved too, so the same-album decision can be made without
-// touching the control loop.
+// incoming one fills its own ring, ready for the ramp. Its album is resolved
+// too, so the same-album decision does not touch the control loop.
 func (s *Session) startPrefetch() {
 	idx := s.index + 1
 	if idx < 0 || idx >= len(s.queue) {
@@ -195,9 +185,9 @@ func (s *Session) startPrefetch() {
 }
 
 // prefetchAlbum resolves the album of the prefetched track, so the same-album
-// skip can be decided before the ramp. A provider track already carries its
-// album from the build; a local file is read through the resolver, which is why
-// this runs on the prefetch worker and not the control loop.
+// skip can be decided before the ramp. A provider track carries its album from
+// the build; a local file is read through the resolver, which is why this runs
+// on the prefetch worker and not the control loop.
 func (s *Session) prefetchAlbum(res openResult, path string) string {
 	if res.providerMeta {
 		return res.meta.Tags.Album

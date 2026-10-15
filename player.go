@@ -2,9 +2,8 @@
 // a small interface of cheap queries and non-blocking commands, and re-exports
 // the state and event types so a UI never has to reach into internal/session.
 //
-// The package is deliberately UI-agnostic: no terminal code, no bubbletea, no
-// os.Exit. A TUI, a desktop window and a headless CLI all program against the
-// same Player.
+// The package is deliberately UI-agnostic: no terminal code, no process exit. A
+// TUI, a desktop window and a headless CLI all program against the same Player.
 package molo
 
 import (
@@ -477,10 +476,9 @@ func New(opts ...Option) (Player, error) {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	// An unset provider list selects the built-in sources. This keeps direct
-	// http/https streaming available with no configuration while leaving local
-	// playback identical, because LocalAudio marks its source Local and the
-	// session keeps its own opener, resolver and prober for it.
+	// An unset provider list selects the built-in sources, so direct http/https
+	// streaming works with no configuration while local playback stays
+	// identical.
 	providers := cfg.Providers
 	if providers == nil {
 		providers = provider.Defaults()
@@ -534,8 +532,7 @@ func (p *player) InsertQueueAndPlay(index int, refs []string) error {
 }
 
 // Providers lists the names of the providers in effect, in priority order, for
-// a UI that shows where audio can come from. It is empty for the default
-// local-only setup.
+// a UI that shows where audio can come from.
 func (p *player) Providers() []string        { return p.session.Providers() }
 func (p *player) Pause() error               { return p.session.Pause() }
 func (p *player) Resume() error              { return p.session.Resume() }

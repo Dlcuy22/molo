@@ -1,10 +1,11 @@
 //go:build !darwin && !linux && !netbsd
 
+package decode
+
 // libopusfile cannot be reached on this platform: purego exposes no dynamic
 // loader on Windows, so the native path is unavailable there. The factory is
 // still registered so the registry shape is identical everywhere, and it
 // reports a clear error instead of disappearing.
-package decode
 
 import (
 	"errors"
@@ -17,6 +18,10 @@ var errLibopusfileUnsupported = errors.New("decode: libopusfile is not available
 
 func loadLibopusfile() error { return errLibopusfileUnsupported }
 
+// LibopusfileFactory is the stub factory registered where the native
+// libopusfile cannot be loaded. It satisfies Factory and Prober so the registry
+// shape is identical on every platform, and every open fails with
+// errLibopusfileUnsupported.
 type LibopusfileFactory struct{}
 
 // NewLibopusfileFactory returns the stub used where the native library cannot

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// --- synthetic construction helpers --------------------------------
+// synthetic construction helpers.
 
 // rawOggPage assembles a page from explicit lacing values and a body, with a
 // correct checksum. oggPage cannot express a packet that spans a page boundary
@@ -62,7 +62,7 @@ func opusHeadFamily1(preSkip uint16, channels byte) []byte {
 	return p
 }
 
-// --- reader helpers ------------------------------------------------
+// reader helpers.
 
 type oggPacketRead struct {
 	data    []byte
@@ -140,7 +140,7 @@ func fixtureOpusHead(t *testing.T, path string) (preSkip int, gain int16, channe
 		int(src[off+9])
 }
 
-// --- properties ----------------------------------------------------
+// properties.
 
 func TestOggOpusReaderProperties(t *testing.T) {
 	path := writeOgg(t, "props.opus",
@@ -229,7 +229,7 @@ func TestOggOpusReaderGranuleIncludesPreSkip(t *testing.T) {
 	}
 }
 
-// --- rejection -----------------------------------------------------
+// rejection.
 
 func TestOggOpusReaderRejectsNonOpus(t *testing.T) {
 	notOgg := writeFile(t, t.TempDir(), "plain.opus", []byte("this is not an Ogg stream"))
@@ -276,7 +276,7 @@ func TestOggOpusReaderRejectsUnsupportedMappingFamily(t *testing.T) {
 	}
 }
 
-// --- packet reassembly ---------------------------------------------
+// packet reassembly.
 
 func TestOggOpusReaderReassemblesPacketOver255Bytes(t *testing.T) {
 	// oggPage splits a >= 255 byte packet into 255-byte lacing runs, so this
@@ -581,7 +581,7 @@ func TestOggOpusReaderFixturesCarryLargePackets(t *testing.T) {
 	}
 }
 
-// --- granule indexing ----------------------------------------------
+// granule indexing.
 
 func TestOggOpusReaderIndexIsMonotonicAndSkipsMinusOne(t *testing.T) {
 	// Two synthetic pages with granule -1 bracket a completed packet so the
@@ -642,7 +642,7 @@ func TestOggOpusReaderIndexOnReferenceFile(t *testing.T) {
 	}
 }
 
-// --- seeking -------------------------------------------------------
+// seeking.
 
 func TestOggOpusReaderSeekMatchesLinearRead(t *testing.T) {
 	path := realOpusPath(t)
@@ -791,7 +791,7 @@ func TestOggOpusReaderPositionTracksGranule(t *testing.T) {
 	}
 }
 
-// --- integrity and lifetime ----------------------------------------
+// integrity and lifetime.
 
 func TestOggOpusReaderReportsChecksumMismatch(t *testing.T) {
 	// New only reads page headers past the mandatory headers, so a checksum
@@ -882,7 +882,7 @@ func TestOggOpusReaderDoesNotOwnOrLeakInput(t *testing.T) {
 	}
 }
 
-// --- seek cost -----------------------------------------------------
+// seek cost.
 
 // TestOggOpusReaderSeekCost measures the index-plus-binary-search seek against
 // the previous decode-and-discard path it replaces. Numbers are logged, not

@@ -42,12 +42,9 @@ type EffectMeters = session.EffectMeters
 // Player offers these methods directly, and Effects returns the same view for
 // callers that want to name the surface.
 //
-// The kind accessor is named EffectKindList rather than EffectKinds because the
-// Player interface also owns EffectKinds for the plain []string list. One type
-// cannot carry two methods of the same name, and the plain list must keep
-// working for the existing chooser, so the detailed list gets its own name. A
-// UI that wants both reads Player.EffectKinds for the names and
-// Effects.EffectKindList for the per-implementation detail.
+// EffectKindList keeps the detailed (kind, impl) list, while Player.EffectKinds
+// stays the plain []string a chooser already uses: the two share a name and one
+// type cannot carry both methods.
 type Effects interface {
 	// EffectKindList lists every registered implementation, so a chooser can
 	// offer each (kind, impl) pair.

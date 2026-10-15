@@ -61,11 +61,10 @@ var (
 	// ErrBadVolume means a gain outside dsp's accepted range.
 	ErrBadVolume = errors.New("session: volume out of range")
 	// ErrNoProvider means the session was configured with providers, none of
-	// them claimed the reference, and the reference is not a local path. It is
-	// the error an empty provider list never produces: with no providers the
-	// session runs the legacy local path, which is behaviourally LocalAudio.
-	// Non-empty providers are a deliberate configuration, so an unclaimed ref is
-	// a caller mistake rather than something to silently open as a file.
+	// them claimed the reference, and the reference is not a local path. With
+	// no providers the session runs the legacy local path (behaviourally
+	// LocalAudio), so an unclaimed ref with providers configured is a caller
+	// mistake rather than something to silently open as a file.
 	ErrNoProvider = provider.ErrNoProvider
 	// ErrProviderNoOpener means a matching provider returned a Source with no
 	// Opener. The provider matched, so this is not ErrNoProvider: it is a broken
@@ -77,9 +76,8 @@ var (
 	ErrProviderNoDecoder = errors.New("session: provider Opener returned a nil decoder")
 	// ErrProviderNoDecoderSwap means SwapDecoder was asked to change the decoder
 	// of a track owned by a provider. A provider supplies an opaque Opener, so
-	// the session cannot rebuild it with a different decoder name; a decoder
-	// swap is only meaningful on the local path, where the registry can open the
-	// named codec. Local references are unaffected.
+	// the session cannot rebuild it with a different decoder name. Local
+	// references are unaffected.
 	ErrProviderNoDecoderSwap = errors.New("session: cannot swap the decoder of a provider reference")
 	// ErrInvalidSetting marks a rejected Settings update. The field-specific
 	// errors above are wrapped inside it, so a caller can match on this one to
@@ -89,8 +87,8 @@ var (
 
 // ValidateDecoder reports whether name is a usable decoder preference. The
 // empty string means automatic selection and is always valid. This is the one
-// copy of the rule: the facade and the config defaults both call it, so a
-// chooser UI and a direct setter cannot disagree about what is legal.
+// copy of the rule, so a chooser UI and a direct setter cannot disagree about
+// what is legal.
 func ValidateDecoder(name string) error {
 	if name == "" {
 		return nil
@@ -170,8 +168,7 @@ type Config struct {
 	Resolver meta.Resolver
 
 	// Providers resolves track references, highest priority first. Nil or empty
-	// selects the legacy local path, which is behaviourally LocalAudio and keeps
-	// the historic Config.openDecoder seam intact. When the list is non-empty
+	// selects the legacy local path (behaviourally LocalAudio). When non-empty,
 	// the first provider whose Match returns true wins, so order is significant
 	// and a catch-all provider such as LocalAudio must stay last. A non-empty
 	// list that claims nothing is an error (ErrNoProvider) rather than a silent
@@ -185,8 +182,8 @@ type Config struct {
 	ProbeMode *core.DurationMode
 
 	// Decoder is the initial decoder preference: a name from
-	// decode.Default.Codecs(), or empty for automatic selection. It is only the
-	// starting value; Settings can change it while the session runs.
+	// decode.Default.Codecs(), or empty for automatic selection. Settings can
+	// change it while the session runs.
 	Decoder string
 
 	// Pipeline is the post-ring effect chain. Zero is an empty chain, which is
@@ -194,14 +191,12 @@ type Config struct {
 	// streamer's business and is ignored here.
 	Pipeline dsp.Pipeline
 
-	// Experimental toggles not-yet-stable features. Zero is today's behaviour,
-	// so leaving it unset keeps every existing path byte-for-byte.
+	// Experimental toggles not-yet-stable features.
 	Experimental Experimental
 
 	// validateDecoder overrides the decoder-name check. Tests that drive the
 	// session with fake codecs set it, so they do not have to register into the
-	// process-wide registry. Production code leaves it nil and the real
-	// registry is consulted.
+	// process-wide registry. Production code leaves it nil.
 	validateDecoder func(name string) error
 
 	// The seams below let tests drive the controller without a file system or
@@ -221,9 +216,8 @@ type Config struct {
 // the gain itself, so it is not duplicated here.
 //
 // Backend is included because a change must survive until the next device is
-// built, but note that an already-open device keeps playing on the old backend:
-// a Device cannot be re-bound, so the switch lands on the next Play that has to
-// build one.
+// built, but an already-open device keeps playing on the old backend: a Device
+// cannot be re-bound, so the switch lands on the next Play that builds one.
 type runtimeSettings struct {
 	mu        sync.Mutex
 	decoder   string
@@ -299,14 +293,13 @@ func (r *runtimeSettings) setPipeline(p dsp.Pipeline) uint64 {
 // setPipelineIfChanged stores the pipeline only when it differs from the one in
 // force and reports whether it did. The compare and the store share one lock, so
 // two concurrent callers cannot both decide a change is new. Skipping an
-// identical pipeline is what stops a settings change that does not touch the
-// chain from re-installing it, resetting effect state mid-track and emitting a
-// spurious PipelineChanged.
+// identical pipeline stops a settings change that does not touch the chain from
+// re-installing it, resetting effect state mid-track and emitting a spurious
+// PipelineChanged.
 //
 // Only the Post halves are compared: this is the same Post-only surface Settings
-// exposes, and a Pre change is not this method's business. Normalising with
-// clonePipeline is what makes a Pipeline carrying a Pre half compare equal to
-// the stored one that has none.
+// exposes. Normalising with clonePipeline is what makes a Pipeline carrying a
+// Pre half compare equal to the stored one that has none.
 func (r *runtimeSettings) setPipelineIfChanged(p dsp.Pipeline, effects []dsp.Effect, keys []stageKey) (bool, uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -344,10 +337,9 @@ func (r *runtimeSettings) pipelineGenNow() uint64 {
 
 // setPipelineParam writes one parameter into the stored pipeline so a later
 // rebuild (the next track's chain) constructs the effect with the value the
-// user set rather than the value it was added with. The live effect's Set is
-// what changes the audio now; this keeps the description in step so the change
-// survives a rebuild. The Params map is copied before the write because the
-// stored maps are shared with readers.
+// user set. The live effect's Set is what changes the audio now; this keeps the
+// description in step so the change survives a rebuild. The Params map is
+// copied because the stored maps are shared with readers.
 func (r *runtimeSettings) setPipelineParam(id, key string, value any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -454,10 +446,9 @@ type command struct {
 	index int
 
 	// play makes cmdInsertQueue start the first inserted ref instead of only
-	// splicing it in. It is a field on the insert command rather than a second
-	// PlayIndex call because PlayIndex validates its index synchronously,
-	// before the control loop has grown the queue, so the pair cannot be sent
-	// as two commands.
+	// splicing it in. It is a field here rather than a second PlayIndex call
+	// because PlayIndex validates its index synchronously, before the control
+	// loop has grown the queue.
 	play bool
 
 	// on is the desired state of cmdShuffle: true shuffles the queue, false
@@ -526,9 +517,8 @@ type openResult struct {
 
 	// providerMeta is true when a provider supplied the track's description.
 	// It changes two things downstream: activate seeds the view from Meta
-	// instead of an empty Meta, and enrich skips the local resolver, which has
-	// nothing to read for a remote ref and would clobber the provider's tags
-	// with filename-derived junk.
+	// instead of an empty Meta, and enrich skips the local resolver, which
+	// would clobber the provider's tags with filename-derived junk.
 	providerMeta bool
 	meta         meta.Meta
 	// probe is the provider's optional duration probe. Nil means the total
@@ -540,7 +530,7 @@ type openResult struct {
 	// available. It is carried only when the experimental seamless-swap path is
 	// on and the provider offered one, so with the flag off the build behaves
 	// exactly as before. It runs off the control loop after the track is
-	// playing, because waiting for a whole download must not delay audio.
+	// playing, because a whole download must not delay audio.
 	upgrade func(context.Context) (stream.Opener, error)
 }
 
@@ -596,9 +586,8 @@ type view struct {
 
 	// providerRef is true when the live track was opened through a provider
 	// Source rather than the session's own decoder path. SwapDecoder refuses
-	// such a track, so the flag lives here, under the same lock SwapDecoder
-	// reads the path under, rather than being re-derived from the ref (which
-	// would need to inspect the provider's identity).
+	// such a track, so the flag lives under the same lock SwapDecoder reads the
+	// path under, rather than being re-derived from the ref.
 	providerRef bool
 
 	queueIndex int
@@ -667,10 +656,10 @@ type Session struct {
 	// with the pipeline generation it belongs to. The editor pairs a description
 	// with the live effects only while the generations agree, and it reads the
 	// pair together: two separate atomics could be caught between the two stores
-	// and pair one generation's identity with another generation's meters.
+	// and pair one generation's identity with another's meters.
 	//
 	// The effects a change has accepted but not yet published live in
-	// runtimeSettings.pendingEffects, beside the generation, so the editor can
+	// [runtimeSettings.pending], beside the generation, so the editor can
 	// resolve a stage in that window too.
 	installed atomic.Pointer[installedChain]
 
@@ -690,8 +679,7 @@ type Session struct {
 	inFlight      bool
 
 	// lastUnderruns is the streamer's cumulative underrun count as of the last
-	// device poll. It is owned by the control goroutine and read only there, so
-	// it needs no lock. It is the baseline a delta is computed against.
+	// device poll, the baseline the next delta is computed against.
 	lastUnderruns int64
 
 	// shuffled is the baked-shuffle state. When true the queue in force is a
@@ -746,9 +734,8 @@ type Session struct {
 
 	// xfadeStarts counts blends actually started. It is a test seam: the
 	// control loop increments it in beginCrossfade, so a test can prove the
-	// same-album skip suppressed the blend rather than inferring it from
-	// timing. A real session never reads it, and it is atomic because a test
-	// reads it from its own goroutine while the control loop runs.
+	// same-album skip suppressed the blend rather than inferring it from timing.
+	// It is atomic because a test reads it from its own goroutine.
 	xfadeStarts atomic.Int64
 
 	// prefetchFail records the queue index whose prefetch last failed to build,
@@ -893,10 +880,9 @@ func New(cfg Config) (*Session, error) {
 
 // buildPost compiles the post-ring half of a pipeline into configured effects.
 // Building is also validation: resolving each kind and coercing each parameter
-// is what rejects an unknown kind or parameter. The effects are Configured for
-// the canonical post-ring format and Reset before they are handed to a caller,
-// so the first buffer an effect sees is never stale state from a previous
-// install.
+// rejects an unknown kind or parameter. The effects are Configured for the
+// canonical post-ring format and Reset before they are handed to a caller, so
+// the first buffer an effect sees is not stale state from a previous install.
 func buildPost(p dsp.Pipeline) ([]dsp.Effect, error) {
 	if err := validateSpecIDs(p.Post); err != nil {
 		return nil, err
@@ -919,8 +905,7 @@ func buildPost(p dsp.Pipeline) ([]dsp.Effect, error) {
 
 // validateSpecIDs rejects a pipeline with two stages sharing a non-empty ID. An
 // empty ID means the stage is not addressable by the editor and is allowed, but
-// a duplicate would make RemoveEffect and liveEffect address different stages:
-// the first would drop both, the second would write the wrong one.
+// a duplicate would make RemoveEffect and liveEffect address different stages.
 func validateSpecIDs(specs []dsp.Spec) error {
 	seen := make(map[string]bool, len(specs))
 	for _, spec := range specs {
@@ -987,9 +972,7 @@ func (s *Session) Settings() Settings {
 
 // ApplyPipeline validates every post-ring stage before applying any of them,
 // matching SetSettings: a pipeline with an unknown kind or an unknown parameter
-// is rejected whole and leaves the chain in force untouched. Validation happens
-// on the caller's goroutine: building an effect is bounded and never touches
-// the device, just as validation of a decoder name never opens a file.
+// is rejected whole and leaves the chain in force untouched.
 //
 // The accepted effects are handed to the control loop, which publishes them with
 // an atomic swap. A successful call therefore means the pipeline is accepted,
@@ -1012,13 +995,12 @@ func (s *Session) Pipeline() dsp.Pipeline { return s.runtime.Pipeline() }
 
 // SetSettings validates every field before applying any of them, so a partial
 // update is impossible: either the whole set is accepted or nothing changes.
-// Validation runs here, on the caller's goroutine, so a bad value is reported
-// as an error instead of surfacing as a Failed event on the next track.
+// Validation runs on the caller's goroutine, so a bad value is reported as an
+// error instead of surfacing as a Failed event on the next track.
 //
-// Pipeline is validated as part of the same all-or-nothing rule. It differs
-// from the other fields in that it is applied by the control loop rather than
-// here, because installing a chain must not race a build; the whole set is
-// still rejected before anything is written.
+// Pipeline is applied by the control loop rather than here, because installing a
+// chain must not race a build; the whole set is still rejected before anything
+// is written.
 func (s *Session) SetSettings(next Settings) error {
 	if err := ValidateVolume(next.Volume); err != nil {
 		return err
@@ -1064,11 +1046,12 @@ func stageKeys(p dsp.Pipeline) []stageKey {
 }
 
 // installPipeline records a validated pipeline and, when it actually changed,
-// hands its prebuilt effects to the control loop to publish. Building the
-// effects already happened on the caller's goroutine, so the control loop only
-// performs an atomic chain swap and never blocks on effect construction. An
-// identical pipeline is a no-op: the effects are discarded and nothing is
-// emitted, so a settings edit that leaves the chain alone cannot reset it.
+// hands its prebuilt effects to the control loop to publish. An identical
+// pipeline is a no-op: the effects are discarded and nothing is emitted, so a
+// settings edit that leaves the chain alone cannot reset it.
+//
+// The effects were already built on the caller's goroutine, so the control loop
+// only performs an atomic chain swap and never blocks on effect construction.
 func (s *Session) installPipeline(effects []dsp.Effect, p dsp.Pipeline, installed chan struct{}) {
 	keys := stageKeys(p)
 	changed, gen := s.runtime.setPipelineIfChanged(p, effects, keys)
@@ -1088,8 +1071,7 @@ func (s *Session) installPipeline(effects []dsp.Effect, p dsp.Pipeline, installe
 // applyPipelineWait is ApplyPipeline plus a wait for the control loop to publish
 // the chain. The effect editor uses it so a stage it just added is already live
 // when the call returns, which is what lets the caller set a parameter on it
-// immediately instead of polling. The wait is bounded by the control loop, which
-// only does bounded work, and by Close, so it cannot block a shutdown.
+// immediately instead of polling.
 func (s *Session) applyPipelineWait(p dsp.Pipeline) error {
 	effects, err := buildPost(p)
 	if err != nil {
@@ -1109,7 +1091,7 @@ func (s *Session) applyPipelineWait(p dsp.Pipeline) error {
 // caller may change while playback is running. Everything else in Config is
 // read once by New and cannot change afterwards.
 //
-// Three of these take effect at different moments, which callers must know:
+// The fields take effect at different moments:
 //
 //   - Volume applies immediately.
 //   - Decoder and ProbeMode are read when the next track is built, so the
@@ -1281,9 +1263,9 @@ func (s *Session) InsertQueue(index int, refs []string) error {
 // InsertQueueAndPlay inserts refs like InsertQueue and then starts the first
 // inserted ref. With nothing playing that is simply "play this now"; with a
 // track sounding it would cut it off, so the live case is refused with
-// ErrNoLiveTrack and the caller keeps the refs to append instead. It is one
-// command rather than an insert plus a PlayIndex because PlayIndex validates
-// its index synchronously, before the control loop has grown the queue.
+// ErrNoLiveTrack. It is one command rather than an insert plus a PlayIndex
+// because PlayIndex validates its index synchronously, before the control loop
+// has grown the queue.
 func (s *Session) InsertQueueAndPlay(index int, refs []string) error {
 	if err := validateRefs(refs); err != nil {
 		return err
@@ -1341,9 +1323,7 @@ func (s *Session) Prev() error {
 // SetShuffle turns baked shuffle on or off. On, the queue in force is replaced
 // with a shuffled permutation of itself and the current track keeps playing;
 // the next advance follows the shuffled order rather than picking a random
-// track each time. Off restores the order the last shuffle was taken from. A
-// shuffle is the control loop's to apply because it re-seats the queue under
-// the same lock Queue reads under.
+// track each time. Off restores the order the last shuffle was taken from.
 func (s *Session) SetShuffle(on bool) error {
 	s.enqueue(command{kind: cmdShuffle, on: on})
 
@@ -1755,20 +1735,19 @@ func (s *Session) setQueue(paths []string) {
 
 // insertQueue splices refs into the queue at index and republishes the length.
 // It deliberately does not touch the current track: no detach, no new open, no
-// seek. The streamer keeps feeding the device, so a track that is playing
-// carries on exactly where it was, and the inserted refs are simply what the
-// engine reaches when it advances.
+// seek. The streamer keeps feeding the device, so a playing track carries on
+// where it was, and the inserted refs are what the engine reaches when it
+// advances.
 //
-// The current index is left alone when the insertion lands after it, because
-// the current track has not moved. Inserting at or before the current index
-// would shift the current track, so it is treated as an append: the engine has
-// no way to re-seat the live streamer's position, and pretending otherwise
-// would make the next advance skip or repeat a track.
+// Inserting at or before the current index would shift the current track, so it
+// is treated as an append: the engine has no way to re-seat the live streamer's
+// position, and pretending otherwise would make the next advance skip or repeat
+// a track. An insertion after the current index leaves the index alone, because
+// the current track has not moved.
 //
 // play starts the first inserted ref instead of leaving it queued. The decision
 // is re-made here, on the control loop that owns the queue: the caller's check
-// ran on its own goroutine, so a track may have started since and a live track
-// must never be cut off by an insert.
+// ran on its own goroutine, so a track may have started since.
 func (s *Session) insertQueue(index int, refs []string, play bool) {
 	if len(refs) == 0 {
 		return
@@ -2026,15 +2005,14 @@ func (s *Session) openTrack(seq uint64, index int, path string) {
 // refused, so shutdown cannot be extended by a new file open.
 //
 // The chain is built on this worker, not the control loop, because building an
-// effect can be arbitrarily expensive and the control loop must stay
-// responsive. The pipeline snapshot and its generation are captured before the
-// effects are built, so the loop can tell whether a change landed while this
-// ran and prefer the newer one.
+// effect can be arbitrarily expensive. The pipeline snapshot and its generation
+// are captured before the effects are built, so the loop can tell whether a
+// change landed while this ran and prefer the newer one.
 //
-// A reference claimed by a non-local provider is resolved here too, on this
-// worker, because Open may block on the network. LocalAudio is transparent: it
-// is treated as the legacy path so the decoder preference and the existing
-// openDecoder seam keep working unchanged.
+// A reference claimed by a non-local provider is resolved here too, because
+// Open may block on the network. LocalAudio is transparent: it is treated as
+// the legacy path so the decoder preference and the openDecoder seam keep
+// working unchanged.
 func (s *Session) build(seq uint64, index int, path string) openResult {
 	select {
 	case <-s.closing:
@@ -2277,10 +2255,9 @@ func (s *Session) activate(res openResult) {
 // startUpgrade runs a Source.Upgrade off the control loop and hands the result
 // back as a request. A failure is silent by design: the upgrade is a best-effort
 // optimisation over a stream that is already playing, so it is not a track
-// failure. It must not emit Failed and must not close the streamer; the track
-// keeps the decoder it was built with. workerWG tracks it so Close waits for a
-// download that is still running, and ctx is cancelled on Close and on a track
-// change.
+// failure and must neither emit Failed nor close the streamer. workerWG tracks
+// it so Close waits for a download that is still running; ctx is cancelled on
+// Close and on a track change.
 func (s *Session) startUpgrade(ctx context.Context, res openResult) {
 	s.workerWG.Add(1)
 
@@ -2309,14 +2286,14 @@ func (s *Session) startUpgrade(ctx context.Context, res openResult) {
 
 // enrich starts the asynchronous metadata and duration lookups. Play never
 // waits for either: the snapshot reports an unknown duration until the probe
-// lands. These workers own no engine resource, so Close does not wait for
-// them; their channel sends are released by the closing signal.
+// lands. These workers own no engine resource, so Close does not wait for them;
+// their channel sends are released by the closing signal.
 //
 // A provider ref is described by its Source, so the local resolver is skipped:
 // meta.Default() would read a file that does not exist and invent a title from
 // the ref string. The duration likewise comes from Source.Probe when one was
-// supplied; without it the total stays unknown, because the session's own
-// prober only understands a local path.
+// supplied, and stays unknown otherwise, because the session's own prober only
+// understands a local path.
 func (s *Session) enrich(res openResult) {
 	go func() {
 		var info core.StreamInfo
@@ -2460,8 +2437,7 @@ func (s *Session) pollDevice() {
 // the increase since the last poll. It is a poll rather than a callback because
 // the shortfall is counted on the streamer's producer path, which must not be
 // asked to render or emit; sampling on the device tick keeps the audio path
-// untouched. The whole check is skipped when no debug consumer is attached, so
-// an ordinary session pays nothing for it.
+// untouched. The whole check is skipped when no debug consumer is attached.
 func (s *Session) pollUnderruns() {
 	if !s.debug.active.Load() || s.live == nil {
 		return
@@ -2973,9 +2949,7 @@ func (s *Session) handleDecoderSwap(res seekResult) {
 // handleSeamlessSwap applies a finished source upgrade. Nothing is reported: no
 // event, no preference change. On success only the live decoder and parser
 // labels move; on failure they stand, because the streamer kept the old decoder
-// and the upgrade is an optimisation, not a track failure. Either way a seek or
-// swap queued behind the upgrade is started, since the upgrade never parked the
-// device the way a seek does.
+// and the upgrade is an optimisation, not a track failure.
 func (s *Session) handleSeamlessSwap(res seekResult) {
 	if res.stream != s.live || res.seq != s.seq {
 		s.startPendingRequest()

@@ -11,6 +11,7 @@
 // The scalar Analyzer stays as the reference implementation and the fallback
 // for a CPU with neither AVX nor NEON, where the plan's own scalar path would
 // not beat the radix-2 loop.
+
 package spectrum
 
 import (

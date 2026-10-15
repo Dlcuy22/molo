@@ -19,12 +19,15 @@ func init() {
 	Register(NewMaximizerFactory())
 }
 
+// Maximizer parameter keys matching preset names.
 const (
 	MaximizerThreshold = "threshold"
 	MaximizerRelease   = "release"
 	MaximizerCeiling   = "ceiling"
-	MeterReduction     = "reduction"
 )
+
+// MeterReduction is the gain-reduction meter key reported by dynamics effects.
+const MeterReduction = "reduction"
 
 const (
 	maximizerMinThreshold = -36.0
@@ -40,6 +43,7 @@ const (
 // MaximizerFactory creates instances of the lookahead peak maximizer.
 type MaximizerFactory struct{}
 
+// NewMaximizerFactory returns a factory for the lookahead peak maximizer.
 func NewMaximizerFactory() *MaximizerFactory { return &MaximizerFactory{} }
 
 func (f *MaximizerFactory) Kind() string { return "maximizer" }

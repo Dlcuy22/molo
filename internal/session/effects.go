@@ -19,12 +19,12 @@ var ErrEffectIndexOutOfRange = errors.New("session: effect index out of range")
 // scriptedKind is the pipeline slot every scripted effect shares. A kind is
 // scripted when its factory registers under this name. The session compares the
 // string rather than importing the script package, which would pull a Lua
-// interpreter into every build that only wants an editor.
+// interpreter into every build.
 const scriptedKind = "script"
 
-// EffectKindInfo describes one registered implementation for a chooser. It is
-// the (kind, impl) pair a caller passes to AddEffect, plus the label and the
-// script flag a UI needs to group the list.
+// EffectKindInfo describes one registered implementation for a chooser: the
+// (kind, impl) pair a caller passes to AddEffect, plus the label and the script
+// flag a UI needs to group the list.
 type EffectKindInfo struct {
 	Kind     string
 	Impl     string
@@ -36,9 +36,9 @@ type EffectKindInfo struct {
 // EffectStage is one stage of the chain in force: its identity, its schema, its
 // current parameter values, its live meters and its described readings and
 // visuals. Schema and Values are snapshots taken when the stage is read, so a UI
-// can render it without holding an effect. Meters is nil for an effect that does
-// not implement dsp.Metered. Readings is empty and Visuals is empty for an
-// effect that does not implement dsp.Described or dsp.Visualized.
+// can render it without holding an effect. Meters is nil, and Readings and
+// Visuals are empty, for an effect that does not implement the corresponding
+// interface.
 type EffectStage struct {
 	ID       string
 	Kind     string
@@ -64,9 +64,9 @@ type EffectMeters struct {
 // EffectMeters returns the live meters of every stage that meters, in
 // processing order. It resolves the live chain by ID exactly as EffectStages
 // does, but reads only the meters, so a UI can drive a moving needle at a
-// higher rate than the full snapshot without re-walking schemas and values. A
-// stage with no live effect yet, or an effect that does not implement
-// dsp.Metered, is omitted rather than reported with empty meters.
+// higher rate than the full snapshot. A stage with no live effect yet, or an
+// effect that does not implement dsp.Metered, is omitted rather than reported
+// with empty meters.
 func (s *Session) EffectMeters() []EffectMeters {
 	pipeline, _ := s.runtime.pipelineSnapshot()
 	specs := pipeline.Post
@@ -121,10 +121,9 @@ func (s *Session) EffectKinds() []EffectKindInfo {
 // chain is swapped by the control loop a moment later. A rebuild in flight can
 // therefore leave the two briefly out of step. Pairing them by index in that
 // window would report one stage's identity with another stage's meters, so this
-// pairs them only while the pipeline generation matches the generation the
-// control loop last installed. A chain caught mid-install reports the accepted
-// description with no meters rather than a wrong pairing, and the next read
-// settles.
+// pairs them only while the pipeline generation matches the one the control
+// loop last installed. A chain caught mid-install reports the accepted
+// description with no meters rather than a wrong pairing.
 func (s *Session) EffectStages() []EffectStage {
 	pipeline, _ := s.runtime.pipelineSnapshot()
 	specs := pipeline.Post
@@ -137,8 +136,7 @@ func (s *Session) EffectStages() []EffectStage {
 	for _, spec := range specs {
 		// Resolve by ID, not by index: the description and the live chain can
 		// come from different accepted changes, and an ID says exactly which
-		// effect belongs to which stage. A stage with no live effect yet
-		// reports its description with no meters rather than a wrong pairing.
+		// effect belongs to which stage.
 		if inst != nil {
 			if e, ok := inst.effect(spec); ok {
 				out = append(out, stageFromEffect(spec, e))
@@ -254,9 +252,8 @@ func specLabel(kind, impl string) string {
 
 // AddEffect appends one stage to the chain and returns its new ID. The stage is
 // built on the caller's goroutine, exactly as ApplyPipeline builds, and the
-// install is waited for, so the returned stage is already live: the caller can
-// set a parameter on it immediately. Waiting is bounded by the control loop,
-// which only does bounded work, and by Close.
+// install is waited for, so the returned stage is already live and the caller
+// can set a parameter on it immediately.
 //
 // The whole read-modify-write is serialized, so two concurrent calls each see
 // the other's stage instead of starting from the same list and dropping one.
@@ -353,7 +350,7 @@ func (s *Session) MoveEffect(id string, to int) error {
 // documented safe while Process runs, so the change lands on the running effect
 // and its state survives.
 //
-// Any lock the lookup takes is released before Set runs, so Set is never called
+// Any lock the lookup takes is released before Set runs, so Set never runs
 // while holding a lock the audio thread could want.
 func (s *Session) SetEffectParam(id, key string, value any) error {
 	e, err := s.liveEffect(id)
@@ -367,8 +364,7 @@ func (s *Session) SetEffectParam(id, key string, value any) error {
 	// rebuild constructs this effect with it. Without this the live effect
 	// changes but the description the build reads keeps the old value, and the
 	// setting appears to reset on every track change. The value is read back
-	// from the effect so the description carries the coerced value the effect
-	// actually stored, not the raw input.
+	// from the effect so the description carries the coerced value it stored.
 	stored := value
 	if got, err := e.Get(key); err == nil {
 		stored = got
@@ -385,8 +381,8 @@ func (s *Session) SetEffectBypass(id string, bypassed bool) error {
 	return s.SetEffectParam(id, dsp.ParamBypass, bypassed)
 }
 
-// liveEffect resolves a stage ID to the effect currently installed. It looks the
-// ID up in the live chain and, when the control loop has not published the
+// liveEffect resolves a stage ID to the effect currently installed. It looks
+// the ID up in the live chain and, when the control loop has not published the
 // newest change yet, in the pending chain for that same change. Resolving by ID
 // rather than by a generation and an index means a stage is found whenever its
 // effect exists, even if the caller read a description from an older snapshot.
@@ -436,10 +432,10 @@ func (s *Session) chainSpecs() []dsp.Spec {
 
 // newEffectID hands out a unique stage ID. The counter is monotonic so an ID is
 // never reused after a remove: a reused ID would let a stale UI reference
-// address whichever stage next took the slot. It also skips any ID already in
-// specs, so a caller-supplied ID from ApplyPipeline or SetSettings cannot be
-// collided with, which would otherwise make RemoveEffect and liveEffect address
-// different stages.
+// address whichever stage next took the slot, and RemoveEffect and liveEffect
+// would no longer agree on which stage an ID names. It also skips any ID already
+// in specs, so a caller-supplied ID from ApplyPipeline or SetSettings cannot be
+// collided with.
 func (s *Session) newEffectID(kind, impl string, specs []dsp.Spec) string {
 	s.effectIDs.mu.Lock()
 	defer s.effectIDs.mu.Unlock()

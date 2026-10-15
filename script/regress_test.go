@@ -1,8 +1,7 @@
 package script
 
 // Regression tests for the adversarial review of the script package. Each test
-// pins one finding with a printed number, so a future refactor that undoes a
-// fix fails here rather than in the field.
+// pins one finding, so a future refactor that undoes a fix fails here.
 
 import (
 	"math"

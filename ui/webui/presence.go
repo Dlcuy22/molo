@@ -10,6 +10,7 @@
 // needs one extra browse lookup, cached on disk. A local file has neither, so
 // its embedded cover is uploaded to a temporary host and its small image falls
 // back to the application asset.
+
 package main
 
 import (

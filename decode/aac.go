@@ -3,22 +3,15 @@
 // stream (.aac) rather than the raw AAC inside an MP4 container, which is a
 // different demuxer's job.
 //
-// ADTS is a bare frame stream. Each frame carries its own 7-byte header with
-// the sample rate and channel configuration, but there is no field for the
-// total length and no frame index. The header does carry the frame length,
-// though, so a single pass over the 7-byte headers builds a byte-offset index
-// without decoding a sample. That index gives both an exact Probe total and a
-// native seek, the same approach ffmpeg's ADTS probe takes. go-aac itself is
-// asked for one access unit at a time (pcm.FrameDecoder), so this adapter
-// demuxes the framing rather than the library parsing it again.
+// ADTS carries no total length and no frame index, so a single pass over the
+// 7-byte headers builds a byte-offset index without decoding a sample. That
+// index gives both an exact Probe total and a native seek, the same approach
+// ffmpeg's ADTS probe takes. go-aac is asked for one access unit at a time, so
+// this adapter demuxes the framing rather than the library parsing it again.
 //
-// The decoder normalizes whatever the file holds (44.1 or 48 kHz, mono or
-// stereo) to the engine's canonical 48000 Hz stereo float32, the same contract
-// the other byte-oriented decoders satisfy. The shared pcmConverter does the
-// rate, channel and width conversion; go-aac emits interleaved little-endian
-// S16, so the stored width is always two bytes.
-//
-// Dependencies: github.com/tphakala/go-aac.
+// The shared pcmConverter normalizes whatever the file holds to the engine's
+// canonical 48000 Hz stereo float32; go-aac emits interleaved little-endian S16,
+// so the stored width is always two bytes.
 
 package decode
 
@@ -31,7 +24,6 @@ import (
 	"github.com/tphakala/go-aac/pcm"
 )
 
-// init registers the AAC decoder.
 func init() {
 	Register(NewAacFactory())
 }

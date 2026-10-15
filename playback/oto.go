@@ -91,11 +91,10 @@ var (
 )
 
 // playerBufferFrames is how far ahead of the device oto is allowed to read:
-// 100 ms at the device rate. oto's default is 500 ms, which is larger than the
+// 100 ms at the device rate. oto's default of 500 ms is larger than the
 // streamer's 300 ms ring, so every pull would ask for more than the ring can
 // ever hold, come back short, and be counted as an underrun even when audio is
-// flowing perfectly. Matching the engine's own chunk size keeps reads whole and
-// the underrun counter meaningful, at the cost of a little robustness margin.
+// flowing perfectly. Matching the engine's own chunk size keeps reads whole.
 var playerBufferFrames = deviceRate * 100 / 1000
 
 type deviceState uint8
@@ -159,10 +158,10 @@ func (d *otoDevice) Open(f core.FrameFormat, p Provider) error {
 
 	src := newPCMReader(p, f.Ch)
 	player := ctx.NewPlayer(src)
-	// oto's default player buffer is 500 ms, larger than the streamer's 300 ms
-	// ring: every pull would ask for more than the ring can hold and come back
-	// short, which the streamer counts as an underrun even when audio is
-	// flowing. Matching the engine's own 100 ms chunk keeps reads whole.
+	// oto's default player buffer of 500 ms is larger than the streamer's
+	// 300 ms ring, so every pull would come back short and be counted as an
+	// underrun even when audio is flowing. Matching the engine's own 100 ms
+	// chunk keeps reads whole.
 	// NewPlayer returns a paused player that does not touch the source until
 	// Play, so Open does not consume any of the stream.
 	player.SetBufferSize(playerBufferFrames * f.Ch * 4)

@@ -205,7 +205,7 @@
       adding = false;
       // Adopt the source this open started in, so the source-change effect
       // below does not read the open itself as a switch and disarm the preview
-      // we just armed (Ctrl+Alt+P after the palette was last used for YouTube).
+      // armed above (Ctrl+Alt+P after the palette was last used for YouTube).
       lastSource = source;
       inputEl?.focus();
     } else if (!open && wasOpen) {

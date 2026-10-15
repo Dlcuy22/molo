@@ -10,39 +10,24 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-// Tier 2 is the optional control callback. It runs on its own goroutine, never
-// on the audio thread and never per sample, and writes only values the audio
-// plan reads. The watchdog exists because a script is untrusted: a callback
-// that blocks or loops must not be allowed to starve anything, so a budget is
-// measured per invocation and a breach silences the effect.
-//
-// The bridge is deliberately narrow. The callback receives a table of current
-// parameter values and calls `node:set{ field = value }` on handles it kept
-// from build. Those writes land in a Go map, which is then converted to
-// precomputed coefficients and published atomically. The audio thread only ever
-// copies finished numbers out of the published snapshot, so it never runs math
-// the control side could have done.
-
-// controlRate is how often the callback runs. About 10 Hz is the plan's figure:
-// fast enough to track a signal for a compressor, slow enough that a script
-// cannot mistake this for a sample-rate hook.
+// controlRate is how often the callback runs. About 10 Hz tracks a compressor's
+// signal closely enough without passing as a per-sample hook.
 const controlRate = 10
 
-// watchdogBudget is how long one control callback may run before it is treated
-// as a fault. The audio block is about 100 ms, so 2 ms leaves a callback ample
-// room while still catching a script that does real work or loops forever.
+// watchdogBudget is how long one callback may run before it is treated as a
+// fault. A control block is about 100 ms, so 2 ms leaves ample room while still
+// catching a script that does real work or loops forever.
 const watchdogBudget = 2 * time.Millisecond
 
 // watchdogStrikes is how many consecutive over-budget ticks fault the effect.
 // The budget is a wall-clock measurement, so one overrun can be a scheduler
-// preemption or a GC pause rather than the script's fault; a callback that is
-// genuinely too slow overruns every tick, so a small run separates the two
-// while still catching a bad script within a few hundred milliseconds.
+// preemption or a GC pause rather than the script's fault; a genuinely slow
+// callback overruns every tick, so a short run separates the two.
 const watchdogStrikes = 3
 
-// callbackDeadline is the real deadline the interpreter enforces. It is wide
-// enough that a callback doing genuine work under the budget is never cut off,
-// and finite so an infinite loop is interrupted instead of hanging Close.
+// callbackDeadline is the deadline the interpreter itself enforces, wide enough
+// that a callback doing genuine work under the budget is never cut off and
+// finite so an infinite loop cannot hang Close.
 const callbackDeadline = 250 * time.Millisecond
 
 // ctrlValue is one precomputed value the control side publishes for a node. The
@@ -89,6 +74,15 @@ type controlBridge struct {
 }
 
 // controlRunner owns the Tier 2 loop. A nil runner means a Tier 1 script.
+//
+// The callback runs on its own goroutine, never on the audio thread and never
+// per sample, and writes only values the audio plan reads. It receives a table
+// of current parameter values and calls `node:set{ field = value }` on handles
+// it kept from build; those writes land in a Go map, are converted to
+// precomputed coefficients, and published atomically. The audio thread copies
+// finished numbers out of the published snapshot, never running that math. A
+// script is untrusted, so the watchdog measures each invocation against a
+// budget and silences the effect on a breach.
 type controlRunner struct {
 	bridge *controlBridge
 	stop   chan struct{}
@@ -96,14 +90,10 @@ type controlRunner struct {
 
 	committed atomic.Pointer[controlValues]
 
-	// overBudget counts consecutive callbacks that ran past the budget. A
-	// single overrun is not enough to fault the effect: the budget is measured
-	// with a wall clock, so one scheduler preemption or GC pause can push a
-	// trivial callback past 2 ms on a loaded machine, and faulting on that
-	// would brick a working effect until the host cleared it. A callback that
-	// is genuinely too slow, or loops forever, overruns every tick, so
-	// requiring a few in a row separates the two without letting a bad script
-	// run long.
+	// overBudget counts consecutive callbacks that ran past the budget. One
+	// overrun can be a scheduler preemption or a GC pause on a loaded machine,
+	// so faulting on it would brick a working effect; a genuinely slow callback
+	// overruns every tick, so requiring a few in a row separates the two.
 	overBudget int
 
 	startOnce sync.Once
@@ -133,8 +123,7 @@ func newControlRunner(ls *luaState) (*controlRunner, error) {
 }
 
 // controlGlobal is where the loader stashes the control function on the
-// interpreter's globals so the runner can recover it without a second return
-// value.
+// interpreter's globals, so the runner recovers it without a second return.
 const controlGlobal = "__player_control"
 
 // write records a `node:set{...}` value from inside the callback.
@@ -149,10 +138,9 @@ func (b *controlBridge) write(n *node, field string, value float64) {
 
 // invoke runs one tick: rewrite the params table, run the callback, then turn
 // the writes into precomputed node updates. The callback runs under a context
-// deadline, so an infinite loop is interrupted rather than hanging the control
-// goroutine and Close with it. The deadline has real headroom over the measured
-// budget because the interpreter checks it once per Lua instruction, not on a
-// wall clock.
+// deadline, so an infinite loop is interrupted rather than hanging Close. The
+// deadline is generous over the measured budget because the interpreter checks
+// it once per Lua instruction, not on a wall clock.
 func (b *controlBridge) invoke(values map[string]any) ([]ctrlValue, error) {
 	for k := range b.dirty {
 		delete(b.dirty, k)
@@ -356,7 +344,7 @@ func (r *controlRunner) loop(e *Effect) {
 	}
 }
 
-// close stops the loop. It is safe on a niche runner and safe to call twice.
+// close stops the loop. It is safe on a nil runner and safe to call twice.
 func (r *controlRunner) close() {
 	if r == nil || r.stop == nil {
 		return
@@ -406,9 +394,8 @@ func applyControl(p *plan, values []ctrlValue) {
 		case ctrlVals:
 			n.vals = v.vals
 			// An envelope keeps its smoothing coefficients in state, so they
-			// are derived here as well. Two exps per parameter change per
-			// block is nothing next to a block of samples, and it keeps the
-			// script's attack and release live.
+			// are derived here too; two exps per block is nothing next to a
+			// block of samples.
 			if s, ok := n.state.(*envState); ok {
 				s.attack = smoothCoeff(v.vals.attack, p.rate)
 				s.release = smoothCoeff(v.vals.release, p.rate)

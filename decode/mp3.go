@@ -2,20 +2,13 @@
 // path: it needs no runtime shared library and no cgo, and it decodes the
 // native MPEG audio bitstream rather than an Ogg mapping.
 //
-// MP3 has no container index: a seek walks frame headers from the first audio
+// MP3 has no container index, so a seek walks frame headers from the first audio
 // frame and then primes the bit reservoir and MDCT overlap before landing, which
-// is what the library's SeekToSample does. The output is normalized to the
-// engine's canonical 48000 Hz stereo float32 by the shared pcmConverter, the
-// same contract the FLAC and Opus decoders satisfy.
+// is what the library's SeekToSample does.
 //
-// The decoder asks the library for WithF32, its native sample type. pcmConverter
-// ingests integer PCM only, so the float bytes are unpacked to []float32 here
-// and handed straight to the converter's resampler; only the byte decode is
-// local, rate and channel conversion still go through the shared layer. Taking
-// the default S16 would round every sample through int16 and back for no gain,
-// and the extra quantization is not worth it even on lossy output.
-//
-// Dependencies: github.com/tphakala/go-mp3.
+// The decoder asks the library for WithF32 and unpacks the float bytes to
+// []float32 here, because pcmConverter ingests integer PCM only. Taking the
+// default S16 would round every sample through int16 and back for no gain.
 
 package decode
 
@@ -27,7 +20,6 @@ import (
 	mp3pcm "github.com/tphakala/go-mp3/pcm"
 )
 
-// init registers the MP3 decoder.
 func init() {
 	Register(NewMp3Factory())
 }

@@ -18,12 +18,11 @@ const tapScratchFrames = 1024
 // tap is the visualizer feed. It is a second ring, entirely separate from the
 // streamer's: the playback ring is forward-only and feeding the device, so
 // observing it would consume audio. The provider instead writes a mono downmix
-// into this ring after the gain has run, which is exactly what the listener
-// hears.
+// into this ring after the gain has run, which is what the listener hears.
 //
 // The writer is the audio path and must never wait. It only ever TryLocks, so a
 // consumer that is mid-copy makes the writer skip that buffer rather than
-// stall. TryLock is not just a politeness: an overwrite-oldest ring lets the
+// stall. TryLock is not just politeness: an overwrite-oldest ring lets the
 // writer reuse a slot the consumer may be reading, which is a data race unless
 // the copy is mutually exclusive. A slow consumer therefore loses frames, never
 // the audio thread.
@@ -63,16 +62,15 @@ func newTapRing(frames int) *tap {
 }
 
 // attach marks the tap as having a consumer. It is what makes publish do work;
-// calling it more than once is harmless. Read calls it, so merely holding a Tap
-// handle costs the audio path nothing until the consumer actually asks for
-// samples.
+// calling it more than once is harmless. Read calls it, so holding a Tap handle
+// costs the audio path nothing until the consumer asks for samples.
 func (t *tap) attach() { t.active.Store(true) }
 
 // publish writes frames of interleaved dst, downmixed to mono, into the ring.
 // It is the audio-path entry point: it must not block or allocate. The downmix
 // runs into the preallocated scratch and the ring copy is bounded, so the
 // critical section is a few microseconds; TryLock guarantees the audio thread
-// never waits for a consumer, dropping one buffer rather than stalling.
+// never waits for a consumer.
 func (t *tap) publish(dst []float32, frames, ch int) {
 	if !t.active.Load() {
 		return
@@ -194,9 +192,8 @@ func (t *tap) readMono(dst []float32) int {
 
 // Read is the consumer side: it copies up to len(dst) mono frames in time
 // order and reports zero when nothing is buffered. The first call marks the tap
-// live, which is what starts the audio path publishing; a Tap handle that is
-// never read therefore costs the audio path nothing. It is safe with no active
-// producer, which is what a UI holds between tracks.
+// live, which is what starts the audio path publishing, so a Tap that is never
+// read costs the audio path nothing.
 func (t *tap) Read(dst []float32) int {
 	t.attach()
 

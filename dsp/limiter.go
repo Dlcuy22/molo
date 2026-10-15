@@ -60,6 +60,7 @@ var limiterOversamplingOptions = []string{
 // LimiterFactory registers the lookahead limiter implementation.
 type LimiterFactory struct{}
 
+// NewLimiterFactory returns a factory for the lookahead limiter.
 func NewLimiterFactory() *LimiterFactory { return &LimiterFactory{} }
 
 func (f *LimiterFactory) Kind() string { return "limiter" }

@@ -1,15 +1,12 @@
 // Canonical PCM conversion shared by the byte-oriented decoders.
 //
-// The engine's currency is 48 kHz stereo interleaved float32 (core.CanonicalFormat):
-// playback rejects any other device format and the streamer's pre-module chain
-// must end there. A codec library, though, hands back whatever the file held:
-// its own sample rate, 1..8 channels, and int16 or int32 samples. package
-// decode therefore converts at the decoder boundary rather than pushing the
-// problem downstream, which is also why the direct decoder (see flac.go)
-// converts on its own.
+// A codec library hands back whatever the file held: its own sample rate, 1..8
+// channels, int16 or int32 samples. The engine's currency is 48 kHz stereo
+// interleaved float32 (core.CanonicalFormat), so package decode converts at the
+// decoder boundary rather than pushing the problem downstream.
 //
 // One implementation lives here because go-aac, go-mp3, go-wav and the direct
-// readers all need the same three conversions. A per-codec copy would be four
+// readers all need the same conversions; a per-codec copy would be several
 // chances to disagree about rounding or channel order.
 
 package decode
@@ -322,8 +319,8 @@ func le32(b []byte) uint32 {
 	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 }
 
-// float32frombits is math.Float32frombits without the math import here, so the
-// converter file stays free of a dependency it uses once.
+// float32frombits reinterprets raw float bits, keeping the byte-order helpers
+// next to the integer ones they mirror.
 func float32frombits(b uint32) float32 {
 	return math.Float32frombits(b)
 }

@@ -18,9 +18,9 @@ func (p namedProvider) Open(context.Context, string) (provider.Source, error) {
 	return provider.Source{}, nil
 }
 
-// TestProvidersIsReachableThroughTheInterface is the M2 regression: an external
-// caller holding the molo.Player interface must be able to ask which sources
-// are configured. Before the method was on the interface this did not compile.
+// TestProvidersIsReachableThroughTheInterface pins that an external caller
+// holding the molo.Player interface can ask which sources are configured: the
+// assignment below fails to compile if Providers is missing from molo.Player.
 func TestProvidersIsReachableThroughTheInterface(t *testing.T) {
 	// The assignment to the interface is the point: it fails to compile if
 	// Providers is missing from molo.Player.

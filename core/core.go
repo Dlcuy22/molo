@@ -105,7 +105,10 @@ type Module interface {
 type DurationMode uint8
 
 const (
-	DurationUnknown DurationMode = iota // open as fast as possible, leave the total unknown
-	DurationProbe                       // read the tail of the file, cheap
-	DurationScan                        // read and decode the whole file
+	// DurationUnknown opens as fast as possible and leaves the total unknown.
+	DurationUnknown DurationMode = iota
+	// DurationProbe reads the tail of the file, cheap.
+	DurationProbe
+	// DurationScan reads and decodes the whole file.
+	DurationScan
 )

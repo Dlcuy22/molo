@@ -36,11 +36,8 @@ type Bucket struct {
 	Min, Max, RMS float32
 }
 
-// Result is a decoded waveform.
-//
-// It is named Result rather than Waveform because Go gives a package one
-// namespace per identifier, so a type and the function that builds it cannot
-// share the same name.
+// Result is a decoded waveform. It is named Result rather than Waveform
+// because a type and the function that builds it cannot share one identifier.
 type Result struct {
 	Buckets []Bucket
 	Format  core.FrameFormat
@@ -59,7 +56,7 @@ type Options struct {
 	OnProgress func(done, total int64)
 
 	// CacheDir overrides the on-disk cache directory. Empty selects
-	// <user cache dir>/player/waveform. Tests set it so they never touch the
+	// <user cache dir>/molo/waveform. Tests set it so they never touch the
 	// real cache.
 	CacheDir string
 

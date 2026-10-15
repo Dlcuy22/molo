@@ -104,6 +104,8 @@ type uploadCall struct {
 	err  error
 }
 
+// NewImageUploader returns an uploader backed by the on-disk upload cache. A nil
+// logger falls back to the default.
 func NewImageUploader(log *slog.Logger) *ImageUploader {
 	if log == nil {
 		log = slog.Default()

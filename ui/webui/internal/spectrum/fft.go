@@ -7,6 +7,7 @@
 // 2048-point frame at 30 fps is a rounding error next to the decoder, so a
 // mixed-radix or a lookup-table implementation would be complexity without a
 // user-visible payoff.
+
 package spectrum
 
 import (

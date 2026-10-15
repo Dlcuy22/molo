@@ -27,13 +27,13 @@ type TrackChanged struct {
 	Path  string
 }
 
-// Seeked confirms a seek after it has been applied and audio resumed. From and
-// Elapsed describe the move itself: where playback was, and how long the
-// reposition took.
+// Seeked confirms a seek after it has been applied and audio resumed. Position
+// is where the seek landed, From is where playback was, and Elapsed is how long
+// the reposition took.
 type Seeked struct {
-	Position time.Duration // where the seek landed
-	From     time.Duration // where playback was before the seek
-	Elapsed  time.Duration // how long the reposition took
+	Position time.Duration
+	From     time.Duration
+	Elapsed  time.Duration
 }
 
 // TrackEnded is emitted once per track when it reaches its natural end.
@@ -70,14 +70,13 @@ func (Swapped) isEvent()         {}
 func (PipelineChanged) isEvent() {}
 func (Failed) isEvent()          {}
 
-// eventQueue is a non-blocking sink. It is a channel plus a drop-oldest
-// policy: a push never waits for a consumer, and when the buffer is full the
-// oldest value is discarded in favour of the newest. The dropped count is kept
-// so a slow consumer is visible instead of silent.
+// eventQueue is a non-blocking sink: a channel plus a drop-oldest policy. A
+// push never waits for a consumer, and when the buffer is full the oldest value
+// is discarded in favour of the newest. The dropped count is kept so a slow
+// consumer is visible instead of silent.
 //
-// Dropping the oldest rather than the newest is the deliberate choice for a
-// player UI: a stale "Playing" is worse than a missing one, and the newest
-// state is the one that matches what the user hears.
+// Dropping the oldest rather than the newest is deliberate for a player UI: a
+// stale "Playing" is worse than a missing one.
 type eventQueue[T any] struct {
 	mu     sync.Mutex
 	ch     chan T

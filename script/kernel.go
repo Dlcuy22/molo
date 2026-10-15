@@ -5,32 +5,26 @@ import (
 	"math"
 )
 
-// The kernel is pure Go and knows nothing about Lua. It takes a compiled graph
-// and runs it as a flat list, in place, with no allocation and no locks. Fase A
-// of the plan exists separately for this reason: if the kernel cannot hold the
-// zero-allocation contract, adding an interpreter in front of it is pointless.
-//
-// Every node buffers one frame of ch channels in float64. A filter recurrence
-// in float32 drifts, so the internal arithmetic is float64 and only the block
-// edges are float32, the same choice the engine's own crossfeed makes.
-
 // plan is a graph compiled for one sample rate: a flat order of nodes, a value
 // buffer per node, and the scratch the combinators need. It is built once in
 // Configure and only read afterwards.
+//
+// The kernel is pure Go and knows nothing about Lua: it runs the plan as a flat
+// list, in place, with no allocation and no locks. Every node buffers one frame
+// of ch channels in float64; a filter recurrence in float32 drifts, so internal
+// arithmetic is float64 and only the block edges are float32, the same choice
+// the engine's own crossfeed makes.
 type plan struct {
 	ops   []*node
 	ch    int
 	rate  int
 	frame []float64
-	// scratch is the staging buffer a node reads its own wired input into
-	// before writing its result. The delay needs it because it must read its
-	// source while writing its line, and the source may be a node whose output
-	// buffer is the one being written. It is allocated once, so the run loop
-	// still allocates nothing.
+	// scratch is the staging buffer a node reads its wired input into before
+	// writing its result, needed because a source may alias the output buffer
+	// being written. It is allocated once, so the run loop allocates nothing.
 	scratch []float64
 	// ctrl indexes nodes by declaration position, so a published control value
-	// can find its node without a map on the audio thread. Entries for constants
-	// are nil.
+	// finds its node without a map on the audio thread. Constants are nil.
 	ctrl []*node
 	// meters is every meter node, so one block's sample is published once per
 	// block instead of once per frame.
@@ -317,10 +311,9 @@ func lfoSelector(name string) (int, error) {
 }
 
 // maxLine is the saturation ceiling a delay line holds. A feedback loop at or
-// above unity grows without bound, and while a float64 can hold a long way the
-// block edge is float32: a value past 3.4e38 becomes Inf the moment it is
-// written back. Saturating the line at 4 bounds the loop well inside that,
-// while normal audio, which peaks near 1, never reaches it.
+// above unity grows without bound and the block edge is float32, so a value
+// past 3.4e38 becomes Inf when written back; 4 bounds it well inside that and
+// normal audio never reaches it.
 const maxLine = 4
 
 // clampLine keeps a delay line's contents finite and bounded. A non-finite

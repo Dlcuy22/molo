@@ -12,49 +12,44 @@ import (
 	"github.com/dlcuy22/molo/dsp"
 )
 
-// The effect wraps a compiled plan and exposes it as an ordinary dsp.Effect.
-// Nothing above this file knows a script is involved: the registry, the chain,
-// the preset loader and the UI all go through the same interface a built-in
-// effect implements.
-
-// Effect is a scripted effect instance.
+// Effect is a scripted effect instance. It wraps a compiled plan behind the
+// same dsp.Effect interface a built-in implements, so the registry, the chain,
+// the preset loader and the UI never know a script is involved.
 type Effect struct {
 	store *store
 	name  string
 
 	// graph is the compiled plan's source. It stays reachable so Configure can
-	// rebuild the plan for a new rate; the plan itself is what the audio thread
-	// runs.
+	// rebuild the plan for a new rate.
 	graph *graph
 
 	// state is the immutable audio-side snapshot: the plan, the gains and the
-	// bypass flags. Set rebuilds it and publishes it whole, so Process loads it
+	// bypass flags. Set rebuilds and publishes it whole, so Process loads it
 	// once and never races a control goroutine.
 	state atomic.Pointer[compiledState]
 
-	// mu serialises the control side: Set, Configure and Reset. It is never
-	// held on the audio path.
+	// mu serialises the control side (Set, Configure, Reset). It is never held
+	// on the audio path.
 	mu sync.Mutex
 
 	rate, ch int
 	isSet    bool
 
 	// control is the Tier 2 callback and its published values. The callback
-	// runs on a control goroutine; the audio thread only ever reads the
-	// committed controlState below.
+	// runs on a control goroutine; the audio thread reads only the committed
+	// controlValues.
 	control *controlRunner
 
-	// lua owns the instance's interpreter when it is a Tier 2 script. Closing
-	// it releases the sandbox; a Tier 1 instance has none.
+	// lua owns the instance's interpreter for a Tier 2 script; closing it
+	// releases the sandbox. A Tier 1 instance has none.
 	lua *luaState
 
-	// watchdog is the running verdict on the control callback. It is atomic
-	// because the watchdog goroutine writes it and Process reads it.
+	// watchdog is the running verdict on the control callback, atomic because
+	// the watchdog goroutine writes it and Process reads it.
 	watchdog atomic.Pointer[watchdogState]
 
 	// meterIn and meterOut are the block meters. Only the audio thread pushes
-	// into them and only a control goroutine reads, which is what the meter is
-	// built for; neither takes a lock.
+	// into them and only a control goroutine reads; neither takes a lock.
 	meterIn  dsp.Meter
 	meterOut dsp.Meter
 }
@@ -63,11 +58,11 @@ type Effect struct {
 // change without recompiling. It is replaced whole and never mutated.
 type compiledState struct {
 	plan *plan
-	// params is the resolved parameter set, recomputed on every Set. It is a
-	// fresh slice, so a swap is atomic and Process reads one consistent set.
+	// params is the resolved parameter set, recomputed on every Set as a fresh
+	// slice, so a swap is atomic and Process reads one consistent set.
 	params []ctrlValue
 	// bypassed is the bypass parameter; watchdogFailed forces bypass
-	// regardless of it, so a script that overran cannot keep touching audio.
+	// regardless, so a script that overran cannot keep touching audio.
 	bypassed       bool
 	watchdogFailed bool
 	gains          gainState
@@ -162,11 +157,10 @@ func (e *Effect) Process(buf []float32, frames int) error {
 
 	if st.bypassed || st.watchdogFailed {
 		e.meterOut.Push(buf, frames, e.ch)
-		// The plan does not run while bypassed, so nothing would republish a
-		// reading: it would stay frozen at its last pre-bypass value and report
-		// a reduction the effect is no longer applying. Zeroing every reading
-		// says "no reduction" instead of a stale one. The in/out pair still
-		// measures the audio this pass-through carries, so it is left alone.
+		// The plan does not run while bypassed, so nothing republishes a
+		// reading: it would stay frozen at its last pre-bypass value. Zeroing
+		// every reading says "no reduction" instead of a stale one. The in/out
+		// pair still measures the audio this pass-through carries.
 		if st.plan != nil {
 			for _, n := range st.plan.meters {
 				if n.meter != nil {
@@ -177,7 +171,7 @@ func (e *Effect) Process(buf []float32, frames int) error {
 
 		return nil
 	}
-	// Resolve parameter values first, then any Tier 2 writes, both on a block
+	// Resolve parameter values, then any Tier 2 writes, both on a block
 	// boundary so no buffer sees half a change. Both are float copies into
 	// audio-owned fields, so neither allocates.
 	applyControl(st.plan, st.params)
@@ -213,10 +207,10 @@ func (e *Effect) Bypassed() bool {
 	return st != nil && (st.bypassed || st.watchdogFailed)
 }
 
-// Latency reports how far the effect delays its output; the chain sums it into
-// the reported position. It is only called on the control side, so reading the
-// store's mutex here is fine. A negative resolved value clamps to zero: a
-// script cannot claim a latency that would advance the position.
+// Latency reports how far the effect delays its output, so the chain can add it
+// to the reported position. It runs on the control side, so reading the store's
+// mutex is fine. A negative or zero resolved value clamps to zero: a script
+// cannot claim a latency that would advance the position.
 func (e *Effect) Latency() time.Duration {
 	if e.graph == nil {
 		return 0
@@ -257,9 +251,8 @@ func (e *Effect) Meters() map[string]float32 {
 }
 
 // Readings describes every meter node's key, so a UI knows how to draw it. It
-// is a copy: the effect's declaration is not the caller's to mutate. An effect
-// with no meter nodes returns an empty slice, never nil, so it always marshals
-// as [] rather than null.
+// is a copy, so the caller cannot mutate the effect's declaration. An effect
+// with no meter nodes returns an empty slice, never nil, so it marshals as [].
 func (e *Effect) Readings() []dsp.Reading {
 	out := make([]dsp.Reading, 0)
 	if e.graph == nil {
@@ -274,8 +267,8 @@ func (e *Effect) Readings() []dsp.Reading {
 
 // Visuals returns the plots the script declared, in declaration order, or an
 // empty slice when it declared none. The slices are copied so a caller cannot
-// reach into the effect's declaration, and they are always non-nil so an empty
-// list marshals as [] rather than null.
+// reach into the effect's declaration, and every list is non-nil so it marshals
+// as [] rather than null.
 func (e *Effect) Visuals() []dsp.Visual {
 	if e.graph == nil || len(e.graph.visuals) == 0 {
 		return []dsp.Visual{}
@@ -338,9 +331,8 @@ func (e *Effect) Reset() error {
 }
 
 // ClearFault clears a watchdog verdict so the effect can run again after a
-// transient overrun. The fault is fail-closed by default: a host must ask for
-// recovery explicitly, and until it does the effect stays bypassed. This is
-// the documented way out of that state.
+// transient overrun. The fault is fail-closed: a host must ask for recovery
+// explicitly, and until it does the effect stays bypassed.
 func (e *Effect) ClearFault() {
 	e.watchdog.Store(nil)
 
@@ -350,9 +342,9 @@ func (e *Effect) ClearFault() {
 }
 
 // Close stops the control goroutine and releases the instance's interpreter. A
-// Tier 2 effect owns a goroutine and a Lua state, neither of which the engine's
-// Effect contract knows how to free, so a host that discards an effect should
-// call this. It is safe on a Tier 1 effect and safe to call twice.
+// Tier 2 effect owns a goroutine and a Lua state, which the engine's dsp.Effect
+// contract cannot free, so a host that discards an effect should call this. It
+// is safe on a Tier 1 effect and safe to call twice.
 func (e *Effect) Close() error {
 	if e.control != nil {
 		e.control.close()

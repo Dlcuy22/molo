@@ -42,7 +42,7 @@ var ErrClosed = errors.New("decode: decoder is closed")
 var ErrEndOfStream = io.EOF
 
 // sniffWindow bounds how much of a file is read to identify it. Every
-// container we care about is identifiable from its first bytes, so this stays
+// container that matters is identifiable from its first bytes, so this stays
 // far below a whole-file read.
 const sniffWindow = 4096
 

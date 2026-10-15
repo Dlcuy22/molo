@@ -7,11 +7,15 @@ import "github.com/dlcuy22/molo/internal/session"
 // a runtime setting, like the volume, so it can change while a track plays.
 type CrossfadeSettings = session.CrossfadeSettings
 
-// The crossfade duration bounds, re-exported so a UI can render the slider
-// without importing internal/session.
 const (
-	MinCrossfadeMs     = session.MinCrossfadeMs
-	MaxCrossfadeMs     = session.MaxCrossfadeMs
+	// MinCrossfadeMs is the shortest accepted crossfade duration, in
+	// milliseconds.
+	MinCrossfadeMs = session.MinCrossfadeMs
+	// MaxCrossfadeMs is the longest accepted crossfade duration, in
+	// milliseconds.
+	MaxCrossfadeMs = session.MaxCrossfadeMs
+	// DefaultCrossfadeMs is the crossfade duration a fresh install starts with,
+	// in milliseconds.
 	DefaultCrossfadeMs = session.DefaultCrossfadeMs
 )
 

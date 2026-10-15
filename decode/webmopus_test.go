@@ -12,7 +12,7 @@ import (
 	"github.com/dlcuy22/molo/core"
 )
 
-// --- EBML construction helpers -------------------------------------
+// EBML construction helpers.
 
 // ebmlSize encodes a Data Size VINT for n (RFC 8794 section 6), choosing the
 // shortest width that fits. It is the inverse of ebmlVint and lets the tests
@@ -369,7 +369,7 @@ func mustWebMReader(t *testing.T, path string) *webMOpusReader {
 	return r
 }
 
-// --- parity with Ogg -----------------------------------------------
+// parity with Ogg.
 
 // TestWebMOpusParityWithOgg is the strongest proof that the container mapping is
 // right: the same source muxed to Ogg and WebM must decode to the same PCM. A
@@ -408,7 +408,7 @@ func TestWebMOpusParityWithOgg(t *testing.T) {
 	}
 }
 
-// --- totals --------------------------------------------------------
+// totals.
 
 // TestWebMOpusTotalsMatchFFprobe pins the totals against ffprobe's report of the
 // checked-in fixtures, and checks the Duration path and the cluster-scan path
@@ -556,7 +556,7 @@ func stripCues(t *testing.T, path string) string {
 	return writeFile(t, t.TempDir(), "nocues.webm", out)
 }
 
-// --- seek ----------------------------------------------------------
+// seek.
 
 // TestWebMOpusSeekMatchesStraightDecode seeks to several points and requires the
 // PCM after convergence to match a straight decode. The fast window is not
@@ -683,7 +683,7 @@ func TestWebMOpusSeekWithoutCues(t *testing.T) {
 	}
 }
 
-// --- lacing --------------------------------------------------------
+// lacing.
 
 // TestWebMOpusLacingModes crafts one block per lacing mode and checks the reader
 // recovers the packets. ffmpeg never emits laced Opus here, so the bytes are
@@ -792,7 +792,7 @@ func signedVint(v int64) []byte {
 	return out
 }
 
-// --- unknown size --------------------------------------------------
+// unknown size.
 
 // TestWebMOpusUnknownSizeSegmentAndCluster builds a stream whose Segment and
 // Cluster both carry the unknown-size sentinel, as a live or piped muxer emits.
@@ -821,7 +821,7 @@ func TestWebMOpusUnknownSizeSegmentAndCluster(t *testing.T) {
 	}
 }
 
-// --- missing Duration / Cues --------------------------------------
+// missing Duration / Cues.
 
 // TestWebMOpusWithoutDurationFallsBackToClusterScan builds a file with no
 // Duration and checks the total comes from the cluster index: two 2.5 ms packets
@@ -852,7 +852,7 @@ func opusPacket2p5ms() []byte { return []byte{0x80, 0x00} }
 // the decoded-domain position by a full frame, like a real muxer's blocks.
 func opusPacket20ms() []byte { return []byte{0x98, 0x00} }
 
-// --- non-seekable --------------------------------------------------
+// non-seekable.
 
 // TestWebMOpusForwardMatchesSeekable proves the forward-only reader parses the
 // same packets as the indexed one, and that it refuses to seek.
@@ -882,7 +882,7 @@ func TestWebMOpusForwardMatchesSeekable(t *testing.T) {
 	}
 }
 
-// --- Void and CRC-32 ----------------------------------------------
+// Void and CRC-32.
 
 // TestWebMOpusSkipsVoidAndCRC inserts Void and CRC-32 at several levels and
 // requires the file to open and read normally.
@@ -905,7 +905,7 @@ func TestWebMOpusSkipsVoidAndCRC(t *testing.T) {
 	}
 }
 
-// --- DiscardPadding ------------------------------------------------
+// DiscardPadding.
 
 // TestWebMOpusReadsBlockGroupDiscardPadding builds a BlockGroup with signed
 // DiscardPadding and checks the block is read and the padding recorded.
@@ -936,7 +936,7 @@ func TestWebMOpusReadsBlockGroupDiscardPadding(t *testing.T) {
 	}
 }
 
-// --- negative cases ------------------------------------------------
+// negative cases.
 
 // TestWebMOpusRejectsBadStreams requires a clear error, never a panic, for each
 // malformed header.
@@ -1015,7 +1015,7 @@ func TestWebMOpusRejectsBadIDAndPanicFree(t *testing.T) {
 	}
 }
 
-// --- factory and descriptor ---------------------------------------
+// factory and descriptor.
 
 func TestWebMOpusFactoryContract(t *testing.T) {
 	f := NewWebMOpusFactory()
@@ -1084,7 +1084,7 @@ func TestWebMOpusProbeReadsDurationFront(t *testing.T) {
 	}
 }
 
-// --- regression coverage -------------------------------------------
+// regression coverage.
 
 // TestWebMOpusRejectsHugeElementSize is the panic regression: an element size
 // VINT claiming ~2^55 must produce an error, never a make([]byte) panic. Both
@@ -1434,7 +1434,7 @@ func TestWebMOpusForwardRejectsReservedID(t *testing.T) {
 	}
 }
 
-// --- helpers -------------------------------------------------------
+// helpers.
 
 type webmPacketRead struct {
 	data []byte

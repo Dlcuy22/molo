@@ -2,26 +2,17 @@
 // path: every sample in the file is already the sample the engine needs, so the
 // decoder is mostly a width and rate adapter around the shared pcmConverter.
 //
-// Unlike FLAC, a WAV stream carries no compression and no frame index, so the
-// data chunk's declared size is the whole seek story: go-wav turns a frame index
-// into a byte offset from the start of the data chunk and clamps to the declared
-// end. There is nothing to build.
-//
-// The decoder normalizes whatever the file holds (any rate, 1..8 channels, 8/16/
-// 24/32-bit integer or 32/64-bit float) to the engine's canonical 48000 Hz stereo
-// float32, the same contract every other decoder here satisfies. The shared
-// pcmConverter does the rate, channel and width conversion.
+// A WAV stream carries no frame index, so the data chunk's declared size is the
+// whole seek story: go-wav turns a frame index into a byte offset from the start
+// of the data chunk and clamps to the declared end.
 //
 // The one WAV-specific decision is how to reach the shared converter, which
 // reads little-endian integer samples and would misread float bits. A float
-// source is therefore opened with pcm.WithConvertTo(16), which is exactly the
-// library's float-to-integer path (full-scale scaling with clamping), and the
-// converter reads the resulting 16-bit integers. An integer source is read at
-// its native stored width instead, so the converter scales it directly: asking
-// go-wav to convert first would round a 24-bit file down to 16 bits and discard
-// the extra precision the converter is about to preserve.
-//
-// Dependencies: github.com/tphakala/go-wav.
+// source is therefore opened with pcm.WithConvertTo(16), the library's
+// float-to-integer path, and the converter reads the resulting 16-bit integers.
+// An integer source is read at its native stored width so the converter scales
+// it directly: converting a 24-bit file to 16 bits first would discard the
+// precision the converter is about to preserve.
 
 package decode
 
@@ -35,7 +26,6 @@ import (
 	"github.com/tphakala/go-wav/pcm"
 )
 
-// init registers the uncompressed decoder.
 func init() {
 	Register(NewWavFactory())
 }

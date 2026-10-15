@@ -14,16 +14,6 @@ import (
 	"github.com/dlcuy22/molo/dsp"
 )
 
-// The Lua front end is deliberately a binder, not an evaluator. It runs the
-// script once, walks the graph description the script's build function
-// produced, and hands the result to the Go compiler. It never runs on the audio
-// thread and is never called again after load for a Tier 1 script.
-//
-// The sandbox is the other half of this file. A script is untrusted, so the
-// standard libraries that reach outside the process are removed before the
-// script runs, and a script that tries to use one fails to load rather than
-// quietly doing something.
-
 // sandboxLibs are the standard libraries a script may not have. Removing the
 // loaders as well as the tables means a script cannot require or package.loadlib
 // its way back to them.
@@ -37,7 +27,12 @@ type scriptDef struct {
 	graph   *graph
 }
 
-// Load reads one Lua file and returns the factory that builds its effect.
+// Load reads one Lua file and returns the factory that builds its effect. The
+// front end is a binder, not an evaluator: it runs the script once, walks the
+// graph description the build function produced, and hands the result to the Go
+// compiler. It never runs on the audio thread and is never called again for a
+// Tier 1 script.
+//
 // Every failure is an error: a bad script never panics and never registers a
 // half-built effect.
 func Load(path string) (dsp.Factory, error) {

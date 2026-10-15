@@ -1,33 +1,17 @@
 // EBML primitives (RFC 8794) shared by the native Matroska/WebM readers.
 //
-// Purpose:
-//   This file knows EBML and nothing about Matroska. It reads element IDs and
-//   data sizes, classifies the two variable-integer flavours, and walks a
-//   bounded tree of master elements. The WebM Opus reader is its only consumer
-//   today; keeping the Matroska vocabulary out of here lets a future reader
-//   reuse the same primitives.
+// This file knows EBML and nothing about Matroska: it reads element IDs and data
+// sizes, classifies the two variable-integer flavours, and walks a bounded tree
+// of master elements. The WebM Opus reader is its only consumer today.
 //
-// Key Components:
-//   - ebmlID(): an Element ID VINT with the marker bit kept (RFC 8794 section 5)
-//   - ebmlVint(): a Data Size VINT with the marker bit stripped (section 6)
-//   - ebmlElement / ebmlChildren(): one element header and a bounded walk
-//
-// Spec notes:
-//   - IDs are 1 to 4 bytes and sizes 1 to 8 bytes; WebM bounds both with
-//     EBMLMaxIDLength and EBMLMaxSizeLength. The limits here are absolute
-//     RFC 8794 limits, not the file's declared ones.
-//   - A 1-byte ID 0xFF is reserved (RFC 8794 section 5 plus the Matroska
-//     errata); every other 1-byte ID, including 0x80, is legal. That matters
-//     because 0x80 appears inside compressed block data and a byte scan would
-//     mistake it for an element.
-//   - A size whose data bits are all ones means "unknown", which is legal only
-//     for a master element and terminates at its parent's end (section 6.2).
-//   - Void (0xEC) and CRC-32 (0xBF) may appear at any level and are skipped
-//     rather than reported as errors (section 11.3).
-//
-// Ownership:
-//   Every function here is pure: it reads from a byte slice the caller owns and
-//   never seeks, allocates beyond the small returned headers, or keeps state.
+// IDs are 1 to 4 bytes and sizes 1 to 8 bytes. These are the absolute RFC 8794
+// limits, not the file's declared ones. A 1-byte ID 0xFF is reserved (section 5
+// plus the Matroska errata); every other 1-byte ID, including 0x80, is legal,
+// which matters because 0x80 appears inside compressed block data. A size whose
+// data bits are all ones means "unknown", legal only for a master element, which
+// terminates at its parent's end (section 6.2). Void (0xEC) and CRC-32 (0xBF)
+// may appear at any level and are skipped (section 11.3). Every function here is
+// pure: it reads from a caller-owned byte slice and keeps no state.
 
 package decode
 

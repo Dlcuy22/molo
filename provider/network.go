@@ -1,22 +1,3 @@
-// Network as an audio source: direct http/https file streaming.
-//
-// This is the built-in provider for a URL that points straight at an audio
-// file. It is the network counterpart of LocalAudio and the file counterpart of
-// the YouTube Music provider: the reference is a URL, the bytes arrive over
-// HTTP, and the container is decoded by the same decode registry every local
-// file uses.
-//
-// Bytes are read through ranged GETs (httpreader.go), not fetched whole. That
-// keeps the source seekable, so the decoder's own container index works
-// unchanged and a seek costs a Range request rather than a re-download. Only
-// factories that implement decode.ReaderOpener can serve a stream; today those
-// are the Ogg Opus and WebM/Opus readers. A URL holding anything else fails at
-// open with a clear error instead of being misread.
-//
-// The provider holds no library knowledge of its own: it does not import a
-// container parser or a codec. The URL stops here; what crosses into the engine
-// is a decoder over the bytes and a description of the track.
-
 package provider
 
 import (
@@ -35,7 +16,20 @@ import (
 )
 
 // NetworkProvider resolves http and https references into a playable Source. It
-// implements AudioProvider.
+// is the built-in provider for a URL that points straight at an audio file, the
+// network counterpart of [LocalAudio]: the reference is a URL, the bytes arrive
+// over HTTP, and the container is decoded by the same registry every local file
+// uses. It implements [AudioProvider].
+//
+// Bytes are read through ranged GETs ([httpRangeReader]), not fetched whole, so
+// the source stays seekable and a seek costs a Range request rather than a
+// re-download. Only factories that implement decode.ReaderOpener can serve a
+// stream, today the Ogg Opus and WebM/Opus readers; a URL holding anything else
+// fails at open with a clear error instead of being misread.
+//
+// The provider imports no container parser or codec. The URL stops here; what
+// crosses into the engine is a decoder over the bytes and a description of the
+// track.
 type NetworkProvider struct {
 	client *http.Client
 }

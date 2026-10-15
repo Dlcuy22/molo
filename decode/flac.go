@@ -2,17 +2,12 @@
 // it needs no runtime shared library and no cgo, and it decodes the native FLAC
 // bitstream (fLaC) rather than the Ogg FLAC mapping.
 //
-// The container is go-flac's own: FLAC has no page index and no granule, so the
-// decoder binary-searches frames with STREAMINFO's max frame size and lands with
-// a short decode. That is the format's only seek strategy; there is no cheaper
-// index to build, because a FLAC frame does not carry its own length.
+// A FLAC frame does not carry its own length, so there is no index to build:
+// go-flac binary-searches frames with STREAMINFO's max frame size and lands with
+// a short decode. That is the format's only seek strategy.
 //
-// The decoder normalizes whatever the file holds (any FLAC sample rate, 1..8
-// channels, 4..32-bit) to the engine's canonical 48000 Hz stereo float32, the
-// same contract the Opus decoders satisfy. The shared pcmConverter does the
-// rate, channel and width conversion for every byte-oriented decoder here.
-//
-// Dependencies: github.com/tphakala/go-flac.
+// The shared pcmConverter normalizes any source rate, 1..8 channels and 4..32
+// bits to the engine's canonical 48000 Hz stereo float32.
 
 package decode
 
@@ -27,7 +22,6 @@ import (
 	"github.com/tphakala/go-flac/pcm"
 )
 
-// init registers the lossless decoder.
 func init() {
 	Register(NewFlacFactory())
 }

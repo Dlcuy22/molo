@@ -14,8 +14,7 @@ import (
 )
 
 // ErrClosed is returned by every operation after Close. It is deliberately not
-// io.EOF: a consumer that is shut down should be able to tell a planned stop
-// from the track ending.
+// io.EOF, so a consumer can tell a planned stop from the track ending.
 var ErrClosed = errors.New("stream: closed")
 
 // ErrRunning means Start was called on a streamer that is already running.
@@ -36,8 +35,8 @@ var ErrSeekRange = errors.New("stream: seek target out of range")
 // risking a duplicated or dropped span. The stream is left untouched.
 var ErrSeamlessNotSeekable = errors.New("stream: seamless swap requires a seekable decoder")
 
-// DefaultRingFrames is the buffered-audio target at the 48 kHz output rate,
-// about 300 ms. The usable range is roughly 150 to 500 ms.
+// DefaultRingFrames is the buffered-audio target at 48 kHz: about 300 ms, the
+// middle of the usable 150 to 500 ms range.
 const DefaultRingFrames = 48000 * 300 / 1000
 
 // DefaultChunkFrames bounds one decoder read, about 100 ms.
@@ -50,8 +49,8 @@ var canonical = core.CanonicalFormat
 // Opener builds a decoder for the stream. It is called once at construction and
 // again by the reopen-and-discard seek fallback, which is why the streamer
 // cannot own a single decoder. The stop channel is closed on shutdown so an
-// opener that reads from an interruptible source can return a decoder that does
-// not strand the producer in a blocking read.
+// opener that reads from an interruptible source can return instead of
+// stranding the producer in a blocking read.
 type Opener func(stop <-chan struct{}) (decode.Decoder, error)
 
 // Config tunes the buffer. Zero fields take the defaults documented on each
@@ -326,7 +325,7 @@ func (s *Streamer) Stats() Stats {
 // error) after the buffered tail drains.
 //
 // The signature is exactly playback.Provider's, so a Streamer can be passed
-// straight to a device; this package does not import playback to say so.
+// straight to a device.
 func (s *Streamer) ReadFrames(dst []float32) (int, error) {
 	want := len(dst) / s.ch
 	if want == 0 {
@@ -438,10 +437,11 @@ func (s *Streamer) SwapDecoder(target int64, open Opener) error {
 // forward-only stream is replaced by a seekable one over the same audio. The
 // new decoder must implement decode.Seeker so it can be placed on an exact
 // frame; otherwise the call fails with ErrSeamlessNotSeekable and the stream is
-// left untouched. Same gate and latest-wins discipline as SeekFrame: a caller
-// superseded by a newer request is released with that request's outcome, so a
-// caller that must know whether its own swap happened has to run under the
-// session's single-worker serialization (as the source-upgrade path does).
+// left untouched.
+//
+// A caller superseded by a newer request is released with that request's
+// outcome, so a caller that must know whether its own swap happened has to run
+// under the session's single-worker serialization.
 func (s *Streamer) SwapDecoderSeamless(open Opener) error {
 	if open == nil {
 		return errors.New("stream: SwapDecoderSeamless requires an opener")
@@ -451,7 +451,7 @@ func (s *Streamer) SwapDecoderSeamless(open Opener) error {
 }
 
 // requestPosition is the shared gate for SeekFrame, SwapDecoder and
-// SwapDecoderSeamless. carrying an optional opener, a swap flag and a seamless
+// SwapDecoderSeamless. Carrying an optional opener, a swap flag and a seamless
 // flag through the same sequence is what serialises them: at most one
 // reposition runs at a time, and the newest request wins.
 func (s *Streamer) requestPosition(target int64, open Opener, swap, seamless bool) error {
@@ -747,8 +747,8 @@ func (s *Streamer) doSeamlessSwap(open Opener) error {
 }
 
 // complete finishes a reposition that landed at target: reset the pre-modules,
-// publish the new position and refill the ring. Pre-modules that carry filter
-// state must not blend across the jump, so they restart from a clean state.
+// publish the new position and refill the ring. Modules that carry filter state
+// restart from a clean state so they do not blend across the jump.
 func (s *Streamer) complete(target int64) error {
 	for _, m := range s.mods {
 		if err := m.Reset(); err != nil {
@@ -933,9 +933,9 @@ func (s *Streamer) decodeChunk() (int, error) {
 	for i, m := range s.mods {
 		in := s.formats[i]
 		out := s.formats[i+1]
-		// The buffer is both input and output: the frames frames sit at the
-		// front in the input layout, and the slice is wide enough for the
-		// module's output layout so a channel remap can work in place.
+		// The buffer is both input and output: the frames sit at the front in
+		// the input layout, and the slice is wide enough for the module's
+		// output layout so a channel remap can work in place.
 		width := max(in.Ch, out.Ch)
 		if perr := m.Process(s.work[:n*width], n); perr != nil {
 			return 0, fmt.Errorf("stream: module %s: %w", m.Name(), perr)

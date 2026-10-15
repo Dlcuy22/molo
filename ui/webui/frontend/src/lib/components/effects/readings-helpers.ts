@@ -1,4 +1,5 @@
-// Unit-testable without a DOM; the gain-reduction inversion has one definition.
+// Pure helpers for the readings list, in a .ts module so the gain-reduction
+// inversion is unit-testable without a DOM.
 
 import { clamp, meterFraction } from "./effects-helpers";
 import type { Reading } from "../../effect-types";

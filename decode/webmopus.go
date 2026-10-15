@@ -1,47 +1,35 @@
 // Native WebM/Matroska Opus container reader with Cue-index seeks.
 //
-// Purpose:
-//   Read Opus audio packets out of a WebM/Matroska bitstream (RFC 8794 framing,
-//   Matroska codec mapping for A_OPUS) without decoding, and reposition to a
-//   granule position through the file's Cues index. It is the WebM counterpart
-//   of oggopus.go: the same opusPacketSource surface, so opusDecoder is
-//   reused unchanged and only the container differs.
+// It reads Opus audio packets out of a WebM/Matroska bitstream (RFC 8794
+// framing, Matroska codec mapping for A_OPUS) without decoding, and repositions
+// through the file's Cues index. It is the WebM counterpart of oggopus.go: the
+// same opusPacketSource surface, so opusDecoder is reused unchanged and only the
+// container differs.
 //
-// Key Components:
-//   - newWebMOpusReader(): parses EBML, Info, Tracks and Cues, indexes clusters
-//   - webMOpusReader.ReadPacket(): one Opus packet from a SimpleBlock or Block
-//   - webMOpusReader.SeekGranule(): Cues lookup, falling back to a cluster scan
-//   - forwardWebMOpus: the forward-only variant for a non-seekable stream
-//   - WebMOpusFactory: registry entry, probe, and decoding from a path or reader
+// Position domain: opusPacketSource counts at 48 kHz and includes the pre-skip,
+// so a stream's playable length is TotalGranule - PreSkip. WebM has no granule,
+// only block timestamps in segment ticks, so this reader adopts the Ogg
+// convention and keeps the decoder's arithmetic working:
 //
-// Position domain:
-//   opusPacketSource counts at 48 kHz and includes the pre-skip, so a stream's
-//   playable length is TotalGranule - PreSkip. WebM has no granule; it has block
-//   timestamps in segment ticks. This reader adopts the Ogg convention so the
-//   decoder's arithmetic keeps working:
+//	PreSkip()      = CodecDelay * 48000 / 1e9
+//	TotalGranule() = Duration * 48000 / 1e9   (Info, already spans the pre-skip)
 //
-//     PreSkip()      = CodecDelay * 48000 / 1e9
-//     TotalGranule() = Duration * 48000 / 1e9      (Info, already spans the pre-skip)
+// A position is the running sum of decoded packet durations, not a block
+// timestamp. Matroska timestamps sit on a millisecond grid and can disagree with
+// the true packet lengths by a sample or two per block; the decoder's seek skip
+// sums packet durations, so mixing the two domains would shift every seek by the
+// accumulated difference. Each cluster therefore records the running sample sum
+// at its first packet, and a seek targets that.
 //
-//   A position is the running sum of decoded packet durations, not a block
-//   timestamp. Matroska timestamps sit on a millisecond grid and can disagree
-//   with the true packet lengths by a sample or two per block; the decoder's
-//   seek skip sums packet durations, so mixing the two domains would shift every
-//   seek by the accumulated difference. The reader therefore builds its cluster
-//   index in the decoded domain: each cluster records the running sample sum at
-//   its first packet, and a seek targets that. Matroska's CodecDelay is the
-//   reason the first block is stamped zero rather than the pre-skip: that
-//   leading audio is the encoder's warm-up and the decoder discards it.
+// Matroska's CodecDelay is the reason the first block is stamped zero rather
+// than the pre-skip: that leading audio is the encoder's warm-up and the decoder
+// discards it.
 //
-// Offset domains:
-//   CueClusterPosition and SeekPosition are relative to the start of the
-//   Segment's data, not the file (Matroska Cues). Every offset read from an
-//   index element is shifted by segmentDataOff before use; mixing the two
-//   domains is the classic Matroska seek bug.
-//
-// Ownership:
-//   The reader never owns, closes, or spawns goroutines around the source it is
-//   given. The caller keeps that responsibility.
+// Offset domains: CueClusterPosition and SeekPosition are relative to the start
+// of the Segment's data, not the file (Matroska Cues). Every index offset is
+// shifted by segmentDataOff before use; mixing the two domains is the classic
+// Matroska seek bug. The reader never owns, closes, or spawns goroutines around
+// the source it is given; the caller keeps that responsibility.
 
 package decode
 
@@ -1257,8 +1245,6 @@ func signedVintDelta(v uint64, width int) int64 {
 	return int64(v)
 }
 
-// --- forward-only reader -------------------------------------------
-
 // forwardWebMOpus reads Opus packets from a stream that cannot seek. It holds
 // no index, so it reports an unknown total and refuses to reposition, matching
 // forwardOggOpus. It is used when OpenReader gets a source without io.Seeker.
@@ -1698,8 +1684,6 @@ func validateWebMEBMLHeader(body []byte) error {
 	return nil
 }
 
-// --- shared track parsing ------------------------------------------
-
 // webmTrackFields is the A_OPUS subset of a TrackEntry.
 type webmTrackFields struct {
 	trackNumber uint64
@@ -1787,8 +1771,6 @@ func (webmTrackParser) parse(body []byte, adopt func(webmTrackFields)) error {
 
 	return nil
 }
-
-// --- factory, probe, registration ----------------------------------
 
 func init() { Register(NewWebMOpusFactory()) }
 
@@ -1878,8 +1860,6 @@ type opusStreamSource struct {
 func (s opusStreamSource) open() (io.Reader, io.Closer, error) { return s.r, s.closer, nil }
 
 func (s opusStreamSource) rewindable() bool { return s.seekable }
-
-// --- probe ---------------------------------------------------------
 
 // probeWebMOpus reports the stream shape without decoding. DurationUnknown
 // reads only the headers; DurationProbe reads Info, which carries the float

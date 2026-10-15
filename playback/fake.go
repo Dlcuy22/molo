@@ -21,10 +21,9 @@ import (
 	"github.com/dlcuy22/molo/core"
 )
 
-// fakeBackendName is the registry key. It is not build-tagged: the fake is
-// platform-independent, which is what makes it usable on every CI runner. It
-// registers as a dev backend, so it stays selectable by name and by tests but
-// never appears in a UI's output list.
+// fakeBackendName is the registry key. The fake is platform-independent, so it
+// works on every CI runner. It registers as a dev backend: selectable by name
+// and by tests, but never offered in a UI's output list.
 const fakeBackendName = "fake"
 
 // fakeDefaultPace is the wall-clock duration of one block. A background device
@@ -50,9 +49,9 @@ type FakeDevice struct {
 	state fakeState
 	wake  chan struct{}
 	// stop asks the read loop to end; exited is closed by the loop itself as
-	// its last act. They must be separate channels: Close has to wait for the
-	// loop to finish, and waiting on the same channel it just closed would
-	// return immediately and let the loop keep writing after Close returned.
+	// its last act. They must be separate channels: Close waits on exited, and
+	// waiting on the same channel it just closed would return immediately and
+	// let the loop keep writing after Close returned.
 	stop   chan struct{}
 	exited chan struct{}
 	format core.FrameFormat
@@ -169,9 +168,9 @@ func (d *FakeDevice) run(p Provider) {
 		buf, format, out := d.buf, d.format, d.out
 		d.mu.Unlock()
 
-		// The read happens with no lock held. A locked lock would serialize
-		// Pause and Close behind a Provider read that blocks until the stream
-		// is live, and those two must stay free to run on other goroutines.
+		// The read happens with no lock held. Holding the lock would serialize
+		// Pause and Close behind a Provider read that blocks until the stream is
+		// live, and those two must stay free to run on other goroutines.
 		n, err := p.ReadFrames(buf)
 
 		// Close may have landed while that read was in flight. Checking stop
@@ -355,9 +354,8 @@ func (d *FakeDevice) Flush() error {
 // Close releases the device. It is idempotent and safe from any goroutine,
 // including while audio is playing. It signals the read loop to stop and waits
 // for it to actually exit before returning, so the Provider and the writer are
-// not touched again afterwards, which is what lets a caller close or reuse the
-// stream. A Provider that never returns would make the wait unbounded; that
-// matches oto, whose Close also waits out the in-flight read.
+// not touched again afterwards. A Provider that never returns would make the
+// wait unbounded, matching oto, whose Close also waits out the in-flight read.
 func (d *FakeDevice) Close() error {
 	d.mu.Lock()
 	if d.state == fakeStateClosed {

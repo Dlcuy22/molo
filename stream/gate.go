@@ -4,8 +4,7 @@ import "sync"
 
 // gate parks goroutines on a condition while they wait for the ring to change
 // state. It exists so the producer and the consumer sleep instead of polling;
-// a spin loop of runtime.Gosched plus a one millisecond sleep burns a core and
-// adds latency to every wakeup.
+// a spin loop of runtime.Gosched plus a one millisecond sleep burns a core.
 //
 // One condition and one broadcast wake everybody: producers and consumers
 // re-check their predicates, which is cheap next to the cost of getting a

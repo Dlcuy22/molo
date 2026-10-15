@@ -9,6 +9,7 @@
 // The cached value is the resolved https URL, not the image bytes. Discord
 // fetches an https URL itself, so the URL is the only thing the presence needs;
 // the disk entry is what stops the browse call from being repeated.
+
 package main
 
 import (

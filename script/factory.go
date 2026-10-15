@@ -9,14 +9,12 @@ import (
 	"github.com/dlcuy22/molo/dsp"
 )
 
-// factory is what Load returns: a dsp.Factory that builds one scripted effect.
-// It is the integration point, so the engine treats a script exactly like a
-// built-in implementation.
+// factory is what Load returns: a dsp.Factory that builds one scripted effect,
+// so the engine treats a script exactly like a built-in implementation.
 //
-// The factory keeps the script source, not a built graph. Every New call runs
-// the script again in its own sandbox, which is what gives each instance its
-// own nodes and, for a Tier 2 script, its own interpreter. A shared
-// interpreter would make two instances race on it.
+// It keeps the script source, not a built graph. Every New call reruns the
+// script in its own sandbox, which gives each instance its own nodes and, for a
+// Tier 2 script, its own interpreter. A shared interpreter would race.
 type factory struct {
 	name    string
 	schema  []dsp.Param
@@ -60,8 +58,7 @@ func (f *factory) New(values dsp.Values) (dsp.Effect, error) {
 		return nil, err
 	}
 
-	// Run the script for this instance. Its graph and interpreter belong to
-	// this effect alone.
+	// The graph and interpreter belong to this effect alone.
 	def, L, err := instantiate(f.source, f.chunkName())
 	if err != nil {
 		return nil, err

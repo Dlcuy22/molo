@@ -7,9 +7,8 @@ import (
 )
 
 // defaultDebugBuffer is the debug stream depth. It is larger than the control
-// event buffer because debug records are frequent and individually disposable:
-// a UI that drains once a frame should see them, and one that stops reading
-// loses only the oldest diagnostics.
+// event buffer because debug records are frequent and disposable: a slow
+// consumer loses only the oldest diagnostics.
 const defaultDebugBuffer = 256
 
 // DebugKind classifies one debug record. It is a small closed set so a UI can
@@ -61,14 +60,12 @@ func (k DebugKind) String() string {
 	}
 }
 
-// DebugEvent is one diagnostic record. It is deliberately separate from the
-// sealed control Event set: debug traffic is frequent and disposable, and it
-// must never displace a control event such as Failed or StateChanged from the
-// event queue.
+// DebugEvent is one diagnostic record. It is separate from the sealed control
+// Event set: debug traffic is frequent and disposable, and it must never
+// displace a control event such as Failed or StateChanged.
 //
-// Fields are structured where the data is, so a UI can filter and reformat;
-// Message is a short pre-rendered sentence for a plain log view. Which numeric
-// fields are meaningful depends on Kind and is documented per field.
+// Which numeric fields are meaningful depends on Kind and is documented per
+// field.
 type DebugEvent struct {
 	// Time is stamped when the record is accepted by the sink.
 	Time time.Time
@@ -104,9 +101,8 @@ type DebugEvent struct {
 
 // debugSink is a consumer-gated debug stream. Like the visualizer tap, it does
 // nothing until a consumer attaches, so a session that never asks for debug
-// records pays one atomic load per emission and the audio path is untouched.
-// Once active it is a bounded drop-oldest queue, so a slow debug consumer can
-// never stall the control loop.
+// records pays one atomic load per emission. Once active it is a bounded
+// drop-oldest queue, so a slow consumer can never stall the control loop.
 type debugSink struct {
 	active atomic.Bool
 	q      *eventQueue[DebugEvent]
@@ -141,7 +137,7 @@ func (d *debugSink) close() { d.q.close() }
 // DebugEvents is the stream of diagnostic records. It is separate from Events
 // and never blocks the engine: it is a no-op until this method is called, and
 // after that it drops the oldest record when a consumer falls behind, counted
-// in DebugDropped. A UI that does not read it pays nothing.
+// in DebugDropped.
 func (s *Session) DebugEvents() <-chan DebugEvent {
 	s.debug.attach()
 

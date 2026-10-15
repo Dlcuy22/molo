@@ -1,15 +1,13 @@
-// Package script builds dsp.Effect implementations from Lua descriptions.
+// Package script builds [dsp.Effect] implementations from Lua descriptions.
 //
-// The split keeps Lua off the audio thread: Lua declares a parameter set and a
-// node graph once at load time, the Go kernel here builds that graph into a
-// flat execution plan, and only the Go plan runs per sample. Lua never runs on
-// the audio thread and never runs per sample, so the real-time contract that
-// every other dsp stage obeys holds unchanged: Process takes no lock, allocates
-// nothing, and never calls back into the interpreter.
+// A script declares a parameter set and a node graph once at load time. The Go
+// kernel builds that graph into a flat execution plan, and only the plan runs
+// per sample: [Effect.Process] takes no lock, allocates nothing, and never
+// calls into the interpreter.
 //
-// Tier 2 scripts may register a control callback that recomputes node state per
-// block. That callback runs on a control goroutine and publishes its result
-// atomically, and a watchdog silences it if it ever overruns its budget.
+// A script may also register a control callback that recomputes node state per
+// block. It runs on a control goroutine, publishes its result atomically, and a
+// watchdog silences it if it overruns its budget.
 package script
 
 import (
@@ -23,23 +21,20 @@ import (
 // Resource limits. A script is untrusted input, so the compiler bounds what it
 // can ask for up front instead of discovering the cost while building.
 const (
-	// maxNodes caps the number of graph nodes. It is generous for a real
-	// effect and small enough that the topological sort and the run loop stay
-	// trivially cheap.
+	// maxNodes caps the number of graph nodes, large enough for a real effect
+	// and small enough that the topological sort and run loop stay cheap.
 	maxNodes = 256
 	// maxDelayFrames caps one delay line, about 21.8 seconds at 48 kHz. A
-	// delay node is the only node that reserves memory proportional to a
-	// parameter, so it is the only one that needs a ceiling.
+	// delay is the only node that reserves memory proportional to a parameter.
 	maxDelayFrames = 1 << 20
-	// maxFanOut caps how many other nodes may read one node's output. It
-	// exists so a script cannot turn one node into a combinatorial explosion
-	// by naming it a thousand times.
+	// maxFanOut caps how many nodes may read one node's output, so a script
+	// cannot turn one node into a combinatorial explosion by naming it often.
 	maxFanOut = 64
 )
 
-// Port names. Every node has exactly one signal output, addressed as "out";
-// a delay additionally exposes "tap" to read its delayed output before the
-// input sum, which is what makes feedback expressible.
+// Port names. Every node has one signal output, "out"; a delay also exposes
+// "tap", its delayed output before the input sum, which is what makes feedback
+// expressible.
 const (
 	portOut = "out"
 	portTap = "tap"
@@ -69,25 +64,24 @@ const (
 	kindMeter   nodeKind = "meter"
 )
 
-// inputSpec describes one input port: a name, and whether a script may leave it
-// unconnected. It is the single source of truth for both the Lua binder and the
-// kernel builder.
+// inputSpec describes one input port: a name and whether a script may leave it
+// unconnected.
 type inputSpec struct {
 	name     string
 	optional bool
 }
 
 // nodeSpec is the static description of a primitive: which inputs exist and
-// which scalar attributes it reads. It is the single source of truth for both
-// the Lua binder and the kernel builder.
+// which scalar attributes it reads. Both the Lua binder and the kernel builder
+// read it.
 type nodeSpec struct {
 	kind   nodeKind
 	inputs []inputSpec
 	fields []string
 }
 
-// specs is the primitive catalogue. The order is the order a script may name
-// them in; it is otherwise meaningless.
+// specs is the primitive catalogue: the vocabulary a script names primitives
+// with.
 var specs = []nodeSpec{
 	{kind: kindIn},
 	{kind: kindConst, fields: []string{"value"}},
@@ -144,29 +138,26 @@ type node struct {
 	value    float64
 	constant bool
 
-	// paramFields records the field names whose value came from ctx.param. At
-	// publish time the parameter's current number is written into vals, so the
-	// run loop reads a resolved scalar and not a store lookup.
+	// paramFields maps a field name to the parameter key backing it. A publish
+	// reads it to write the parameter's current number into vals, so the run
+	// loop reads a resolved scalar and not a store lookup.
 	paramFields map[string]string
-	// vals is the resolved form of every scalar the run loop needs. Resolving
-	// once per parameter change keeps the per-sample path to plain reads.
+	// vals is the resolved form of every scalar the run loop needs, recomputed
+	// once per parameter change so the per-sample path stays plain reads.
 	vals nodeValues
 	// lit is the literal form, captured at compile and never mutated. The
-	// control side reads it to fill fields a script did not parameterise, so it
-	// never touches the audio-owned vals.
+	// control side reads it so it never touches the audio-owned vals.
 	lit nodeValues
 
 	// out is the node's signal output buffer. A constant node has no buffer;
 	// readers use value instead.
 	out   []float64
 	state any
-	// sink is where a Tier 2 `set` writes go. It is per effect, installed when
-	// the node is cloned into a plan, so two effects built from one script do
-	// not share control state.
+	// sink is where a Tier 2 `set` writes go. It is installed when the node is
+	// cloned into a plan, so two effects from one script share no control state.
 	sink *controlBridge
-	// meter is the published reading a meter node samples into. It is nil for
-	// every other kind, and it is allocated on the plan's own clone so two
-	// effects built from one script never share a reading.
+	// meter is the published reading a meter node samples into, nil for other
+	// kinds. It lives on the plan's clone, so two effects share no reading.
 	meter *meterValue
 }
 
@@ -269,8 +260,8 @@ func (g *graph) addParam(decl paramDecl) error {
 	return nil
 }
 
-// paramKindOf returns the declared kind for a parameter key and whether it was
-// declared. It lets a build-time check read the kind before the schema is built.
+// paramKindOf returns the declared kind for a parameter key, so a build-time
+// check can read it before the schema is built.
 func (g *graph) paramKindOf(key string) (string, bool) {
 	for _, p := range g.params {
 		if p.Key == key {

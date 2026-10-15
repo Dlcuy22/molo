@@ -1,8 +1,8 @@
 // Bass enhancer implementation.
 //
-// Bass enhancer generates higher harmonics from the low-frequency band based on
-// the missing-fundamental psychoacoustic principle, allowing low bass to be
-// perceived on speakers and headphones that cannot reproduce deep fundamentals.
+// It generates higher harmonics from the low-frequency band by the
+// missing-fundamental principle, so low bass is perceived on speakers and
+// headphones that cannot reproduce the deep fundamentals.
 
 package dsp
 
@@ -19,6 +19,7 @@ func init() {
 	Register(NewBassEnhancerFactory())
 }
 
+// Bass enhancer parameter keys matching preset names.
 const (
 	BassEnhancerAmount      = "amount"
 	BassEnhancerHarmonics   = "harmonics"
@@ -42,8 +43,10 @@ const (
 	bassEnhancerMaxBlend     = 1.0
 )
 
+// BassEnhancerFactory registers the harmonic bass enhancer implementation.
 type BassEnhancerFactory struct{}
 
+// NewBassEnhancerFactory returns a factory for the harmonic bass enhancer.
 func NewBassEnhancerFactory() *BassEnhancerFactory { return &BassEnhancerFactory{} }
 
 func (f *BassEnhancerFactory) Kind() string { return "bass-enhancer" }
@@ -92,6 +95,8 @@ type bassEnhancerState struct {
 	coeffsGen   uint64
 }
 
+// BassEnhancer is a post-ring stage that synthesizes harmonics from the bass
+// band, driven by the missing-fundamental principle.
 type BassEnhancer struct {
 	store *paramStore
 	state atomic.Pointer[bassEnhancerState]

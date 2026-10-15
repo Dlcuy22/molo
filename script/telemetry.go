@@ -10,15 +10,11 @@ import (
 	"github.com/dlcuy22/molo/dsp"
 )
 
-// Telemetry is what a script says about what its effect is doing, as opposed to
-// what it is (params) or how loud it is (the standard in/out pair). A meter node
-// publishes one named reading; ctx.visual declares a plot the UI draws from the
-// effect's parameters. Both are graph-level declarations compiled into the plan,
-// and neither runs Lua on the audio thread.
-
 // readingDecl is one meter declaration, in the shape the Lua front end produces
-// and the graph keeps. It is static metadata; the number it describes lives in
-// the meter node's published value.
+// and the graph keeps. Both readings and visuals are graph-level declarations
+// compiled into the plan, and neither runs Lua on the audio thread. It is
+// static metadata; the number it describes lives in the meter node's published
+// value.
 type readingDecl struct {
 	Key   string
 	Label string

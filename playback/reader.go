@@ -10,10 +10,9 @@ import (
 // pcmReader adapts a Provider to the io.Reader that push APIs like oto want.
 //
 // The engine produces PCM when asked, but oto pulls it on its own thread, and
-// this type is the bridge between the two. It must be careful about one thing
-// above all: it must never return (0, nil). oto's
-// multiplexer treats a zero-length successful read as "nothing to do" and
-// sleeps a millisecond, so a Provider that answers (0, nil) would turn the
+// this type is the bridge between the two. It must never return (0, nil):
+// oto's multiplexer treats a zero-length successful read as "nothing to do"
+// and sleeps a millisecond, so a Provider that answers (0, nil) would turn the
 // audio path into a poll loop. Every path here either returns bytes, an error,
 // or waits for the Provider.
 //

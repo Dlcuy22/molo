@@ -10,18 +10,15 @@ import (
 	"github.com/dlcuy22/molo/dsp"
 )
 
-// The builder is the Lua-visible half of the front end. Every ctx call appends
-// a node to the graph here in Go; the script sees handles that know their node
-// and can be connected, indexed and combined with operators. Nothing in this
-// file runs after load for a Tier 1 script.
+// builder holds the interpreter and the graph being described. Every ctx call
+// appends a node here in Go; the script sees handles that know their node and
+// can be connected, indexed and combined with operators. Nothing here runs
+// after load for a Tier 1 script.
 //
-// Arithmetic is expressed by Lua operators on the handles. A handle carries a
-// shared metatable whose __add, __sub, __mul, __div and __unm build the
-// corresponding graph node, so `ctx.in() * amt` builds a mul node, not
-// arithmetic on one sample. A number operand is folded to a constant, which is
-// what keeps `x * 0.5` from running a node for a literal.
-
-// builder holds the interpreter and the graph being described.
+// Arithmetic is expressed by Lua operators on the handles: a shared metatable's
+// __add, __sub, __mul, __div and __unm build the corresponding graph node, so
+// `ctx.in() * amt` builds a mul node, not arithmetic on one sample. A number
+// operand is folded to a constant, which keeps `x * 0.5` from running a node.
 type builder struct {
 	L *lua.LState
 	g *graph

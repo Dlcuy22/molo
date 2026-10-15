@@ -5,9 +5,7 @@
 // page's granule, so within a page the container says nothing about individual
 // packet positions. The packet itself does, through the configuration and frame
 // count in its first one or two bytes. This mirrors libopusfile's
-// op_get_packet_duration, which is opus_packet_get_nb_frames times
-// opus_packet_get_samples_per_frame with the same 120 ms ceiling; the reference
-// is ref/analysis/opus/src/opus.c and opus_decoder.c.
+// op_get_packet_duration (ref/analysis/opus/src/opus.c and opus_decoder.c).
 
 package decode
 

@@ -6,6 +6,7 @@
 // Linux is MPRIS: the desktop media widget, lock screen, media keys and headset
 // buttons all drive molo through it. The transport is chosen by build tag
 // inside systemedia, so this file never names the platform.
+
 package main
 
 import (

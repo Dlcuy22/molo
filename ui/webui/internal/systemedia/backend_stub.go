@@ -6,6 +6,7 @@
 // and the plain server build land here. It lets the Manager be wired
 // unconditionally: a machine that cannot show system media controls reports the
 // transport inactive rather than failing to build.
+
 package systemedia
 
 import (
