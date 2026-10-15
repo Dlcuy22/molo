@@ -136,15 +136,16 @@ describe("ytmResultRow", () => {
     expect(r.coverId).toBe("ytm:abc123");
   });
 
-  it("carries no reference for a hit that cannot be played", () => {
+  it("carries no path but keeps the cover reference for a hit that cannot be played", () => {
     const r = ytmResultRow(hit({ videoId: "MPREalbum", title: "An Album", kind: "Album", playable: false }), 0);
     expect(r.path).toBe("");
-    expect(r.coverId).toBe("");
+    expect(r.coverId).toBe("ytm:MPREalbum");
   });
 
   it("treats an empty id as not playable", () => {
     const r = ytmResultRow(hit({ title: "Nameless", playable: true }), 0);
     expect(r.path).toBe("");
+    expect(r.coverId).toBe("");
   });
 });
 

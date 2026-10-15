@@ -8,6 +8,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- The visualizer settings moved from the main window's control panel into the
+  Ctrl+I settings panel, under a new General tab. Add files and Add folder now
+  sit above the Decoder and Output selects, so the panel keeps a tidy column
+  instead of wrapping a Visualizer dropdown onto a second line.
+- Discord Rich Presence moved from the main window's right column into a new
+  Integration tab in the Ctrl+I settings panel, card preview included. The right
+  column is now just the engine controls and the Effects entry, so it no longer
+  scrolls.
+
 ### Added
 
 - Discord Rich Presence now shows the album for a YouTube Music track. The
@@ -17,6 +28,22 @@ and this project adheres to
 
 ### Fixed
 
+- The YouTube Music search panel no longer labels every album, artist and
+  playlist hit as "Preview loop". An idle preview reports an empty path, and a
+  hit that cannot be played was given an empty path too, so the two matched and
+  the row claimed to be auditioning. The preview label now requires a preview to
+  actually be sounding.
+- Album, artist and playlist hits in the YouTube Music search panel now draw
+  their cover. Those rows carry no playable path, and the artwork was keyed on
+  that path, so no fetch was ever made. The cover is now keyed on the row's
+  catalogue reference, and the backend indexes every hit rather than only the
+  playable ones, so the art has a source.
+- The desktop app's queue now scrolls inside its own panel. The queue and the
+  right-hand column each scroll on their own and the row is clamped to the
+  window height, so scrolling a long queue no longer dragged the right column's
+  panels off screen and left them empty. The window's outer scroll is gone once
+  the columns sit side by side; it remains only in the stacked layout, where the
+  columns cannot fit next to each other.
 - Discord Rich Presence no longer shows the " - Topic" suffix on an artist name.
   YouTube's auto-generated channels carry it and yt-dlp copies it into a local
   file's artist tag; only the exact trailing suffix is removed, so a real artist

@@ -760,11 +760,10 @@ func (s *PlayerService) SearchYTMSongs(query string) ([]YTMResult, error) {
 	results := ytmResults(res)
 
 	// Cache the rows and their catalogue metadata, so a selected result has a
-	// title and art to show before its stream is resolved.
+	// title and art to show before its stream is resolved. Every hit is cached,
+	// including the kinds the palette cannot play: an album, artist or playlist
+	// row still draws its cover, and the cover is served from here by id.
 	for _, r := range results {
-		if !r.Playable {
-			continue
-		}
 		s.ytm.put(ytmTrack{
 			ID:           r.VideoID,
 			Title:        r.Title,

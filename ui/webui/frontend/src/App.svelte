@@ -8,7 +8,6 @@
   import Queue from "./lib/components/Queue.svelte";
   import Spectrum from "./lib/components/Spectrum.svelte";
   import Controls from "./lib/components/Controls.svelte";
-  import DiscordPanel from "./lib/components/DiscordPanel.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
   import SettingsPanel from "./lib/components/settings/SettingsPanel.svelte";
 
@@ -116,22 +115,24 @@
   track title, then the spectrum, then the play button.
 -->
 <div class="flex h-full flex-col bg-bg text-fg">
-  <!-- main is the window's scroll surface: the queue scrolls in its own panel,
-       and this outer scroll keeps the panels below the fold reachable. -->
-  <main class="scroll-thin flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+  <!-- main scrolls only in the stacked (narrow) layout, where the columns
+       cannot fit side by side and one page scroll is the honest answer. Side by
+       side it cannot scroll: the queue and the right column each scroll inside
+       their own panel, so the window never grows a second scrollbar next to the
+       queue's. -->
+  <main class="scroll-thin flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:overflow-y-visible">
     <TrackInfo {snap} />
 
     {#if $spectrumConfig.enabled}
       <Spectrum />
     {/if}
 
-    <!-- The row grows to its tallest column instead of being clamped to the
-         viewport, so a short window scrolls rather than painting over the
-         transport. -->
-    <div class="flex flex-1 flex-col gap-3 lg:flex-row">
-      <!-- min-h-56 keeps the queue's own scroll floor usable on a short window. -->
+    <!-- Side by side, the row is clamped to the space the window has and each
+         column scrolls inside itself. Stacked, it keeps a floor so the queue
+         stays usable and main takes the overflow. -->
+    <div class="flex min-h-56 flex-1 flex-col gap-3 lg:min-h-0 lg:flex-row">
       <section
-        class="flex min-h-56 flex-1 flex-col rounded-[6px] border border-line bg-surface"
+        class="flex min-h-56 flex-1 flex-col rounded-[6px] border border-line bg-surface lg:min-h-0"
       >
         <div class="flex items-center justify-between gap-2 px-3 pb-1 pt-3">
           <h2 class="text-xs font-medium text-muted">Queue</h2>
@@ -168,12 +169,14 @@
         </div>
       </section>
 
-      <section class="flex w-full flex-col gap-3 lg:w-[26rem] lg:shrink-0">
+      <!-- Side by side, the panel stack scrolls inside itself rather than
+           stretching the row. Stacked, it takes its natural height and main
+           carries the scroll, so the two scrollbars never nest. -->
+      <section
+        class="scroll-thin flex w-full flex-col gap-3 lg:min-h-0 lg:w-[26rem] lg:shrink-0 lg:overflow-y-auto"
+      >
         <div class="rounded-[6px] border border-line bg-surface p-3">
           <Controls decoderPref={snap.decoderPref} backend={snap.backend} />
-        </div>
-        <div class="rounded-[6px] border border-line bg-surface p-3">
-          <DiscordPanel />
         </div>
         <div class="rounded-[6px] border border-line bg-surface p-3">
           <div class="flex items-center justify-between gap-2">

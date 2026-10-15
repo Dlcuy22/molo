@@ -151,8 +151,24 @@
     return row.path !== "" && !isRemoteRef(row.path);
   }
 
+  /** coverKey is the identity a row's artwork is stored under. A search hit is
+   *  keyed by its catalogue reference, because a non-playable hit has no path
+   *  but still has a cover; a queued track is keyed by its file path, which is
+   *  what the palette already used and what its cache is built on. */
+  function coverKey(row: PaletteRow): string {
+    return row.ytm ? row.coverId : row.path;
+  }
+
   // previewingPath is the row the Go preview is currently sounding, or "".
   const previewingPath = $derived(preview.active ? preview.path : "");
+
+  /** isPreviewing reports whether the row is the one the audition is sounding.
+   *  An idle preview reports an empty path, and so do the hits that cannot be
+   *  played, so the empty case must never be read as a match: without that
+   *  guard every non-playable row claimed to be previewing. */
+  function isPreviewing(row: PaletteRow): boolean {
+    return previewingPath !== "" && row.path === previewingPath;
+  }
 
   // previewAvailable is whether the highlighted row could be auditioned at all.
   // It drives the button's disabled state, so a remote row says why rather than
@@ -362,9 +378,11 @@
   // to.
   $effect(() => {
     // Track the exact result set, not just its length: a different query can
-    // yield the same count with different rows.
-    const key = matches.map((m) => m.path).join("|");
-    if (!open || !listEl || key === "") {
+    // yield the same count with different rows. The cover identity is the key,
+    // because a search hit is keyed by its reference and a queued track by its
+    // path.
+    const resultKey = matches.map(coverKey).join("|");
+    if (!open || !listEl || resultKey === "") {
       return;
     }
 
@@ -377,24 +395,26 @@
           const el = entry.target as HTMLElement;
           const id = el.dataset.coverId ?? "";
           const path = el.dataset.coverPath ?? "";
-          if (path === "" || pending.has(path)) {
+          const artKey = el.dataset.coverKey ?? "";
+          if (artKey === "" || pending.has(artKey)) {
             continue;
           }
-          pending.add(path);
+          pending.add(artKey);
           // A queued track's art comes from its file, a search hit's from the
           // catalogue; the backend serves both as a data URL, but only the
-          // local one needs the content id it was asked for.
-          const req = isYTM ? ytmCover(path) : queueCover(id, path);
+          // local one needs the content id it was asked for. A non-playable
+          // hit has no path, so its reference is what it asks with.
+          const req = isYTM ? ytmCover(artKey) : queueCover(id, path);
           req.then((url) => {
             if (url !== "") {
-              covers[path] = url;
+              covers[artKey] = url;
             }
           });
         }
       },
       { root: listEl, rootMargin: "0px" },
     );
-    for (const el of listEl.querySelectorAll<HTMLElement>("[data-cover-path]")) {
+    for (const el of listEl.querySelectorAll<HTMLElement>("[data-cover-key]")) {
       observer.observe(el);
     }
 
@@ -849,6 +869,7 @@
               class:bg-selected={i === cursor}
               data-cover-id={row.coverId}
               data-cover-path={row.path}
+              data-cover-key={coverKey(row)}
               onmousedown={(e: MouseEvent) => {
                 // mousedown, not click: the input keeps focus so the list does
                 // not blur before the choice lands.
@@ -864,9 +885,9 @@
               ></span>
               <!-- Art when the track has it, the note otherwise. The slot is
                    one fixed size so rows do not jump when a cover arrives. -->
-              {#if covers[row.path]}
+              {#if covers[coverKey(row)]}
                 <img
-                  src={covers[row.path]}
+                  src={covers[coverKey(row)]}
                   alt=""
                   class="size-8 shrink-0 rounded-[4px] border border-line object-cover"
                 />
@@ -885,7 +906,7 @@
                 <!-- The previewing row carries its own progress line, drawn
                      from the snapshot the Go side pushes, so it reads as an
                      audition distinct from the real "Playing" row. -->
-                {#if row.path === previewingPath}
+                {#if isPreviewing(row)}
                   <span class="mt-1 block h-[2px] w-full overflow-hidden rounded-full bg-track">
                     <span
                       class="block h-full rounded-full bg-accent transition-[width] duration-100 ease-linear"
@@ -914,7 +935,7 @@
                    sounding, that is what the row is doing. -->
               {#if previewMode && !row.ytm && isRemoteRef(row.path)}
                 <span class="shrink-0 text-[11px] text-muted">No preview</span>
-              {:else if row.path === previewingPath}
+              {:else if isPreviewing(row)}
                 <span class="flex shrink-0 items-center gap-1 text-[11px] text-fg">
                   {preview.loop ? "Preview loop" : "Preview"}
                 </span>

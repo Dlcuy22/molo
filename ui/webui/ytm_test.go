@@ -311,6 +311,40 @@ func TestSearchYTMSongsCachesAndIndexes(t *testing.T) {
 	}
 }
 
+// TestSearchYTMSongsIndexesEveryKind pins the contract the palette's artwork
+// reads: a hit that cannot be played is still indexed, because its cover is
+// served by reference and an album shelf drawn without its cover reads as a
+// broken row rather than as what it is.
+func TestSearchYTMSongsIndexesEveryKind(t *testing.T) {
+	svc := newPlayerService()
+	thumb := &ytm.ThumbnailProvider{UrlA: "https://example.test/album.jpg"}
+	svc.ytmProv.search = func(context.Context, string, string, bool) (*ytm.SearchResults, error) {
+		return &ytm.SearchResults{Categories: []ytm.SearchCategory{
+			{Layout: ytm.MediaItemLayout{Items: []ytm.MediaItem{
+				&ytm.Playlist{ID: "MPREalbum", Name: "An Album", Type: ytm.PlaylistTypeAlbum, Thumbnail: thumb},
+			}}},
+		}}, nil
+	}
+
+	got, err := svc.SearchYTMSongs("an album")
+	if err != nil {
+		t.Fatalf("SearchYTMSongs: %v", err)
+	}
+	if len(got) != 1 || got[0].Playable {
+		t.Fatalf("results = %+v, want one non-playable album", got)
+	}
+
+	// The cover is asked for by reference, so the entry has to exist even
+	// though the row can never be played.
+	track, ok := svc.ytm.lookup("ytm:MPREalbum")
+	if !ok {
+		t.Fatal("a non-playable hit was not indexed, so its cover has no source")
+	}
+	if track.ThumbnailURL != thumb.UrlA {
+		t.Fatalf("thumbnail url = %q, want %q", track.ThumbnailURL, thumb.UrlA)
+	}
+}
+
 // TestPreviewRefusesRemoteRefs pins the structural rule: the preview player is
 // built without providers, so a remote ref could never sound; refusing it keeps
 // the main track from being left paused for a session that produces nothing.

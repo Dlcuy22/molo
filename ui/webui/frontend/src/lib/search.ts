@@ -42,21 +42,25 @@ export function hasTags(row: QueueRow): boolean {
  * and one keyboard model. The reference is the provider scheme the engine
  * resolves, which is also what identifies the row for its artwork.
  *
- * A non-playable hit (an album, artist or playlist) carries no reference,
- * because selecting it cannot play anything and pretending otherwise would
- * offer a control that does nothing.
+ * A non-playable hit (an album, artist or playlist) carries no path, because
+ * selecting it cannot play anything and pretending otherwise would offer a
+ * control that does nothing. It still carries its cover id: that is the
+ * catalogue reference the backend serves the art for, and an album shelf
+ * without its cover is a row that looks broken rather than one that says what
+ * it is.
  */
 export function ytmResultRow(result: YTMResult, index: number): QueueRow {
   const playable = result.playable && result.videoId !== "";
+  const ref = result.videoId !== "" ? `ytm:${result.videoId}` : "";
 
   return {
     index,
-    path: playable ? `ytm:${result.videoId}` : "",
+    path: playable ? ref : "",
     name: result.title,
     title: result.title,
     artist: result.artist,
     album: result.album,
-    coverId: playable ? `ytm:${result.videoId}` : "",
+    coverId: ref,
     active: false,
   } as QueueRow;
 }
