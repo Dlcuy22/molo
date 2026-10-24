@@ -10,6 +10,7 @@
     SpeakerSlash,
   } from "phosphor-svelte";
   import { commands } from "../store";
+  import { muted, toggleMute, volumeBy, volumeOverride } from "../volume";
   import { formatTime, isActive, percent, fillFrac } from "../format";
   import type { Snapshot } from "../../../bindings/github.com/dlcuy22/molo/ui/webui/models";
 
@@ -22,42 +23,19 @@
   let scrubbing = $state(false);
   let scrubValue = $state(0);
 
+  // The queue is nullable in the binding; the store never publishes null, but
+  // narrowing once keeps the enabled checks plain.
+  const queue = $derived(snap.queue ?? []);
   const live = $derived(isActive(snap.state));
-  const canPrev = $derived(snap.queue.length > 0);
+  const canPrev = $derived(queue.length > 0);
   const position = $derived(scrubbing ? scrubValue : snap.position);
   const duration = $derived(snap.duration > 0 ? snap.duration : 0);
   const seekFill = $derived(fillFrac(position, 0, duration));
 
-  // Volume is optimistic, the same way the seek bar is: the engine confirms
-  // on the next snapshot, so the thumb and the fill track a local override
-  // until the server value catches up. Without this the thumb follows the
-  // pointer while the fill waits for the round trip and visibly lags it.
-  let volumeOverride: number | null = $state(null);
-  let lastServerVolume: number | null = $state(null);
-  $effect(() => {
-    const server = snap.volume;
-    if (lastServerVolume === null) {
-      lastServerVolume = server;
-    } else if (server !== lastServerVolume) {
-      lastServerVolume = server;
-      volumeOverride = null;
-    }
-  });
-  const volume = $derived(volumeOverride ?? snap.volume);
-
-  let muted = $state(false);
-  let volumeBeforeMute = $state(1);
-
-  function toggleMute() {
-    if (muted) {
-      muted = false;
-      commands.setVolume(volumeBeforeMute || 1);
-    } else {
-      volumeBeforeMute = volume;
-      muted = true;
-      commands.setVolume(0);
-    }
-  }
+  // Volume comes from the shared store, so the slider and the keyboard cannot
+  // disagree. The override leads the engine and is dropped when the server value
+  // catches up (see volume.ts).
+  const volumeLevel = $derived($volumeOverride ?? snap.volume);
 
   function onSeekInput(e: Event) {
     scrubbing = true;
@@ -71,10 +49,10 @@
   }
 
   function onVolume(e: Event) {
-    muted = false;
     const v = Number((e.currentTarget as HTMLInputElement).value) / 100;
-    volumeOverride = v;
-    commands.setVolume(v);
+    // Route the slider drag through the same step helper the keys use, so the
+    // two paths share their unmute and clamp behaviour.
+    volumeBy(v - volumeLevel);
   }
 </script>
 
@@ -124,7 +102,7 @@
       <button
         class="mx-1 grid place-items-center rounded-full bg-accent text-bg transition-colors hover:brightness-110 disabled:bg-disabled"
         style="width: 2.75rem; height: 2.75rem"
-        disabled={snap.queue.length === 0}
+        disabled={queue.length === 0}
         aria-label={snap.state === "playing" ? "Pause" : "Play"}
         title={snap.state === "playing" ? "Pause" : "Play"}
         onclick={() => commands.togglePause()}
@@ -138,7 +116,7 @@
 
       <button
         class="grid size-9 place-items-center rounded-[4px] text-fg transition-colors hover:bg-hover disabled:text-disabled disabled:hover:bg-transparent"
-        disabled={snap.queue.length === 0}
+        disabled={queue.length === 0}
         aria-label="Next track"
         title="Next track"
         onclick={() => commands.next()}
@@ -178,11 +156,11 @@
     <div class="flex items-center gap-2">
       <button
         class="grid size-8 place-items-center rounded-[4px] text-muted transition-colors hover:bg-hover hover:text-fg"
-        aria-label={muted ? "Unmute" : "Mute"}
-        title={muted ? "Unmute" : "Mute"}
+        aria-label={$muted ? "Unmute" : "Mute"}
+        title={$muted ? "Unmute" : "Mute"}
         onclick={toggleMute}
       >
-        {#if volume === 0 || muted}
+        {#if volumeLevel === 0 || $muted}
           <SpeakerSlash size="19" />
         {:else}
           <SpeakerHigh size="19" />
@@ -194,12 +172,12 @@
         min="0"
         max="100"
         step="1"
-        value={percent(volume)}
-        style="--fill-frac: {fillFrac(volume, 0, 1)}"
+        value={percent(volumeLevel)}
+        style="--fill-frac: {fillFrac(volumeLevel, 0, 1)}"
         aria-label="Volume"
         oninput={onVolume}
       />
-      <span class="w-9 text-xs tabular-nums text-muted">{percent(volume)}%</span>
+      <span class="w-9 text-xs tabular-nums text-muted">{percent(volumeLevel)}%</span>
     </div>
   </div>
 </div>

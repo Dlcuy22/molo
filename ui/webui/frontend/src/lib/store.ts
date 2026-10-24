@@ -25,6 +25,7 @@ import type {
 import type { Param } from "../../bindings/github.com/dlcuy22/molo/ui/webui/internal/spectrum/models";
 import type { EffectKind, EffectStage } from "./effect-types";
 import { toEffectKind, toEffectStage } from "./effect-adapter";
+import { initVolume, syncVolumeFromServer } from "./volume";
 
 // The event names mirror the Go constants. They are repeated here rather than
 // imported because the generator does not emit string constants for register
@@ -51,6 +52,7 @@ export const EMPTY: Snapshot = {
   queue: [],
   queueIdx: -1,
   shuffled: false,
+  repeat: "off",
   decoder: "",
   decoderPref: "",
   backend: "",
@@ -94,12 +96,16 @@ export const discordStatus = writable<DiscordStatus>({ enabled: false, connected
 /** appSettings is the persisted settings document the Ctrl+I panel edits. It is
  *  read once on connect and written back whole through SetAppSettings, so the
  *  store and the file always describe the same document. The default mirrors
- *  the Go side: crossfade off at the default duration. */
+ *  the Go side: crossfade off at the default duration, repeat off, visualizer
+ *  on. */
 export const appSettings = writable<AppSettings>({
   version: 1,
-  playback: { crossfade: { enabled: false, durationMs: 5000, skipSameAlbum: true } },
+  playback: {
+    crossfade: { enabled: false, durationMs: 5000, skipSameAlbum: true },
+    repeat: "off",
+  },
   stream: {},
-  general: {},
+  general: { visualizerEnabled: true },
 });
 
 /** queueCoverCache memoises the palette's per-track artwork by cover id, so a
@@ -335,6 +341,9 @@ export function connect(): () => void {
   const apply = (snap: Snapshot) => {
     player.set(snap);
     syncCover(snap.coverId);
+    // The volume override reconciles here, on the one place a server value
+    // lands, so the slider and the shortcuts drop it together.
+    syncVolumeFromServer(snap.volume);
     ready.set(true);
     // The effect window reads the chain on the same tick, so its meters move
     // without a subscription of its own.
@@ -359,7 +368,7 @@ export function connect(): () => void {
   PlayerService.Snapshot().then(apply);
   PlayerService.Options().then(options.set);
   PlayerService.SpectrumConfig().then(spectrumConfig.set);
-  PlayerService.SpectrumSchema().then(spectrumSchema.set);
+  PlayerService.SpectrumSchema().then((schema) => spectrumSchema.set(schema ?? []));
   PlayerService.PreviewConfig().then(previewConfig.set);
   PlayerService.DiscordStatus().then(discordStatus.set);
   PlayerService.AppSettings().then(appSettings.set);
@@ -411,6 +420,10 @@ export const commands = {
   next: () => invoke(PlayerService.Next()),
   prev: () => invoke(PlayerService.Prev()),
   shuffle: (on: boolean) => invoke(PlayerService.SetShuffle(on)),
+  // setRepeat replaces the engine's repeat mode. Persisting it is a separate
+  // write through the settings document, because repeat is playback state that
+  // outlives a restart and the engine holds no file of its own.
+  setRepeat: (mode: string) => invoke(PlayerService.SetRepeat(mode)),
   stop: () => invoke(PlayerService.Stop()),
   seek: (ms: number) => invoke(PlayerService.SeekTo(Math.max(0, Math.round(ms)))),
   setVolume: (v: number) => invoke(PlayerService.SetVolume(v)),
@@ -526,6 +539,11 @@ export const commands = {
     invoke(PlayerService.SetEffectParam(id, key, value));
   },
 };
+
+// Wire the volume engine call into volume.ts. The dependency runs one way
+// (store -> volume) so there is no import cycle: volume.ts holds the optimistic
+// state and this injects the one thing it cannot reach, the binding.
+initVolume(commands.setVolume);
 
 /** invoke awaits one engine call and folds a rejection into the error line. */
 async function invoke(p: Promise<unknown>): Promise<void> {

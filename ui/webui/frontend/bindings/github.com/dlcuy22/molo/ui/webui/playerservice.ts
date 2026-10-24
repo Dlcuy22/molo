@@ -362,6 +362,16 @@ export function SetPreviewConfig(cfg: $models.PreviewConfig): $CancellablePromis
 }
 
 /**
+ * SetRepeat replaces the engine's repeat mode. The three strings are the same
+ * union the snapshot publishes; anything else is rejected instead of silently
+ * mapped to off, because the caller is a UI and a typo there must surface on the
+ * error line rather than play the wrong mode.
+ */
+export function SetRepeat(mode: string): $CancellablePromise<void> {
+    return $Call.ByID(76083775, mode);
+}
+
+/**
  * SetShuffle turns baked shuffle on or off. On, the queue is reordered once and
  * advances follow that order; off restores the order the shuffle was taken from.
  */

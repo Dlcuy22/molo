@@ -1,8 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Warning, MagnifyingGlass } from "phosphor-svelte";
-  import { connect, commands, player, ready, spectrumConfig } from "./lib/store";
-  import { displayTitle } from "./lib/format";
+  import { get } from "svelte/store";
+  import {
+    Warning,
+    MagnifyingGlass,
+    Repeat,
+    RepeatOnce,
+    Shuffle,
+    Eye,
+    EyeSlash,
+    SpeakerHigh,
+    SpeakerSlash,
+    SkipForward,
+    SkipBack,
+  } from "phosphor-svelte";
+  import { connect, commands, player, ready, appSettings, spectrumConfig } from "./lib/store";
+  import { displayTitle, percent } from "./lib/format";
+  import { installKeyboard, shouldIgnoreTarget, type ShortcutAction } from "./lib/shortcuts";
+  import { showToast } from "./lib/toast";
+  import { muted, toggleMute, volume, volumeBy, VOLUME_STEP } from "./lib/volume";
+  import { nextShuffleTarget } from "./lib/shuffle";
   import Transport from "./lib/components/Transport.svelte";
   import TrackInfo from "./lib/components/TrackInfo.svelte";
   import Queue from "./lib/components/Queue.svelte";
@@ -10,6 +27,7 @@
   import Controls from "./lib/components/Controls.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
   import SettingsPanel from "./lib/components/settings/SettingsPanel.svelte";
+  import Toaster from "./lib/components/Toaster.svelte";
 
   // The one subscription to the Go push stream. connect returns its own
   // teardown, so a hot reload does not leave a second listener behind.
@@ -20,6 +38,18 @@
   // never null, but narrowing once here keeps every consumer non-null.
   const queue = $derived(snap.queue ?? []);
   const hasQueue = $derived(queue.length > 0);
+
+  // Shuffle is optimistic like the visualizer. Two presses inside one snapshot
+  // window must land as on then off, so the target is computed from this local
+  // intent, not from snap.shuffled, which lags the round trip by a whole tick.
+  // The intent clears once the snapshot agrees with it, at which point the
+  // server value is the same thing.
+  let shuffleIntent = $state<boolean | null>(null);
+  $effect(() => {
+    if (shuffleIntent !== null && snap.shuffled === shuffleIntent) {
+      shuffleIntent = null;
+    }
+  });
 
   // Ctrl+P (Cmd+P on macOS) opens the queue search, the way it opens a file
   // switcher in an editor. The browser's own Ctrl+P prints, so the default is
@@ -35,68 +65,15 @@
   // The settings panel is opened with Ctrl+I (Cmd+I on macOS) and is a modal
   // overlay of its own, independent of the palette.
   let settingsOpen = $state(false);
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      // Ctrl+I opens settings. It is checked before the palette chords so the
-      // two modals cannot both be open at once.
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "i") {
-        e.preventDefault();
-        settingsOpen = !settingsOpen;
 
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.altKey && key === "p") {
-        e.preventDefault();
-        if (paletteOpen) {
-          // Already open: the palette owns this chord and toggles its own
-          // preview mode, so the app must not double-handle it.
-          return;
-        }
-        paletteSource = "queue";
-        previewOnOpen = true;
-        paletteOpen = true;
-
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "f") {
-        e.preventDefault();
-        paletteSource = "ytm";
-        previewOnOpen = false;
-        paletteOpen = true;
-
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "p") {
-        e.preventDefault();
-        // Ctrl+P always means the queue search. Open in that source, or close
-        // when it is already the one showing; from the YouTube source it is a
-        // switch back, not a close.
-        if (paletteOpen && paletteSource === "queue") {
-          closePalette();
-
-          return;
-        }
-        paletteSource = "queue";
-        previewOnOpen = false;
-        paletteOpen = true;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-
-    return () => window.removeEventListener("keydown", onKey);
-  });
-
-  function openPalette(withPreview: boolean) {
-    paletteSource = "queue";
-    previewOnOpen = withPreview;
+  function openPalette(source: "queue" | "ytm", preview: boolean) {
+    paletteSource = source;
+    previewOnOpen = preview;
     paletteOpen = true;
   }
 
   function openYTMPalette() {
-    paletteSource = "ytm";
-    previewOnOpen = false;
-    paletteOpen = true;
+    openPalette("ytm", false);
   }
 
   function closePalette() {
@@ -106,6 +83,167 @@
     // next open starts fresh.
     commands.previewStop();
   }
+
+  // closePaletteOrSwitch is the Ctrl+P rule: close only when the queue source
+  // is already showing, otherwise open (or switch) to it.
+  function closePaletteOrSwitch(source: "queue" | "ytm") {
+    if (paletteOpen && paletteSource === source) {
+      closePalette();
+
+      return;
+    }
+    openPalette(source, false);
+  }
+
+  // The volume bar is trailing-debounced 400ms. The engine call is not: it
+  // fires on every press so the gain tracks the key without lag, and only the
+  // toast waits, so holding the key shows one bar that reads its final value
+  // instead of a stream of cards. The same key replaces in place, so the timer
+  // resets on each press.
+  let volumeToastTimer: ReturnType<typeof setTimeout> | null = null;
+  function showVolumeToast() {
+    if (volumeToastTimer !== null) {
+      clearTimeout(volumeToastTimer);
+    }
+    volumeToastTimer = setTimeout(() => {
+      volumeToastTimer = null;
+      // volume() is the same derivation the transport draws, so the bar and the
+      // slider cannot read different numbers.
+      const v = volume();
+      showToast({
+        key: "volume",
+        kind: "bar",
+        label: "Volume",
+        value: v,
+        text: `${percent(v)}%`,
+      });
+    }, 400);
+  }
+
+  function showMuteToast() {
+    const m = get(muted);
+    showToast({
+      key: "mute",
+      kind: "tile",
+      label: m ? "Muted" : "Unmuted",
+      icon: m ? SpeakerSlash : SpeakerHigh,
+    });
+  }
+
+  function showTrackToast() {
+    // With nothing queued there is no track to advance to, so an art card would
+    // claim a change that did not happen. The cover and title otherwise come
+    // live from the Toaster; this only needs the key and the shape.
+    if (queue.length === 0) {
+      return;
+    }
+    showToast({ key: "track", kind: "art", label: "Track" });
+  }
+
+  function persistRepeat(mode: "off" | "all" | "one") {
+    commands.setRepeat(mode);
+    // The file is written through the settings document, since repeat outlives
+    // a restart and the engine has no store of its own.
+    commands.setAppSettings({
+      ...$appSettings,
+      playback: { ...$appSettings.playback, repeat: mode },
+    });
+  }
+
+  function toggleVisualizer() {
+    const on = !$appSettings.general.visualizerEnabled;
+    commands.setAppSettings({
+      ...$appSettings,
+      general: { ...$appSettings.general, visualizerEnabled: on },
+    });
+    const next = { ...$spectrumConfig, enabled: on };
+    spectrumConfig.set(next);
+    commands.configureSpectrum(next);
+  }
+
+  // action maps a matched key to its effect and its feedback. It is the only
+  // place a shortcut turns into a command, so the shortcut table stays data and
+  // this stays behaviour.
+  function action(a: ShortcutAction) {
+    switch (a) {
+      case "volume-up":
+        volumeBy(VOLUME_STEP);
+        showVolumeToast();
+
+        return;
+      case "volume-down":
+        volumeBy(-VOLUME_STEP);
+        showVolumeToast();
+
+        return;
+      case "mute":
+        // The flag flips synchronously, so the toast reads the state the user
+        // just toggled, not the one the engine will echo back a tick later.
+        toggleMute();
+        showMuteToast();
+
+        return;
+      case "next":
+        commands.next();
+        showTrackToast();
+
+        return;
+      case "prev":
+        commands.prev();
+        showTrackToast();
+
+        return;
+      case "shuffle": {
+        const on = nextShuffleTarget(shuffleIntent, snap.shuffled);
+        shuffleIntent = on;
+        commands.shuffle(on);
+        showToast({
+          key: "shuffle",
+          kind: "tile",
+          label: on ? "Shuffle on" : "Shuffle off",
+          icon: Shuffle,
+        });
+
+        return;
+      }
+      case "visualizer": {
+        const on = !$appSettings.general.visualizerEnabled;
+        toggleVisualizer();
+        showToast({
+          key: "visualizer",
+          kind: "tile",
+          label: on ? "Visualizer on" : "Visualizer off",
+          icon: on ? Eye : EyeSlash,
+        });
+
+        return;
+      }
+      case "repeat-all":
+        persistRepeat("all");
+        showToast({ key: "repeat", kind: "tile", label: "Repeat all", icon: Repeat });
+
+        return;
+      case "repeat-one":
+        persistRepeat("one");
+        showToast({ key: "repeat", kind: "tile", label: "Repeat one", icon: RepeatOnce });
+
+        return;
+    }
+  }
+
+  onMount(() =>
+    installKeyboard({
+      isModalOpen: () => paletteOpen || settingsOpen,
+      isPaletteOpen: () => paletteOpen,
+      // A focused field typing is not a shortcut target. The rule for range and
+      // other non-text inputs lives in shouldIgnoreTarget.
+      isEditableFocused: () => shouldIgnoreTarget(document.activeElement),
+      openSettings: () => (settingsOpen = !settingsOpen),
+      openPalette,
+      closePaletteOrSwitch,
+      action,
+    }),
+  );
 </script>
 
 <!--
@@ -148,7 +286,7 @@
                  gets its own entry rather than a hidden mode. -->
             <button
               class="flex items-center gap-1.5 rounded-[4px] border border-line bg-surface px-2 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg"
-              onclick={() => openPalette(false)}
+              onclick={() => openPalette("queue", false)}
             >
               <MagnifyingGlass size="12" aria-hidden="true" />
               Search
@@ -239,4 +377,8 @@
   />
 
   <SettingsPanel open={settingsOpen} onclose={() => (settingsOpen = false)} />
+
+  <!-- One toast host for the whole app. It stays mounted and renders nothing
+       until a toast arrives, so it costs a subscription and no layout. -->
+  <Toaster />
 </div>

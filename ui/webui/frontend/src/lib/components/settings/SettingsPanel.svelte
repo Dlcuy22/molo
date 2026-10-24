@@ -26,6 +26,11 @@
   let panelEl = $state<HTMLDivElement | null>(null);
 
   const crossfade = $derived($appSettings.playback.crossfade);
+  const repeat = $derived($appSettings.playback.repeat);
+  // The visualizer switch reads the persisted flag, not the live pump's flag,
+  // so the two cannot disagree after a reload: the pump is rebuilt from this
+  // value on startup.
+  const visualizerOn = $derived($appSettings.general.visualizerEnabled);
 
   // The Discord status line and toggle read the store the same way the panel
   // read them when they lived in the main window's right column.
@@ -97,6 +102,28 @@
         crossfade: { ...$appSettings.playback.crossfade, ...patch },
       },
     });
+  }
+
+  // setRepeat writes the mode to the settings document. Go applies it to the
+  // engine on the same save (applyAppSettingsLocked calls SetRepeat), so the
+  // panel needs no second call; the keyboard path is the one that must tell the
+  // engine and the file separately, because it does not go through this save.
+  function setRepeat(mode: string) {
+    commands.setAppSettings({
+      ...$appSettings,
+      playback: { ...$appSettings.playback, repeat: mode },
+    });
+  }
+
+  // setVisualizer persists the flag and pokes the running pump at once. The
+  // persisted value is what a restart reads; the ConfigureSpectrum call is what
+  // hides the spectrum now, without waiting for the next save to reach Go.
+  function setVisualizer(enabled: boolean) {
+    commands.setAppSettings({
+      ...$appSettings,
+      general: { ...$appSettings.general, visualizerEnabled: enabled },
+    });
+    setSpectrum({ enabled });
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -193,6 +220,24 @@
                 />
               {/snippet}
             </SettingRow>
+
+            <SettingRow
+              label="Repeat"
+              description="Play the queue again, or repeat the current track."
+            >
+              {#snippet control()}
+                <Picker
+                  label="Repeat"
+                  value={repeat}
+                  options={[
+                    { value: "off", label: "Off" },
+                    { value: "all", label: "All" },
+                    { value: "one", label: "One" },
+                  ]}
+                  onchange={(v) => setRepeat(v)}
+                />
+              {/snippet}
+            </SettingRow>
           </div>
         {:else if tab === "integration"}
           <div class="divide-y divide-line">
@@ -225,9 +270,9 @@
             >
               {#snippet control()}
                 <Switch
-                  checked={$spectrumConfig.enabled}
+                  checked={visualizerOn}
                   label="Visualizer"
-                  onchange={(enabled) => setSpectrum({ enabled })}
+                  onchange={setVisualizer}
                 />
               {/snippet}
             </SettingRow>

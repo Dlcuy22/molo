@@ -133,9 +133,11 @@ export interface EffectVisualInfo {
 }
 
 /**
- * GeneralSettings is the General tab. Empty for the same reason.
+ * GeneralSettings is the General tab. VisualizerEnabled restores the spectrum
+ * pump on startup; it is the persisted half of the panel's visualizer switch.
  */
 export interface GeneralSettings {
+    "visualizerEnabled": boolean;
 }
 
 /**
@@ -148,11 +150,13 @@ export interface Options {
 }
 
 /**
- * PlaybackSettings is the Playback tab. Crossfade is the track overlap; it is
- * the only setting the tab carries today.
+ * PlaybackSettings is the Playback tab. Crossfade is the track overlap; Repeat
+ * is the engine's repeat mode as the "off"/"all"/"one" strings, the same
+ * spelling the snapshot publishes.
  */
 export interface PlaybackSettings {
     "crossfade": CrossfadeSettings;
+    "repeat": string;
 }
 
 /**
@@ -264,6 +268,14 @@ export interface Snapshot {
      * its pressed state from the engine rather than from a local guess.
      */
     "shuffled": boolean;
+
+    /**
+     * Repeat is the engine's repeat mode as "off", "all" or "one". A string,
+     * not an int: it is self-describing on the wire and matches how the MPRIS
+     * loop names are spelled, whereas an int would be an opaque enum the UI
+     * would have to decode.
+     */
+    "repeat": string;
     "decoder": string;
 
     /**
