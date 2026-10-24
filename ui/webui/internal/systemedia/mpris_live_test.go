@@ -57,6 +57,7 @@ func startLiveBackend(t *testing.T) (*backend, *recorder) {
 		Stop:      func() { rec.record("stop") },
 		SeekTo:    func(d time.Duration) { rec.record("seekto:" + d.String()) },
 		SetVolume: func(v float64) { rec.record("volume") },
+		SetLoop:   func(s string) { rec.record("loop:" + s) },
 	}
 	b, err := newBackend(cmd, slog.Default())
 	if err != nil {
@@ -295,25 +296,35 @@ func TestLiveMPRISPropertyWriteReachesTheEngine(t *testing.T) {
 	}
 }
 
-// TestLiveMPRISLoopStatusRejectsAnInvalidValue pins the write guard: the engine
-// has no repeat mode, so any LoopStatus write is refused rather than stored.
-func TestLiveMPRISLoopStatusRejectsAnInvalidValue(t *testing.T) {
+// TestLiveMPRISLoopStatusAcceptsAndForwardsAValidValue pins the write path now
+// that the engine has a repeat mode: a valid LoopStatus is accepted, stored, and
+// forwarded to the SetLoop command. An unknown string is still refused.
+func TestLiveMPRISLoopStatusAcceptsAndForwardsAValidValue(t *testing.T) {
 	client := liveBus(t)
-	startLiveBackend(t)
+	_, rec := startLiveBackend(t)
 
 	obj := client.Object(busName, rootPath)
-	call := obj.Call("org.freedesktop.DBus.Properties.Set", 0,
-		ifacePlayer, "LoopStatus", dbus.MakeVariant("Track"))
-	if call.Err == nil {
-		t.Fatal("Set LoopStatus succeeded, want an error while repeat is unsupported")
+	if err := obj.SetProperty(ifacePlayer+".LoopStatus", dbus.MakeVariant("Playlist")); err != nil {
+		t.Fatalf("Set LoopStatus: %v", err)
 	}
+	rec.expect(t, "loop:Playlist")
 
 	got, err := obj.GetProperty(ifacePlayer + ".LoopStatus")
 	if err != nil {
 		t.Fatalf("Get LoopStatus: %v", err)
 	}
-	if got.Value() != "None" {
-		t.Fatalf("LoopStatus = %v, want the stored None", got.Value())
+	if got.Value() != "Playlist" {
+		t.Fatalf("LoopStatus = %v, want the stored Playlist", got.Value())
+	}
+
+	// An unknown value is refused and does not overwrite the stored one.
+	call := obj.Call("org.freedesktop.DBus.Properties.Set", 0,
+		ifacePlayer, "LoopStatus", dbus.MakeVariant("bogus"))
+	if call.Err == nil {
+		t.Fatal("Set LoopStatus with an unknown value succeeded, want an error")
+	}
+	if got, err := obj.GetProperty(ifacePlayer + ".LoopStatus"); err != nil || got.Value() != "Playlist" {
+		t.Fatalf("LoopStatus = %v (err %v), want the stored Playlist", got.Value(), err)
 	}
 }
 

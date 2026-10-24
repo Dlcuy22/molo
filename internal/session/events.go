@@ -56,6 +56,14 @@ type PipelineChanged struct {
 	Stages int
 }
 
+// RepeatChanged confirms that the repeat mode in force changed. It is emitted by
+// the control loop, so a UI sees the same value the end-of-track decision uses
+// rather than whatever it last asked for, and a set that changed nothing emits
+// no event.
+type RepeatChanged struct {
+	Mode RepeatMode
+}
+
 // Failed reports a decode or device error that stopped playback. The session
 // is still usable afterwards: the next Play creates a fresh pipeline.
 type Failed struct {
@@ -68,6 +76,7 @@ func (Seeked) isEvent()          {}
 func (TrackEnded) isEvent()      {}
 func (Swapped) isEvent()         {}
 func (PipelineChanged) isEvent() {}
+func (RepeatChanged) isEvent()   {}
 func (Failed) isEvent()          {}
 
 // eventQueue is a non-blocking sink: a channel plus a drop-oldest policy. A
@@ -176,6 +185,10 @@ type Snapshot struct {
 	// the runtime preference, which a SwapBackend can change while a track
 	// plays, so it matches Settings().Backend once the swap lands.
 	Backend string
+
+	// Repeat is the mode the control loop uses at end-of-track, so a UI shows
+	// the same value the engine acts on rather than one it last requested.
+	Repeat RepeatMode
 
 	// DroppedEvents counts events discarded because the consumer fell behind.
 	DroppedEvents int64

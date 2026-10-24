@@ -364,6 +364,16 @@ func (f *fakePlayer) SetCrossfade(c molo.CrossfadeSettings) error {
 	return nil
 }
 
+// Repeat and SetRepeat satisfy the facade. The TUI does not drive repeat yet,
+// so the fake keeps no state for it.
+func (f *fakePlayer) Repeat() molo.RepeatMode { return molo.RepeatOff }
+
+func (f *fakePlayer) SetRepeat(m molo.RepeatMode) error {
+	f.record("SetRepeat")
+
+	return nil
+}
+
 // Pipeline, ApplyPipeline, EffectSchema and EffectKinds satisfy the facade's
 // effect surface. The model does not drive them yet, so they keep just enough
 // state for a test that checks the fake stays a valid Player.

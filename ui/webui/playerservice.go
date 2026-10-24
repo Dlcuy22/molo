@@ -492,6 +492,7 @@ func (s *PlayerService) Snapshot() Snapshot {
 		Queue:       s.queueRows(queue, snap.QueueIndex),
 		QueueIdx:    snap.QueueIndex,
 		Shuffled:    s.player.Shuffled(),
+		Repeat:      repeatName(snap.Repeat),
 		Decoder:     snap.Decoder,
 		DecoderPref: s.player.Settings().Decoder,
 		Backend:     snap.Backend,
@@ -1112,6 +1113,46 @@ func (s *PlayerService) SetShuffle(on bool) error {
 	return s.command(func() error { return s.player.SetShuffle(on) })
 }
 
+// SetRepeat replaces the engine's repeat mode. The three strings are the same
+// union the snapshot publishes; anything else is rejected instead of silently
+// mapped to off, because the caller is a UI and a typo there must surface on the
+// error line rather than play the wrong mode.
+func (s *PlayerService) SetRepeat(mode string) error {
+	m, err := repeatFromName(mode)
+	if err != nil {
+		return s.command(func() error { return err })
+	}
+
+	return s.command(func() error { return s.player.SetRepeat(m) })
+}
+
+// repeatFromName maps the three UI strings to the engine enum. The two
+// directions live here together so a new mode is added in one place.
+func repeatFromName(mode string) (molo.RepeatMode, error) {
+	switch mode {
+	case "off":
+		return molo.RepeatOff, nil
+	case "all":
+		return molo.RepeatAll, nil
+	case "one":
+		return molo.RepeatOne, nil
+	default:
+		return molo.RepeatOff, fmt.Errorf("repeat: unknown mode %q", mode)
+	}
+}
+
+// repeatName maps the engine enum back to the string the snapshot publishes.
+func repeatName(m molo.RepeatMode) string {
+	switch m {
+	case molo.RepeatAll:
+		return "all"
+	case molo.RepeatOne:
+		return "one"
+	default:
+		return "off"
+	}
+}
+
 // Stop ends playback but keeps the queue, so a later play reuses it.
 func (s *PlayerService) Stop() error { return s.command(func() error { return s.player.Stop() }) }
 
@@ -1198,8 +1239,13 @@ type Snapshot struct {
 	QueueIdx  int        `json:"queueIdx"`
 	// Shuffled reports whether baked shuffle is in force, so the toggle can draw
 	// its pressed state from the engine rather than from a local guess.
-	Shuffled bool   `json:"shuffled"`
-	Decoder  string `json:"decoder"`
+	Shuffled bool `json:"shuffled"`
+	// Repeat is the engine's repeat mode as "off", "all" or "one". A string,
+	// not an int: it is self-describing on the wire and matches how the MPRIS
+	// loop names are spelled, whereas an int would be an opaque enum the UI
+	// would have to decode.
+	Repeat  string `json:"repeat"`
+	Decoder string `json:"decoder"`
 	// DecoderPref is the saved decoder preference, which is what the chooser
 	// selects. Decoder is the effective decoder for the current track, which is
 	// more specific and would not match any option value.

@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/dlcuy22/molo"
 )
 
 // TestSystemMediaTrackMapsSnapshot pins the snapshot-to-track mapping: the
@@ -180,4 +182,43 @@ func TestSystemMediaSyncIsInertWithoutAManager(t *testing.T) {
 	// Must not panic with a nil manager.
 	svc.syncSystemMedia(Snapshot{State: "playing", Path: "p", Title: "t"})
 	svc.systemMediaSeeked(time.Second)
+}
+
+// TestSystemMediaLoopMapsRepeat pins the outbound loop mapping: the snapshot's
+// repeat string becomes the MPRIS name the transport publishes, with off as the
+// empty string the transport normalizes to None.
+func TestSystemMediaLoopMapsRepeat(t *testing.T) {
+	cases := map[string]string{
+		"off":     "",
+		"all":     "Playlist",
+		"one":     "Track",
+		"unknown": "",
+	}
+	for in, want := range cases {
+		if got := loopFromName(in); got != want {
+			t.Fatalf("loopFromName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSystemMediaSetLoopReachesTheEngine pins the inbound loop mapping: the
+// MPRIS name is mapped back to the engine mode, and an unknown name is ignored
+// rather than stored.
+func TestSystemMediaSetLoopReachesTheEngine(t *testing.T) {
+	fake := newFakePlayer()
+	svc := &PlayerService{player: fake}
+	cmd := svc.systemMediaCommands()
+
+	cmd.SetLoop("Track")
+	if fake.Repeat() != molo.RepeatOne {
+		t.Fatalf("SetLoop(Track) stored %v, want RepeatOne", fake.Repeat())
+	}
+	cmd.SetLoop("Playlist")
+	if fake.Repeat() != molo.RepeatAll {
+		t.Fatalf("SetLoop(Playlist) stored %v, want RepeatAll", fake.Repeat())
+	}
+	cmd.SetLoop("None")
+	if fake.Repeat() != molo.RepeatOff {
+		t.Fatalf("SetLoop(None) stored %v, want RepeatOff", fake.Repeat())
+	}
 }

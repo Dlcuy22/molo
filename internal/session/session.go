@@ -225,6 +225,7 @@ type runtimeSettings struct {
 	probeMode core.DurationMode
 	pipeline  dsp.Pipeline
 	crossfade CrossfadeSettings
+	repeat    RepeatMode
 
 	// pipelineGen counts accepted pipeline changes. A build captures it
 	// together with the pipeline it built, and the control loop installs that
@@ -430,6 +431,25 @@ func (r *runtimeSettings) setCrossfade(c CrossfadeSettings) {
 	r.mu.Unlock()
 }
 
+// repeatSettings returns the repeat mode in force. It is read on every
+// end-of-track decision, so it is the same short-lived lock and value copy as
+// the crossfade rather than a pointer a caller could mutate.
+func (r *runtimeSettings) repeatSettings() RepeatMode {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.repeat
+}
+
+// setRepeat stores the repeat mode. The value is already validated by the
+// caller; it lives here so the control loop reads one consistent set of runtime
+// settings.
+func (r *runtimeSettings) setRepeat(m RepeatMode) {
+	r.mu.Lock()
+	r.repeat = m
+	r.mu.Unlock()
+}
+
 // command is one queued public call. Commands are values, so a caller never
 // shares state with the controller.
 type command struct {
@@ -454,6 +474,11 @@ type command struct {
 	// on is the desired state of cmdShuffle: true shuffles the queue, false
 	// restores the order it had before the last shuffle.
 	on bool
+
+	// repeat is the desired mode of cmdRepeat. It is a field of its own rather
+	// than reusing on, which is documented as the shuffle bool and is a plain
+	// true/false, so the three repeat modes do not share one slot with shuffle.
+	repeat RepeatMode
 
 	// effects is a pre-built, configured post-ring chain an ApplyPipeline or
 	// SetSettings accepted. It was built on the caller's goroutine, so the
@@ -492,6 +517,7 @@ const (
 	cmdSwapBackend
 	cmdApplyPipeline
 	cmdShuffle
+	cmdRepeat
 )
 
 // openResult is a finished synchronous pipeline build, delivered to the
@@ -1194,6 +1220,7 @@ func (s *Session) Snapshot() Snapshot {
 		Stats:         stats,
 		Decoder:       v.decoder,
 		Parser:        v.parser,
+		Repeat:        s.runtime.repeatSettings(),
 		DroppedEvents: s.events.droppedCount(),
 	}
 }
@@ -1445,6 +1472,34 @@ func (s *Session) SetCrossfade(c CrossfadeSettings) error {
 	return nil
 }
 
+// Repeat returns the repeat mode the control loop will use at the next
+// end-of-track, which is what Snapshot reports.
+func (s *Session) Repeat() RepeatMode {
+	return s.runtime.repeatSettings()
+}
+
+// SetRepeat replaces the repeat mode. An unknown value is mapped to RepeatOff
+// rather than rejected, matching how a bad crossfade duration is corrected, so a
+// UI can send what it holds. The change applies to the next end-of-track, so it
+// is safe to call while audio is running. It emits nothing itself: the control
+// loop emits RepeatChanged once the mode actually changes.
+func (s *Session) SetRepeat(m RepeatMode) error {
+	s.enqueue(command{kind: cmdRepeat, repeat: ValidateRepeat(m)})
+
+	return nil
+}
+
+// applyRepeat stores the repeat mode and announces a real change. Comparing
+// against the value in force is what keeps a same-value set from emitting a
+// RepeatChanged, matching how the state machine suppresses a self transition.
+func (s *Session) applyRepeat(m RepeatMode) {
+	if s.runtime.repeatSettings() == m {
+		return
+	}
+	s.runtime.setRepeat(m)
+	s.emit(RepeatChanged{Mode: m})
+}
+
 // Tap is the real-time audio feed a visualizer reads. The engine writes mono
 // downmixed frames after the gain and before the device, so a consumer sees
 // exactly what is heard.
@@ -1619,6 +1674,8 @@ func (s *Session) apply(c command) {
 	case cmdShuffle:
 		s.cancelCrossfade()
 		s.setShuffle(c.on)
+	case cmdRepeat:
+		s.applyRepeat(c.repeat)
 	}
 }
 
@@ -2384,6 +2441,26 @@ func (s *Session) handleFeed(ev feedEvent) {
 	switch ev.kind {
 	case feedExhausted:
 		s.emit(TrackEnded{})
+		// Repeat is decided before the prefetch promotion, because a prefetch
+		// always targets index+1 and repeat one wants the current track again.
+		// Both branches restart through startIndex, the Next/Prev path, rather
+		// than requestSeek(0): a decoder parked at EOF is not reliably seekable.
+		switch mode := s.runtime.repeatSettings(); mode {
+		case RepeatOne:
+			// startIndex tears the current track down itself, dropping any
+			// blend or prefetch on the way.
+			s.startIndex(s.index)
+
+			return
+		case RepeatAll:
+			if s.index+1 >= len(s.queue) {
+				// The wrap is a hard cut: there is no prefetch at the end of
+				// the queue, so the last-to-first handoff is not blended.
+				s.startIndex(0)
+
+				return
+			}
+		}
 		// A prefetch that is already built and ready is promoted with no gap
 		// and no rebuild. That is the gapless path the same-album skip relies
 		// on, and the fallback when a blend could not start in time.
@@ -2404,6 +2481,17 @@ func (s *Session) handleFeed(ev feedEvent) {
 	case feedCrossfadeDone:
 		// The ramp finished. The outgoing track is done, so the same end-of-
 		// track signal is emitted before the incoming one is promoted.
+		//
+		// Under repeat one the ramp should never have started, because
+		// pollCrossfade returns early in that mode. Were one to complete anyway,
+		// promoting the prefetched index+1 would be wrong; the mode is re-checked
+		// here so the ramp is torn down and the exhaustion path restarts the
+		// current track instead.
+		if s.runtime.repeatSettings() == RepeatOne {
+			s.cancelCrossfade()
+
+			return
+		}
 		s.emit(TrackEnded{})
 		if !s.promoteReadyPrefetch() {
 			// No incoming track to promote: tear the ramp down so the audio

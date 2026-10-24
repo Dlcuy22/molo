@@ -178,6 +178,46 @@ func TestSetShuffleReachesTheEngine(t *testing.T) {
 	}
 }
 
+// TestSetRepeatReachesTheEngine pins the three-mode command wiring and that an
+// unknown string is refused rather than silently mapped to off.
+func TestSetRepeatReachesTheEngine(t *testing.T) {
+	fp := newFakePlayer()
+	svc := newPlayerService()
+	svc.player = fp
+
+	for mode, want := range map[string]molo.RepeatMode{
+		"off": molo.RepeatOff,
+		"all": molo.RepeatAll,
+		"one": molo.RepeatOne,
+	} {
+		if err := svc.SetRepeat(mode); err != nil {
+			t.Fatalf("SetRepeat(%q): %v", mode, err)
+		}
+		if got := fp.Repeat(); got != want {
+			t.Fatalf("SetRepeat(%q) stored %v, want %v", mode, got, want)
+		}
+	}
+
+	if err := svc.SetRepeat("bogus"); err == nil {
+		t.Fatal("SetRepeat(bogus) succeeded, want an error")
+	}
+}
+
+// TestRepeatNameRoundTrips pins the two mapping directions together, so a new
+// mode cannot be added to one and forgotten in the other.
+func TestRepeatNameRoundTrips(t *testing.T) {
+	for _, mode := range []molo.RepeatMode{molo.RepeatOff, molo.RepeatAll, molo.RepeatOne} {
+		name := repeatName(mode)
+		back, err := repeatFromName(name)
+		if err != nil {
+			t.Fatalf("repeatFromName(%q): %v", name, err)
+		}
+		if back != mode {
+			t.Fatalf("round trip of %v = %v via %q", mode, back, name)
+		}
+	}
+}
+
 // TestClamp01 pins the gain clamp, which guards the engine's range check.
 func TestClamp01(t *testing.T) {
 	for _, c := range []struct{ in, want float64 }{
@@ -204,7 +244,9 @@ func TestPositionIntervalIsFourHz(t *testing.T) {
 // through to the wrong track's bytes.
 func TestCoverIsEmptyWithoutArtwork(t *testing.T) {
 	svc := newPlayerService()
-	p, err := molo.New()
+	// The fake backend keeps the test headless: the default "oto" would open a
+	// sound card the moment this player ever built a device.
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("molo.New: %v", err)
 	}

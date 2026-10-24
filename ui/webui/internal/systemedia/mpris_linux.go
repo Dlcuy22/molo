@@ -430,11 +430,26 @@ func (b *backend) onShuffle(c *prop.Change) *dbus.Error {
 	return nil
 }
 
-// onLoop refuses a repeat-mode write: the engine has no repeat mode, so a
-// stored value would be a lie. The property is writable only because the spec
-// marks it so, and a client that tries gets an honest error.
+// onLoop forwards a client LoopStatus write to the engine. The three spec values
+// map to the engine's modes; anything else is refused rather than stored, so the
+// property never reads back a value the engine does not hold.
 func (b *backend) onLoop(c *prop.Change) *dbus.Error {
-	return dbus.MakeFailedError(errors.New("mpris: repeat mode is not supported"))
+	s, ok := c.Value.(string)
+	if !ok {
+		return prop.ErrInvalidArg
+	}
+	if s != "None" && s != "Track" && s != "Playlist" {
+		return prop.ErrInvalidArg
+	}
+	if !b.dispatch(func() {
+		if b.cmd.SetLoop != nil {
+			b.cmd.SetLoop(s)
+		}
+	}) {
+		return dbus.MakeFailedError(errors.New("mpris: repeat mode is not controllable"))
+	}
+
+	return nil
 }
 
 // ---- org.mpris.MediaPlayer2 ----

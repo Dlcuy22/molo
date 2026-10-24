@@ -38,6 +38,10 @@ type fakePlayer struct {
 	// queue is the ref list the facade reads back for LoadPaths' append case.
 	queue []string
 
+	// repeat is the mode the last SetRepeat stored, so a later phase can assert
+	// the web UI forwarded it.
+	repeat molo.RepeatMode
+
 	// debugCh is the consumer side of the fake's debug stream. It is nil unless
 	// a test sets it, and a nil channel simply never yields, so the pump waits
 	// on shutdown instead of reading records.
@@ -260,6 +264,24 @@ func (f *fakePlayer) Crossfade() molo.CrossfadeSettings { return molo.CrossfadeS
 
 func (f *fakePlayer) SetCrossfade(c molo.CrossfadeSettings) error {
 	f.record("crossfade")
+
+	return nil
+}
+
+// Repeat and SetRepeat let a later phase assert that the web UI forwarded the
+// mode to the engine. The fake stores it so a test can read the value back.
+func (f *fakePlayer) Repeat() molo.RepeatMode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.repeat
+}
+
+func (f *fakePlayer) SetRepeat(m molo.RepeatMode) error {
+	f.record("repeat")
+	f.mu.Lock()
+	f.repeat = m
+	f.mu.Unlock()
 
 	return nil
 }

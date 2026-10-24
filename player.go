@@ -59,6 +59,26 @@ type Swapped = session.Swapped
 // Stages is how many effects the chain runs after the change.
 type PipelineChanged = session.PipelineChanged
 
+// RepeatChanged confirms that the repeat mode in force changed. It is emitted
+// by the control loop once the mode actually changes; a same-value set emits
+// nothing.
+type RepeatChanged = session.RepeatChanged
+
+// RepeatMode is what the player does at the end of a track: stop, wrap the
+// queue, or restart the current track. It is an alias of the engine's type, so
+// a value crossing the boundary needs no conversion.
+type RepeatMode = session.RepeatMode
+
+const (
+	// RepeatOff stops at the end of the queue. It is the zero value and the
+	// behaviour of a fresh install.
+	RepeatOff = session.RepeatOff
+	// RepeatAll wraps from the last track back to the first.
+	RepeatAll = session.RepeatAll
+	// RepeatOne restarts the current track instead of advancing.
+	RepeatOne = session.RepeatOne
+)
+
 // TrackEnded is emitted once per track when it reaches its natural end.
 type TrackEnded = session.TrackEnded
 
@@ -309,6 +329,15 @@ type Player interface {
 	// duration is clamped rather than rejected. The change applies to the next
 	// handoff, so it is safe to call while audio is running.
 	SetCrossfade(c CrossfadeSettings) error
+	// Repeat returns the repeat mode in force: stop at the end, wrap the queue,
+	// or restart the current track. The engine confirms a real change with a
+	// RepeatChanged event.
+	Repeat() RepeatMode
+	// SetRepeat replaces the repeat mode. An unknown mode falls back to
+	// RepeatOff rather than being rejected, so a caller can send what it holds.
+	// The change applies at the next end of track and is safe to call while
+	// audio is running.
+	SetRepeat(m RepeatMode) error
 
 	// Pipeline returns the effect chain in effect.
 	Pipeline() dsp.Pipeline

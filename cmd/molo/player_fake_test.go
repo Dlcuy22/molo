@@ -343,6 +343,8 @@ func (f *fakePlayer) EffectKinds() []string { return dsp.Default.Kinds() }
 func (f *fakePlayer) Effects() molo.Effects                          { return f }
 func (f *fakePlayer) Crossfade() molo.CrossfadeSettings              { return molo.CrossfadeSettings{} }
 func (f *fakePlayer) SetCrossfade(c molo.CrossfadeSettings) error    { return nil }
+func (f *fakePlayer) Repeat() molo.RepeatMode                        { return molo.RepeatOff }
+func (f *fakePlayer) SetRepeat(m molo.RepeatMode) error              { return nil }
 func (f *fakePlayer) EffectKindList() []molo.EffectKind              { return nil }
 func (f *fakePlayer) EffectChain() molo.EffectChain                  { return molo.EffectChain{} }
 func (f *fakePlayer) EffectMeters() []molo.EffectMeters              { return nil }

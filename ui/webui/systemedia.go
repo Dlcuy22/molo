@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dlcuy22/molo"
 	"github.com/dlcuy22/molo/ui/webui/internal/systemedia"
 )
 
@@ -103,19 +104,22 @@ func (s *PlayerService) systemMediaTrack(snap Snapshot) systemedia.TrackInfo {
 	}
 
 	return systemedia.TrackInfo{
-		ID:         snap.Path,
-		Title:      snap.Title,
-		Artist:     snap.Artist,
-		Album:      snap.Album,
-		Artwork:    art,
-		MIME:       mime,
-		Duration:   time.Duration(snap.Duration) * time.Millisecond,
-		Position:   time.Duration(snap.Position) * time.Millisecond,
-		Volume:     snap.Volume,
-		Playing:    snap.State == "playing",
-		Paused:     snap.State == "paused",
-		Stopped:    snap.State == "stopped",
-		Shuffle:    snap.Shuffled,
+		ID:       snap.Path,
+		Title:    snap.Title,
+		Artist:   snap.Artist,
+		Album:    snap.Album,
+		Artwork:  art,
+		MIME:     mime,
+		Duration: time.Duration(snap.Duration) * time.Millisecond,
+		Position: time.Duration(snap.Position) * time.Millisecond,
+		Volume:   snap.Volume,
+		Playing:  snap.State == "playing",
+		Paused:   snap.State == "paused",
+		Stopped:  snap.State == "stopped",
+		Shuffle:  snap.Shuffled,
+		// Loop carries the MPRIS names the transport normalizes: "" is None,
+		// the two non-default modes are Track and Playlist.
+		Loop:       loopFromName(snap.Repeat),
 		CanControl: true,
 		// The seek bar is gated on a known duration everywhere else in the UI,
 		// so the same rule decides whether the desktop is offered a seek.
@@ -155,7 +159,42 @@ func (s *PlayerService) systemMediaCommands() systemedia.Commands {
 		},
 		SetVolume:  func(v float64) { s.player.SetVolume(clamp01(v)) },
 		SetShuffle: func(on bool) { _ = s.player.SetShuffle(on) },
-		// SetLoop stays nil: the engine has no repeat mode, so the transport
-		// refuses a LoopStatus write instead of faking it.
+		// SetLoop forwards the MPRIS LoopStatus write back into the engine. The
+		// transport refuses an unknown string before it reaches here; a nil
+		// field was the old "the engine has no repeat mode" refusal.
+		SetLoop: func(name string) {
+			if mode, ok := repeatFromLoop(name); ok {
+				_ = s.player.SetRepeat(mode)
+			}
+		},
+	}
+}
+
+// loopFromName maps the snapshot's repeat string to the MPRIS LoopStatus enum.
+// The transport's loopName normalizes it, so anything unknown becomes None.
+func loopFromName(name string) string {
+	switch name {
+	case "one":
+		return "Track"
+	case "all":
+		return "Playlist"
+	default:
+		return ""
+	}
+}
+
+// repeatFromLoop is the inbound half of loopFromName: it maps an MPRIS
+// LoopStatus to the engine mode. The second result is false for a name the
+// transport should already have refused, so the caller leaves the mode alone.
+func repeatFromLoop(name string) (molo.RepeatMode, bool) {
+	switch name {
+	case "Track":
+		return molo.RepeatOne, true
+	case "Playlist":
+		return molo.RepeatAll, true
+	case "None":
+		return molo.RepeatOff, true
+	default:
+		return molo.RepeatOff, false
 	}
 }

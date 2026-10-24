@@ -27,6 +27,17 @@ func (s *Session) pollCrossfade() {
 		return
 	}
 
+	// A prefetch always targets index+1, which is the wrong track under repeat
+	// one: the end-of-track wants the current track again. So repeat one never
+	// builds or blends into a next track. The consequence is that repeat one
+	// plays as a hard restart, with no blend, which is the mode's documented
+	// behaviour rather than a missed optimisation.
+	if s.runtime.repeatSettings() == RepeatOne {
+		s.cancelPrefetch()
+
+		return
+	}
+
 	cfg := s.runtime.crossfadeSettings()
 	if !cfg.Enabled {
 		// A disabled crossfade must not leave a prefetch in flight: a track

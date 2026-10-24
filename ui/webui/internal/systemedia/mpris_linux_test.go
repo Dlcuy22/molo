@@ -28,9 +28,10 @@ func TestPlaybackStatusMapsTheThreeStates(t *testing.T) {
 	}
 }
 
-// TestLoopNameNormalizes pins the loop mapping: only the two non-default spec
-// values survive, and anything unknown falls back to None rather than reaching
-// the bus as an invalid string.
+// TestLoopNameNormalizes pins the loop mapping onto the three spec values:
+// Track and Playlist survive, and anything unknown (including the empty string
+// a snapshot sends for "off") falls back to None rather than reaching the bus
+// as an invalid string.
 func TestLoopNameNormalizes(t *testing.T) {
 	cases := map[string]string{
 		"":          "None",
