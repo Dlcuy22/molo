@@ -52,7 +52,9 @@ func TestProvidersIsReachableThroughTheInterface(t *testing.T) {
 // streams direct http/https URLs and still plays local files, with no
 // configuration.
 func TestProvidersBuiltInByDefault(t *testing.T) {
-	p, err := molo.New()
+	// The fake backend keeps the test headless: the default "oto" would open a
+	// sound card the moment this player ever built a device.
+	p, err := molo.New(molo.WithBackend("fake"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

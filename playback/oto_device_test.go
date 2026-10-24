@@ -5,6 +5,7 @@ package playback
 import (
 	"errors"
 	"io"
+	"os"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -44,11 +45,55 @@ func (p *silenceProvider) ReadFrames(dst []float32) (int, error) {
 
 func (p *silenceProvider) framesRead() int64 { return p.done.Load() }
 
+// sourceOf returns the silenceProvider under the mute wrapper openOtoDevice
+// installs, so a test can still read how many frames the device pulled.
+func sourceOf(t *testing.T, p Provider) *silenceProvider {
+	t.Helper()
+
+	if m, ok := p.(*mutedProvider); ok {
+		p = m.src
+	}
+	s, ok := p.(*silenceProvider)
+	if !ok {
+		t.Fatalf("provider under test is %T, want *silenceProvider", p)
+	}
+
+	return s
+}
+
+// mutedProvider pulls the real frames from its source and hands the device
+// silence. It sits between the provider and oto, so decode, the streamer, the
+// ring and any post-ring effect still run on real samples and at the real pace
+// the device pulls them; only what reaches the speakers is zeroed.
+type mutedProvider struct {
+	src Provider
+}
+
+func (p *mutedProvider) ReadFrames(dst []float32) (int, error) {
+	n, err := p.src.ReadFrames(dst)
+	if end := min(n*deviceChannels, len(dst)); end > 0 {
+		clear(dst[:end])
+	}
+
+	return n, err
+}
+
+// liveAudio reports whether the tests may drive the speakers. The default is
+// muted: `go test ./...` used to play the 440 Hz fixture through the machine's
+// output, which is loud, startling and pointless when the assertions are about
+// position and underruns. MOLO_AUDIO_LIVE=1 is for checking the device by ear,
+// matching the opt-in MOLO_SMTC_LIVE gate on the Windows media session.
+func liveAudio() bool { return os.Getenv("MOLO_AUDIO_LIVE") != "" }
+
 // openOtoDevice opens a device against a Provider, skipping the test with a
 // visible reason when this machine has no audio server. The skip is deliberate
 // and logged: a silent pass would hide that no audio path was exercised.
 func openOtoDevice(t *testing.T, p Provider) *otoDevice {
 	t.Helper()
+
+	if !liveAudio() {
+		p = &mutedProvider{src: p}
+	}
 
 	d, err := Open(otoBackendName)
 	if err != nil {
@@ -235,7 +280,7 @@ func TestOtoFlushDropsQueuedAudio(t *testing.T) {
 		t.Fatal("Pause dropped the queue by itself; the test would not prove Flush does anything")
 	}
 
-	before := dev.src.provider.(*silenceProvider).framesRead()
+	before := sourceOf(t, dev.src.provider).framesRead()
 	if err := dev.Flush(); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
@@ -244,7 +289,7 @@ func TestOtoFlushDropsQueuedAudio(t *testing.T) {
 	}
 
 	time.Sleep(30 * time.Millisecond)
-	if after := dev.src.provider.(*silenceProvider).framesRead(); after != before {
+	if after := sourceOf(t, dev.src.provider).framesRead(); after != before {
 		t.Fatalf("Flush pulled %d more frames; it must not read the Provider", after-before)
 	}
 
