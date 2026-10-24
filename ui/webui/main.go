@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/dlcuy22/molo/internal/priority"
+	"github.com/dlcuy22/molo/priority"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )

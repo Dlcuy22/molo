@@ -17,7 +17,7 @@ import (
 	"github.com/dlcuy22/molo"
 	"github.com/dlcuy22/molo/core"
 	"github.com/dlcuy22/molo/decode"
-	"github.com/dlcuy22/molo/internal/priority"
+	"github.com/dlcuy22/molo/priority"
 	"golang.org/x/term"
 )
 

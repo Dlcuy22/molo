@@ -24,7 +24,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/dlcuy22/molo"
 	"github.com/dlcuy22/molo/analysis"
-	"github.com/dlcuy22/molo/internal/priority"
+	"github.com/dlcuy22/molo/priority"
 	"github.com/dlcuy22/molo/ui/tui"
 )
 
