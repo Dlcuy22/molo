@@ -13,7 +13,7 @@ Lua and loaded at runtime, alongside the built-in effects, with no recompile.
 
 ## Status
 
-molo is at v1.1.0. The public surface is frozen and the core pieces are in
+molo is at v1.2.0. The public surface is frozen and the core pieces are in
 place: decoders, streamer, ring buffer, device output, DSP, metadata, the Lua
 scripting engine, and the facade. The current known limitations are:
 

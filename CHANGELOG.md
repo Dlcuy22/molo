@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-25
+
+### Added
+
+- `github.com/dlcuy22/molo/priority` is a public package, promoted from
+  `internal/priority`. The Windows scheduling correction was reachable only from
+  inside the module, which a front end in another repository cannot import, and
+  the desktop app needs it at startup. `cmd/molo` and `cmd/molo-tui` import the
+  new path.
+
+### Removed
+
+- The `ui/webui` module left this repository for
+  [github.com/dlcuy22/molow](https://github.com/dlcuy22/molow), the maintained
+  desktop front end. It is now an ordinary module that requires the engine as a
+  library, so `go.work` holds two modules instead of three and CI no longer
+  builds a Wails front end. No engine API changed: the module zip already
+  excluded `ui/`, so `go get github.com/dlcuy22/molo` resolves the same packages
+  as before.
+
 ## [1.1.0] - 2026-10-24
 
 ### Changed
@@ -200,6 +220,7 @@ cut.
   and seeking are unaffected; only the length is unknown.
 - The built-in effect set is small: gain and crossfeed are the two that ship.
 
-[Unreleased]: https://github.com/dlcuy22/molo/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/dlcuy22/molo/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/dlcuy22/molo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dlcuy22/molo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dlcuy22/molo/releases/tag/v1.0.0
