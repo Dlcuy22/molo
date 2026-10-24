@@ -98,3 +98,16 @@ jobs:
       - run: go test -tags server ./...
         env:
           CGO_ENABLED: "0"
+
+      # The Windows media backend only builds on GOOS=windows, so without this
+      # it would rot unnoticed. No cgo, so it cross-compiles on the runner.
+      # build/ios is excluded: it is Wails scaffolding without a main function,
+      # so `go build ./...` already fails on it on every platform.
+      - name: Cross-compile for Windows
+        run: |
+          go vet -tags server ./...
+          go build -tags server . ./internal/...
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"

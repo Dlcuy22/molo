@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !windows
 
 // The no-op transport for platforms without one yet.
 //
