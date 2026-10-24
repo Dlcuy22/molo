@@ -17,7 +17,7 @@ import (
 var errFFTSize = errors.New("fft: size must be a positive power of two")
 
 // useSIMD reports whether SIMD acceleration is available and expected to beat
-// scalar Go execution. Matches the webui spectrum backend selector.
+// scalar Go execution. Matches the spectrum backend selector molow uses.
 func useSIMD() bool {
 	switch runtime.GOARCH {
 	case "amd64":
