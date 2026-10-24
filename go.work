@@ -3,5 +3,4 @@ go 1.27.1
 use (
 	.
 	./ui/tui
-	./ui/webui
 )

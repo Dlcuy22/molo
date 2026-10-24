@@ -27,7 +27,3 @@ __pycache__/
 /AGENTS.md
 /DESIGN.md
 /skills-lock.json
-
-# Local benchmark and process-monitor output: evidence kept on disk, not source.
-/ui/webui/tools/
-/ui/webui/*stats*.json
