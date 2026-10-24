@@ -5,17 +5,18 @@ commands, and the two extension points a new feature usually touches.
 
 ## Workspace layout
 
-The repository is a Go workspace with three modules, joined by the `go.work` at
+The repository is a Go workspace with two modules, joined by the `go.work` at
 the root:
 
 | Module | Path | Contents |
 |---|---|---|
 | engine | `.` | `core`, `decode`, `stream`, `playback`, `dsp`, `script`, `meta`, `analysis`, `provider`, `internal/session`, and the `molo` facade |
 | TUI | `ui/tui` | the Bubble Tea front end |
-| desktop | `ui/webui` | the Wails v3 backend and Svelte 5 frontend |
 
 The engine depends on no UI framework. Keep it that way: a UI import belongs in
-its own module, not in the root.
+its own module, not in the root. The maintained desktop front end,
+[molow](https://github.com/Dlcuy22/molow), is a separate repository that requires
+the engine as a library.
 
 ## Running the tests
 
@@ -24,7 +25,6 @@ Run the tests from the module you changed. The engine is the root module, so:
 ```sh
 go test ./...                    # engine
 (cd ui/tui && go test ./...)     # TUI
-(cd ui/webui && go test ./...)   # desktop backend
 ```
 
 Add `-race` to the engine suite before you send a change:

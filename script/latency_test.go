@@ -133,10 +133,9 @@ func impulseIndex(buf []float32, frames int) int {
 // the exact value the test asked for.
 func formatFloat(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 
-// frontendReduction mirrors ui/webui/frontend/.../transfer-curve.ts: the gain
-// reduction is transferSample(x) - (x + makeup), with makeup dropped as 0. It
-// exists so the Go law is checked against the curve the UI draws, not a copy of
-// the Go branch.
+// frontendReduction mirrors molow's transfer-curve.ts: the gain reduction is
+// transferSample(x) - (x + makeup), with makeup dropped as 0. It exists so the
+// Go law is checked against the curve the UI draws, not a copy of the Go branch.
 func frontendReduction(x, threshold, ratio, knee float64) float64 {
 	if ratio < 1 {
 		ratio = 1

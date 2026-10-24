@@ -174,26 +174,28 @@ can change at runtime through `Settings`, or with `SwapDecoder` and
 
 ## Example UIs
 
-The repository ships three front ends behind one facade, and they share no UI
-code.
+The engine is UI-agnostic. Three front ends are built on it, and they share no
+UI code.
 
 `cmd/molo` is the headless CLI, plain Go. It lives in the engine module rather
 than in a module of its own. It plays the paths given on the command line as a
-queue and keeps single-key controls when stdin is a terminal. this is just a reference
+queue and keeps single-key controls when stdin is a terminal. It is a reference
 implementation of the engine's facade, not actively maintained.
 
 `ui/tui` is a terminal UI built on Bubble Tea and Lip Gloss. It draws a
 now-playing panel, a progress bar, a level meter, an optional waveform, and the
-queue. this frontend is not actively maintained.
+queue. It is not actively maintained.
 
-`ui/webui` is a desktop app: a Wails v3 Go backend with a Svelte 5 frontend. It
+[molow](https://github.com/Dlcuy22/molow) is the maintained desktop front end,
+in a repository of its own: a Wails v3 Go backend with a Svelte 5 frontend. It
 has transport controls, a clickable queue, decoder and backend selection, album
 artwork in the now-playing row, a bar visualizer driven by the engine's `Tap`,
 the effect editor, and YouTube Music search and queueing through the provider
-seam. It is the one front end that renders cover art today. 
+seam. It is the one front end that renders cover art today.
 
-The TUI and the desktop app keep their own `go.mod`, joined to the engine by a
-`go.work` at the root, so the engine stays free of UI dependencies.
+`ui/tui` keeps its own `go.mod`, joined to the engine by a `go.work` at the
+root, so the engine stays free of UI dependencies. molow is an ordinary module
+that requires the engine like any other library.
 
 ## License
 
