@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-24
 
 ### Changed
 
@@ -18,41 +18,6 @@ and this project adheres to
   Integration tab in the Ctrl+I settings panel, card preview included. The right
   column is now just the engine controls and the Effects entry, so it no longer
   scrolls.
-
-### Added
-
-- Discord Rich Presence now shows the album for a YouTube Music track. The
-  search and playlist responses carry the album id but not its name, so the name
-  is resolved once through the watch endpoint and cached, filling the cover
-  tooltip that was previously empty.
-
-### Fixed
-
-- The YouTube Music search panel no longer labels every album, artist and
-  playlist hit as "Preview loop". An idle preview reports an empty path, and a
-  hit that cannot be played was given an empty path too, so the two matched and
-  the row claimed to be auditioning. The preview label now requires a preview to
-  actually be sounding.
-- Album, artist and playlist hits in the YouTube Music search panel now draw
-  their cover. Those rows carry no playable path, and the artwork was keyed on
-  that path, so no fetch was ever made. The cover is now keyed on the row's
-  catalogue reference, and the backend indexes every hit rather than only the
-  playable ones, so the art has a source.
-- The desktop app's queue now scrolls inside its own panel. The queue and the
-  right-hand column each scroll on their own and the row is clamped to the
-  window height, so scrolling a long queue no longer dragged the right column's
-  panels off screen and left them empty. The window's outer scroll is gone once
-  the columns sit side by side; it remains only in the stacked layout, where the
-  columns cannot fit next to each other.
-- Discord Rich Presence no longer shows the " - Topic" suffix on an artist name.
-  YouTube's auto-generated channels carry it and yt-dlp copies it into a local
-  file's artist tag; only the exact trailing suffix is removed, so a real artist
-  whose name contains the word is untouched.
-
-## [1.1.0]
-
-### Changed
-
 - The module path is now `github.com/dlcuy22/molo`, renamed from
   `github.com/dlcuy22/player`. This is a breaking change: update every import
   path, and `go get github.com/dlcuy22/molo`. The public package is `molo`, the
@@ -68,6 +33,29 @@ and this project adheres to
 
 ### Added
 
+- The engine has a repeat mode: off, all, or one. Repeat all wraps the queue
+  back to the first track when the last one ends; repeat one restarts the track
+  that just finished. It is a runtime setting like crossfade, exposed through
+  `Player.SetRepeat` and reported in the snapshot, and MPRIS now publishes and
+  accepts `LoopStatus` instead of refusing the write. Repeat one plays as a hard
+  restart with no crossfade, because a prefetch always targets the next track.
+- The desktop app answers the transport from the keyboard while the main window
+  has focus: `*`/`/` (or the numpad, or `0`/`9`) for volume, `n`/`.` for next,
+  `<`/`,` for previous, `s` shuffle, `v` visualizer, `m` mute, `l` repeat all and
+  `L` repeat one. The playback keys are inert while the palette or the settings
+  panel is open, and while a text field has focus, so they never fight the modal
+  chords.
+- A centred status card confirms each keyboard action: a bar for volume, a tile
+  with an icon for a toggle, and a card with the album cover for a track change.
+  One card is on screen at a time; a new action replaces it rather than stacking.
+  The volume bar is debounced so a held key shows one card that keeps updating.
+- The Ctrl+I settings panel gains a Repeat picker under Playback. The
+  visualizer switch under General now persists to `settings.json`, alongside
+  repeat, so both survive a restart. Mute and shuffle deliberately do not.
+- Discord Rich Presence now shows the album for a YouTube Music track. The
+  search and playlist responses carry the album id but not its name, so the name
+  is resolved once through the watch endpoint and cached, filling the cover
+  tooltip that was previously empty.
 - Track crossfade in the engine and the desktop app. A `CrossfadeSettings`
   runtime setting (`SetCrossfade`/`Crossfade` on the facade) fades the end of a
   track into the start of the next over 1 to 12 seconds, with an equal-power
@@ -131,6 +119,26 @@ and this project adheres to
 
 ### Fixed
 
+- The YouTube Music search panel no longer labels every album, artist and
+  playlist hit as "Preview loop". An idle preview reports an empty path, and a
+  hit that cannot be played was given an empty path too, so the two matched and
+  the row claimed to be auditioning. The preview label now requires a preview to
+  actually be sounding.
+- Album, artist and playlist hits in the YouTube Music search panel now draw
+  their cover. Those rows carry no playable path, and the artwork was keyed on
+  that path, so no fetch was ever made. The cover is now keyed on the row's
+  catalogue reference, and the backend indexes every hit rather than only the
+  playable ones, so the art has a source.
+- The desktop app's queue now scrolls inside its own panel. The queue and the
+  right-hand column each scroll on their own and the row is clamped to the
+  window height, so scrolling a long queue no longer dragged the right column's
+  panels off screen and left them empty. The window's outer scroll is gone once
+  the columns sit side by side; it remains only in the stacked layout, where the
+  columns cannot fit next to each other.
+- Discord Rich Presence no longer shows the " - Topic" suffix on an artist name.
+  YouTube's auto-generated channels carry it and yt-dlp copies it into a local
+  file's artist tag; only the exact trailing suffix is removed, so a real artist
+  whose name contains the word is untouched.
 - A crossfade no longer drops a whole buffer to silence when the outgoing
   track's probed duration is longer than its real audio and it ends part-way
   through the blend. The outgoing ending is the end of one side of the blend,
