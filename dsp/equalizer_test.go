@@ -278,8 +278,8 @@ func TestEqualizerFactoryAndSchema(t *testing.T) {
 	}
 
 	schema := fac.Schema()
-	if len(schema) != 34 {
-		t.Fatalf("expected 34 schema params, got %d", len(schema))
+	if len(schema) != 100 {
+		t.Fatalf("expected 100 schema params, got %d", len(schema))
 	}
 
 	var numBandsParam *Param
@@ -289,8 +289,26 @@ func TestEqualizerFactoryAndSchema(t *testing.T) {
 			break
 		}
 	}
-	if numBandsParam == nil || numBandsParam.Min != 1 || numBandsParam.Max != 10 {
-		t.Fatalf("expected num-bands range 1..10, got %+v", numBandsParam)
+	if numBandsParam == nil || numBandsParam.Min != 1 || numBandsParam.Max != EqualizerBandCount {
+		t.Fatalf("expected num-bands range 1..EqualizerBandCount, got %+v", numBandsParam)
+	}
+
+	// A band past the classic ten is declared up front and starts at the
+	// add-band default, so appending one lands on a usable frequency.
+	var addedFreq, addedGain *Param
+	for i := range schema {
+		switch schema[i].Key {
+		case EqualizerBandFreqKey(10):
+			addedFreq = &schema[i]
+		case EqualizerBandGainKey(10):
+			addedGain = &schema[i]
+		}
+	}
+	if addedFreq == nil || addedFreq.Default != equalizerNewBandFreq {
+		t.Fatalf("band 11 frequency default = %+v, want %v", addedFreq, equalizerNewBandFreq)
+	}
+	if addedGain == nil || addedGain.Default != 0.0 {
+		t.Fatalf("band 11 gain default = %+v, want 0", addedGain)
 	}
 
 	eq, err := fac.New(nil)

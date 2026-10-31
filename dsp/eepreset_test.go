@@ -637,6 +637,7 @@ func TestEEPresetEqualizerBandHandling(t *testing.T) {
 					"band0": {"frequency": 50.0, "gain": 1.0, "q": 1.0},
 					"band2": {"frequency": 200.0, "gain": 2.0, "q": 1.0},
 					"band12": {"frequency": 12000.0, "gain": 0.0, "q": 1.0},
+					"band32": {"frequency": 18000.0, "gain": 0.0, "q": 1.0},
 					"not_a_band": {"gain": 0.0}
 				}
 			},
@@ -652,13 +653,19 @@ func TestEEPresetEqualizerBandHandling(t *testing.T) {
 	}
 
 	eqStage := pipeline.Post[0]
-	// Highest valid band is band2, so inferred num-bands should be 3.
-	if eqStage.Params[EqualizerNumBands] != 3 {
-		t.Errorf("inferred num-bands = %v, want 3", eqStage.Params[EqualizerNumBands])
+	// band12 is inside the schema, so the highest valid index is 12 and the
+	// inferred count is 13. band32 is past the 32-band schema and is skipped.
+	if eqStage.Params[EqualizerNumBands] != 13 {
+		t.Errorf("inferred num-bands = %v, want 13", eqStage.Params[EqualizerNumBands])
 	}
 
-	if !eeTestContainsWarning(warnings, "equalizer.band12 skipped: band index out of range") {
-		t.Errorf("expected warning for band12, got %v", warnings)
+	for _, idx := range []int{0, 2, 12} {
+		if _, ok := eqStage.Params[EqualizerBandFreqKey(idx)]; !ok {
+			t.Errorf("band %d should have been imported", idx)
+		}
+	}
+	if !eeTestContainsWarning(warnings, "equalizer.band32 skipped: band index out of range") {
+		t.Errorf("expected warning for band32, got %v", warnings)
 	}
 	if !eeTestContainsWarning(warnings, "equalizer.not_a_band skipped: unsupported parameter") {
 		t.Errorf("expected warning for not_a_band, got %v", warnings)

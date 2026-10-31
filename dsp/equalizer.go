@@ -22,11 +22,16 @@ const (
 	EqualizerNumBands = "num-bands"
 )
 
+// EqualizerBandCount is how many bands the effect declares. The schema carries
+// all of them up front; num-bands decides how many are processed, so a UI can
+// append a band without reshaping the parameter set. The bands past the ten
+// classic frequencies all start at equalizerNewBandFreq.
+const EqualizerBandCount = 32
+
 const (
 	equalizerMinBands     = 1
-	equalizerMaxBands     = equalizerBandCount
+	equalizerMaxBands     = EqualizerBandCount
 	equalizerDefaultBands = 10
-	equalizerBandCount    = 10
 	equalizerDefaultQ     = 1.504760237537245
 
 	equalizerMinFreq = 20.0
@@ -35,10 +40,25 @@ const (
 	equalizerMaxGain = 20.0
 	equalizerMinQ    = 0.1
 	equalizerMaxQ    = 10.0
+
+	// equalizerNewBandFreq is the default for a band added past the classic
+	// ten. A UI's "add band" therefore lands on a usable frequency instead of
+	// a duplicate of the highest band.
+	equalizerNewBandFreq = 100.0
 )
 
-var defaultBandFrequencies = [equalizerBandCount]float64{
+var defaultBandFrequencies = [...]float64{
 	32.0, 64.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+}
+
+// defaultBandFrequency is the declared default for band i: the classic ten
+// frequencies first, then the add-band default.
+func defaultBandFrequency(i int) float64 {
+	if i >= 0 && i < len(defaultBandFrequencies) {
+		return defaultBandFrequencies[i]
+	}
+
+	return equalizerNewBandFreq
 }
 
 // EqualizerBandFreqKey formats the frequency parameter key for a band index.
@@ -74,7 +94,7 @@ func (f *EqualizerFactory) Weight() int { return 50 }
 func (f *EqualizerFactory) Placement() Placement { return Post }
 
 func (f *EqualizerFactory) Schema() []Param {
-	params := make([]Param, 0, 1+equalizerBandCount*3)
+	params := make([]Param, 0, 1+EqualizerBandCount*3)
 	params = append(params, Param{
 		Key:     EqualizerNumBands,
 		Kind:    Int,
@@ -87,7 +107,7 @@ func (f *EqualizerFactory) Schema() []Param {
 		Widget:  WidgetSlider,
 	})
 
-	for i := 0; i < equalizerBandCount; i++ {
+	for i := 0; i < EqualizerBandCount; i++ {
 		group := fmt.Sprintf("Band %d", i+1)
 		params = append(params,
 			Param{
@@ -97,7 +117,7 @@ func (f *EqualizerFactory) Schema() []Param {
 				Max:     equalizerMaxFreq,
 				Step:    1.0,
 				Unit:    "Hz",
-				Default: defaultBandFrequencies[i],
+				Default: defaultBandFrequency(i),
 				Label:   fmt.Sprintf("Band %d Frequency", i+1),
 				Group:   group,
 				Widget:  WidgetKnob,
@@ -142,7 +162,7 @@ func (f *EqualizerFactory) New(values Values) (Effect, error) {
 
 // equalizerState is the immutable snapshot read by the audio path.
 type equalizerState struct {
-	coeffs    [equalizerBandCount][5]float64
+	coeffs    [EqualizerBandCount][5]float64
 	coeffsGen uint64
 	numBands  int
 	ch        int
@@ -209,8 +229,8 @@ func (e *Equalizer) Configure(in core.FrameFormat) (core.FrameFormat, error) {
 	e.ch = in.Ch
 	e.isSet = true
 
-	e.bands = make([]*biquadState, equalizerBandCount)
-	for i := 0; i < equalizerBandCount; i++ {
+	e.bands = make([]*biquadState, EqualizerBandCount)
+	for i := 0; i < EqualizerBandCount; i++ {
 		e.bands[i] = newBiquadState(e.ch)
 	}
 	e.publishLocked()
@@ -315,7 +335,7 @@ func (e *Equalizer) meterCh(st *equalizerState) int {
 }
 
 func (e *Equalizer) computeBandCoeffsLocked(idx int) [5]float64 {
-	if idx < 0 || idx >= equalizerBandCount || e.rate <= 0 {
+	if idx < 0 || idx >= EqualizerBandCount || e.rate <= 0 {
 		return [5]float64{1, 0, 0, 0, 0}
 	}
 	freq := e.store.Float(EqualizerBandFreqKey(idx))
@@ -353,8 +373,8 @@ func (e *Equalizer) publishLocked() {
 		numBands = len(e.bands)
 	}
 
-	var coeffs [equalizerBandCount][5]float64
-	for i := 0; i < equalizerBandCount; i++ {
+	var coeffs [EqualizerBandCount][5]float64
+	for i := 0; i < EqualizerBandCount; i++ {
 		coeffs[i] = e.computeBandCoeffsLocked(i)
 	}
 
