@@ -212,6 +212,19 @@ func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
 	return f.InsertQueue(index, refs)
 }
 
+func (f *fakePlayer) MoveQueue(from, to int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if from < 0 || to < 0 || from >= len(f.queue) || to >= len(f.queue) {
+		return molo.ErrIndexOutOfRange
+	}
+	ref := f.queue[from]
+	f.queue = append(f.queue[:from], f.queue[from+1:]...)
+	f.queue = append(f.queue[:to], append([]string{ref}, f.queue[to:]...)...)
+
+	return nil
+}
+
 func (f *fakePlayer) Pause() error {
 	f.mu.Lock()
 	f.record("Pause")

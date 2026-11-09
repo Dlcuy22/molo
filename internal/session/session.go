@@ -465,6 +465,11 @@ type command struct {
 	// Next and Prev do.
 	index int
 
+	// from and to are the endpoints of cmdMoveQueue. They are separate fields
+	// because a move is not an insert: both positions already exist.
+	from int
+	to   int
+
 	// play makes cmdInsertQueue start the first inserted ref instead of only
 	// splicing it in. It is a field here rather than a second PlayIndex call
 	// because PlayIndex validates its index synchronously, before the control
@@ -507,6 +512,7 @@ const (
 	cmdPlayQueue
 	cmdPlayIndex
 	cmdInsertQueue
+	cmdMoveQueue
 	cmdNext
 	cmdPrev
 	cmdPause
@@ -1311,6 +1317,25 @@ func (s *Session) InsertQueueAndPlay(index int, refs []string) error {
 	return nil
 }
 
+// MoveQueue moves the entry at from to to. The playing track is preserved by
+// identity: the control loop adjusts the current index instead of reopening the
+// streamer, so a reorder under the live track is silent.
+//
+// Both endpoints are checked here, on the caller's goroutine, and again on the
+// control loop because a PlayQueue or a shrink may have landed in between.
+func (s *Session) MoveQueue(from, to int) error {
+	s.mu.Lock()
+	bad := from < 0 || to < 0 || from >= len(s.queue) || to >= len(s.queue)
+	s.mu.Unlock()
+	if bad {
+		return fmt.Errorf("%w: %d -> %d", ErrIndexOutOfRange, from, to)
+	}
+
+	s.enqueue(command{kind: cmdMoveQueue, from: from, to: to})
+
+	return nil
+}
+
 // hasLiveTrack reports whether a track is loaded, playing or paused. It is the
 // one definition of "the insert would cut something off".
 func (s *Session) hasLiveTrack() bool {
@@ -1633,6 +1658,8 @@ func (s *Session) apply(c command) {
 		}
 	case cmdInsertQueue:
 		s.insertQueue(c.index, c.paths, c.play)
+	case cmdMoveQueue:
+		s.moveQueue(c.from, c.to)
 	case cmdNext:
 		s.next()
 	case cmdPrev:
@@ -1790,8 +1817,48 @@ func (s *Session) setQueue(paths []string) {
 	s.mu.Unlock()
 }
 
-// insertQueue splices refs into the queue at index and republishes the length.
-// It deliberately does not touch the current track: no detach, no new open, no
+// moveQueue shifts one entry and re-seats the current index onto the same ref.
+// It is the control-loop half of MoveQueue: cheap, bounded, and it does not
+// touch the streamer, so the track that is playing keeps sounding.
+func (s *Session) moveQueue(from, to int) {
+	if from == to || from < 0 || to < 0 || from >= len(s.queue) || to >= len(s.queue) {
+		return
+	}
+
+	next := make([]string, len(s.queue))
+	copy(next, s.queue)
+	moved := next[from]
+	if from < to {
+		copy(next[from:to], s.queue[from+1:to+1])
+	} else {
+		copy(next[to+1:from+1], s.queue[to:from])
+	}
+	next[to] = moved
+	s.setQueue(next)
+
+	idx := s.index
+	switch {
+	case idx == from:
+		idx = to
+	case from < idx && idx <= to:
+		idx--
+	case to <= idx && idx < from:
+		idx++
+	}
+	s.index = idx
+	s.updateView(func(v *view) {
+		v.queueLen = len(next)
+		if idx >= 0 && idx < len(next) {
+			v.queueIndex = idx
+		}
+	})
+
+	// The prefetched next track may no longer be next, so drop the prefetch
+	// and any blend in flight. The live streamer itself is untouched.
+	s.cancelCrossfade()
+}
+
+// insertQueue splices refs into the queue at index and republishes the length.// It deliberately does not touch the current track: no detach, no new open, no
 // seek. The streamer keeps feeding the device, so a playing track carries on
 // where it was, and the inserted refs are what the engine reaches when it
 // advances.

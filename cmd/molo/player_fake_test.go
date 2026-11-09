@@ -225,6 +225,26 @@ func (f *fakePlayer) InsertQueueAndPlay(index int, refs []string) error {
 	return nil
 }
 
+func (f *fakePlayer) MoveQueue(from, to int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if from < 0 || to < 0 || from >= len(f.queue) || to >= len(f.queue) {
+		return molo.ErrIndexOutOfRange
+	}
+	ref := f.queue[from]
+	f.queue = append(f.queue[:from], f.queue[from+1:]...)
+	f.queue = append(f.queue[:to], append([]string{ref}, f.queue[to:]...)...)
+	if from == f.snap.QueueIndex {
+		f.snap.QueueIndex = to
+	} else if from < f.snap.QueueIndex && to >= f.snap.QueueIndex {
+		f.snap.QueueIndex--
+	} else if from > f.snap.QueueIndex && to <= f.snap.QueueIndex {
+		f.snap.QueueIndex++
+	}
+
+	return nil
+}
+
 func (f *fakePlayer) Queue() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

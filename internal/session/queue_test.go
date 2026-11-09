@@ -469,3 +469,60 @@ func sameSet(a, b []string) bool {
 
 	return true
 }
+
+// TestMoveQueueKeepsThePlayingTrackByRef pins the reorder contract: the queue
+// changes order, the live streamer is not reopened, and the index follows the
+// track rather than staying on the slot.
+func TestMoveQueueKeepsThePlayingTrackByRef(t *testing.T) {
+	s, factory := newQueueSession(t)
+	a, b, c := fixture(t, "short_stereo.opus"), fixture(t, "mono_1s.opus"), fixture(t, "stereo_2s.opus")
+
+	if err := s.PlayQueue([]string{a, b, c}); err != nil {
+		t.Fatalf("PlayQueue: %v", err)
+	}
+	waitState(t, s, StatePlaying, 3*time.Second)
+	if factory.count() != 1 {
+		t.Fatalf("devices built = %d, want 1", factory.count())
+	}
+
+	// Move the playing track to the end.
+	if err := s.MoveQueue(0, 2); err != nil {
+		t.Fatalf("MoveQueue: %v", err)
+	}
+	eventually(t, 2*time.Second, "queue reordered", func() bool {
+		q := s.Queue()
+		return len(q) == 3 && q[2] == a
+	})
+	if got := s.Queue(); got[0] != b || got[1] != c || got[2] != a {
+		t.Fatalf("Queue() = %q, want [%q %q %q]", got, b, c, a)
+	}
+	snap := s.Snapshot()
+	if snap.Path != a || snap.QueueIndex != 2 || snap.State != StatePlaying {
+		t.Fatalf("after move: path=%q index=%d state=%s", snap.Path, snap.QueueIndex, stateName(snap.State))
+	}
+	if factory.count() != 1 {
+		t.Fatalf("devices built = %d, want 1: a move must not reopen the track", factory.count())
+	}
+
+	// Moving another entry across the current one adjusts the index.
+	if err := s.MoveQueue(0, 2); err != nil {
+		t.Fatalf("MoveQueue: %v", err)
+	}
+	eventually(t, 2*time.Second, "index adjusted", func() bool {
+		return s.Snapshot().Path == a && s.Snapshot().QueueIndex == 1
+	})
+}
+
+func TestMoveQueueRejectsBadIndices(t *testing.T) {
+	s, _ := newQueueSession(t)
+	if err := s.InsertQueue(0, []string{"ytm:a", "ytm:b"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 2*time.Second, "queue length 2", func() bool { return s.Snapshot().QueueLen == 2 })
+
+	for _, pair := range [][2]int{{-1, 0}, {0, -1}, {2, 0}, {0, 2}} {
+		if err := s.MoveQueue(pair[0], pair[1]); !errors.Is(err, ErrIndexOutOfRange) {
+			t.Fatalf("MoveQueue(%d,%d) = %v, want ErrIndexOutOfRange", pair[0], pair[1], err)
+		}
+	}
+}

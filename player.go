@@ -281,6 +281,10 @@ type Player interface {
 	// track already sounding it would cut that track off, so it is refused with
 	// ErrNoLiveTrack and nothing changes; the caller then appends instead.
 	InsertQueueAndPlay(index int, refs []string) error
+	// MoveQueue moves one entry to another position without touching the track
+	// that is playing. Both indices must be in range; the playing index follows
+	// its ref, so a move around it does not change which track is sounding.
+	MoveQueue(from, to int) error
 	// Queue returns a copy of the current queue, which holds track references
 	// (for example "ytm:abc123") rather than paths once a provider is in use.
 	Queue() []string
@@ -558,6 +562,11 @@ func (p *player) InsertQueue(index int, refs []string) error {
 // already live, which is refused rather than interrupted.
 func (p *player) InsertQueueAndPlay(index int, refs []string) error {
 	return p.session.InsertQueueAndPlay(index, refs)
+}
+
+// MoveQueue reorders one entry, keeping the playing track by identity.
+func (p *player) MoveQueue(from, to int) error {
+	return p.session.MoveQueue(from, to)
 }
 
 // Providers lists the names of the providers in effect, in priority order, for
