@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-24
+
+### Added
+
+- `dsp`: support up to 32 equalizer bands.
+- `session`: `MoveQueue` reorders queue entries without reopening the playing track.
+
+### Fixed
+
+- `stream`: `SwapDecoderSeamless` now opens and validates the replacement decoder
+  off the producer goroutine so slow container indexing no longer stalls ring
+  refills.
+
 ## [1.2.0] - 2026-10-25
 
 ### Added
@@ -220,7 +233,8 @@ cut.
   and seeking are unaffected; only the length is unknown.
 - The built-in effect set is small: gain and crossfeed are the two that ship.
 
-[Unreleased]: https://github.com/dlcuy22/molo/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/dlcuy22/molo/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/dlcuy22/molo/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dlcuy22/molo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dlcuy22/molo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dlcuy22/molo/releases/tag/v1.0.0
