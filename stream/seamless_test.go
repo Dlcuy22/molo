@@ -257,3 +257,58 @@ func TestSeamlessSwapRequiresAnOpener(t *testing.T) {
 		t.Fatal("SwapDecoderSeamless(nil) returned nil")
 	}
 }
+
+// TestSeamlessSwapSlowOpenDoesNotStallProducer proves opening a slow decoder
+// (such as indexing a multi-hour WebM) runs off the producer goroutine, so a
+// paced consumer draining past the ring capacity does not underrun.
+func TestSeamlessSwapSlowOpenDoesNotStallProducer(t *testing.T) {
+	const total = 1 << 20
+	s := newTestStreamer(t, finiteForwardToneOpener(0.5, total), Config{
+		RingFrames:  128,
+		ChunkFrames: 64,
+	})
+	startStreamer(t, s)
+	_ = readAll(t, s, 256)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]float32, 64*canonicalFormat.Ch)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := s.ReadFrames(buf); err != nil {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+
+	before := s.Stats().Underruns
+	slowOpen := func(stopCh <-chan struct{}) (decode.Decoder, error) {
+		select {
+		case <-time.After(80 * time.Millisecond):
+		case <-stopCh:
+			return nil, ErrClosed
+		}
+
+		return finiteToneOpener(0.25, total)(stopCh)
+	}
+	if err := s.SwapDecoderSeamless(slowOpen); err != nil {
+		t.Fatalf("SwapDecoderSeamless: %v", err)
+	}
+	time.Sleep(15 * time.Millisecond)
+
+	if after := s.Stats().Underruns; after != before {
+		t.Fatalf("Underruns rose from %d to %d while slow open ran; producer stalled", before, after)
+	}
+}

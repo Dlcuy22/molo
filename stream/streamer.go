@@ -137,6 +137,10 @@ type Streamer struct {
 	// are read together with seekSeq, so a newer request always overwrites
 	// them whole.
 	seekOpen Opener
+	// seekDec carries a decoder pre-opened off the producer goroutine for a
+	// seamless swap, so opening and indexing a large file never stalls ring
+	// refills.
+	seekDec  decode.Decoder
 	seekSwap bool
 	// seekSeamless marks a swap that must not flush the ring: the new decoder
 	// is positioned at the frontier and the buffered audio keeps playing across
@@ -407,7 +411,7 @@ func (s *Streamer) finishRead(n, want int, eos bool, err error) (int, error) {
 // has run: the ring is flushed, the decoder is repositioned, position is reset
 // and the ring is refilled. Concurrent seeks collapse to the latest target.
 func (s *Streamer) SeekFrame(frame int64) error {
-	return s.requestPosition(frame, nil, false, false)
+	return s.requestPosition(frame, nil, nil, false, false)
 }
 
 // SwapDecoder reopens the stream with a different opener, repositions to
@@ -423,15 +427,15 @@ func (s *Streamer) SwapDecoder(target int64, open Opener) error {
 		return errors.New("stream: SwapDecoder requires an opener")
 	}
 
-	return s.requestPosition(target, open, true, false)
+	return s.requestPosition(target, open, nil, true, false)
 }
 
 // SwapDecoderSeamless installs the decoder built by open without flushing the
-// ring. The outgoing decoder keeps playing from the buffer while the new one is
-// opened and positioned at the frontier, the first frame the producer has not
-// yet emitted, so a consumer hears no gap when the new decoder is ready within
-// the buffered runway. The pre-modules are not reset: the samples continue, so
-// their state is still correct.
+// ring. Opening and validating the new decoder run on the caller goroutine so
+// slow container indexing never stalls the producer's ring refills; only
+// positioning at the frontier and replacing the active decoder run on the
+// producer. The pre-modules are not reset: the samples continue, so their
+// state is still correct.
 //
 // It is the counterpart of SwapDecoder for the source-upgrade path, where a
 // forward-only stream is replaced by a seekable one over the same audio. The
@@ -446,19 +450,29 @@ func (s *Streamer) SwapDecoderSeamless(open Opener) error {
 	if open == nil {
 		return errors.New("stream: SwapDecoderSeamless requires an opener")
 	}
-
-	return s.requestPosition(0, open, true, true)
-}
-
-// requestPosition is the shared gate for SeekFrame, SwapDecoder and
-// SwapDecoderSeamless. Carrying an optional opener, a swap flag and a seamless
-// flag through the same sequence is what serialises them: at most one
-// reposition runs at a time, and the newest request wins.
-func (s *Streamer) requestPosition(target int64, open Opener, swap, seamless bool) error {
-	if target < 0 {
-		return fmt.Errorf("%w: negative target %d", ErrSeekRange, target)
+	if err := s.readyForRequest(); err != nil {
+		return err
 	}
 
+	dec, err := open(s.stopDec)
+	if err != nil {
+		return err
+	}
+	if got := dec.Info().Format; !got.Equal(s.formats[0]) {
+		_ = dec.Close()
+
+		return fmt.Errorf("stream: decoder reports %+v, the stream takes %+v", got, s.formats[0])
+	}
+	if _, ok := dec.(decode.Seeker); !ok {
+		_ = dec.Close()
+
+		return ErrSeamlessNotSeekable
+	}
+
+	return s.requestPosition(0, open, dec, true, true)
+}
+
+func (s *Streamer) readyForRequest() error {
 	s.startMu.Lock()
 	started := s.started
 	s.startMu.Unlock()
@@ -467,21 +481,68 @@ func (s *Streamer) requestPosition(target int64, open Opener, swap, seamless boo
 	}
 
 	s.gate.mu.Lock()
+	defer s.gate.mu.Unlock()
+	if s.gate.closed {
+		return ErrClosed
+	}
+	if s.finished.Load() {
+		return ErrEndOfStream
+	}
+
+	return nil
+}
+
+// requestPosition is the shared gate for SeekFrame, SwapDecoder and
+// SwapDecoderSeamless. Carrying an optional opener, a pre-opened decoder, a
+// swap flag and a seamless flag through the same sequence is what serialises
+// them: at most one reposition runs at a time, and the newest request wins.
+func (s *Streamer) requestPosition(target int64, open Opener, dec decode.Decoder, swap, seamless bool) error {
+	if target < 0 {
+		if dec != nil {
+			_ = dec.Close()
+		}
+
+		return fmt.Errorf("%w: negative target %d", ErrSeekRange, target)
+	}
+
+	s.startMu.Lock()
+	started := s.started
+	s.startMu.Unlock()
+	if !started {
+		if dec != nil {
+			_ = dec.Close()
+		}
+
+		return ErrNotStarted
+	}
+
+	s.gate.mu.Lock()
 	if s.gate.closed {
 		s.gate.mu.Unlock()
+		if dec != nil {
+			_ = dec.Close()
+		}
 
 		return ErrClosed
 	}
 	if s.finished.Load() {
 		s.gate.mu.Unlock()
+		if dec != nil {
+			_ = dec.Close()
+		}
 
 		return ErrEndOfStream
 	}
 
+	if s.seekDec != nil {
+		_ = s.seekDec.Close()
+		s.seekDec = nil
+	}
 	s.seekSeq++
 	seq := s.seekSeq
 	s.seekTarget = target
 	s.seekOpen = open
+	s.seekDec = dec
 	s.seekSwap = swap
 	s.seekSeamless = seamless
 	s.gate.cond.Broadcast()
@@ -544,7 +605,16 @@ func (s *Streamer) run() {
 	// Read s.dec at exit rather than binding the receiver now: the seek
 	// fallback replaces it, and the original would otherwise be closed twice
 	// while the replacement leaked.
-	defer func() { s.dec.Close() }()
+	defer func() {
+		s.gate.mu.Lock()
+		leftover := s.seekDec
+		s.seekDec = nil
+		s.gate.mu.Unlock()
+		if leftover != nil {
+			_ = leftover.Close()
+		}
+		s.dec.Close()
+	}()
 
 	for !s.finished.Load() {
 		if !s.produce() {
@@ -624,12 +694,14 @@ func (s *Streamer) applyPendingSeek() bool {
 	}
 	target := s.seekTarget
 	open := s.seekOpen
+	dec := s.seekDec
+	s.seekDec = nil
 	swap := s.seekSwap
 	seamless := s.seekSeamless
 	seq := s.seekSeq
 	s.gate.mu.Unlock()
 
-	err := s.doSeek(target, open, swap, seamless)
+	err := s.doSeek(target, open, dec, swap, seamless)
 
 	s.gate.mu.Lock()
 	s.seekApplied = seq
@@ -645,9 +717,12 @@ func (s *Streamer) applyPendingSeek() bool {
 // end means a consumer that wakes up after it finds data, not an empty ring.
 // A seamless swap takes the other branch: it keeps the ring and positions the
 // new decoder at the frontier instead.
-func (s *Streamer) doSeek(target int64, open Opener, swap, seamless bool) error {
+func (s *Streamer) doSeek(target int64, open Opener, dec decode.Decoder, swap, seamless bool) error {
 	if seamless {
-		return s.doSeamlessSwap(open)
+		return s.doSeamlessSwap(open, dec)
+	}
+	if dec != nil {
+		_ = dec.Close()
 	}
 
 	s.gate.mu.Lock()
@@ -696,39 +771,28 @@ func (s *Streamer) doSeek(target int64, open Opener, swap, seamless bool) error 
 	return s.complete(target)
 }
 
-// doSeamlessSwap installs open without flushing the ring. The frontier is the
-// first frame the producer has not yet emitted: the frames delivered to the
-// consumer, plus the frames buffered in the ring, plus the processed frames
-// still held in pending. The new decoder is built and positioned on that exact
-// frame before the outgoing one is closed, so a failure leaves the stream
-// untouched and the buffered audio keeps playing throughout.
-//
-// The frontier is read under the gate lock, the same critical section the
-// consumer advances s.pos and drains the ring in, so the three terms are a
-// consistent snapshot and the sum cannot drift by a concurrent read. Opening
-// the decoder runs without the lock: the ring is the runway that covers it.
-func (s *Streamer) doSeamlessSwap(open Opener) error {
+// doSeamlessSwap installs the pre-opened decoder without flushing the ring. The
+// frontier is the first frame the producer has not yet emitted: the frames
+// delivered to the consumer, plus the frames buffered in the ring, plus the
+// processed frames still held in pending. The decoder was opened off the
+// producer goroutine, so only SeekFrame and the pointer swap run here.
+func (s *Streamer) doSeamlessSwap(open Opener, dec decode.Decoder) error {
+	if dec == nil {
+		return errors.New("stream: seamless swap missing decoder")
+	}
+
 	s.gate.mu.Lock()
 	frontier := s.pos.Load() + s.ring.Len() + int64(len(s.pending))/int64(s.ch)
 	s.gate.mu.Unlock()
 
-	dec, err := open(s.stopDec)
-	if err != nil {
-		return err
-	}
-	if got := dec.Info().Format; !got.Equal(s.formats[0]) {
-		dec.Close()
-
-		return fmt.Errorf("stream: decoder reports %+v, the stream takes %+v", got, s.formats[0])
-	}
 	seeker, ok := dec.(decode.Seeker)
 	if !ok {
-		dec.Close()
+		_ = dec.Close()
 
 		return ErrSeamlessNotSeekable
 	}
 	if err := seeker.SeekFrame(frontier); err != nil {
-		dec.Close()
+		_ = dec.Close()
 
 		return fmt.Errorf("stream: seamless swap seek to %d: %w", frontier, err)
 	}
