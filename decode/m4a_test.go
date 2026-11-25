@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dlcuy22/molo/core"
 )
@@ -131,6 +132,31 @@ func TestM4aProbeReportsLength(t *testing.T) {
 	}
 	if info.TotalFrames != 12000 {
 		t.Fatalf("Probe total = %d, want 12000 canonical frames", info.TotalFrames)
+	}
+}
+
+// TestSourceDurationRoundsNonIntegralRates pins the source-domain length. A
+// 44.1 kHz file never converts exactly from the nanosecond duration go-m4a
+// derives from the media timescale, and an exact-only rule would report no
+// duration at all for it.
+func TestSourceDurationRoundsNonIntegralRates(t *testing.T) {
+	cases := []struct {
+		name string
+		d    time.Duration
+		rate int
+		want int64
+		ok   bool
+	}{
+		{"48 kHz divides evenly", 250 * time.Millisecond, 48000, 12000, true},
+		{"44.1 kHz rounds to the nearest sample", 199*time.Second + 60680272*time.Nanosecond, 44100, 8778576, true},
+		{"zero duration", 0, 44100, 0, false},
+		{"zero rate", time.Second, 0, 0, false},
+	}
+	for _, c := range cases {
+		got, ok := sourceDuration(c.d, c.rate)
+		if ok != c.ok || got != c.want {
+			t.Errorf("%s: sourceDuration = (%d, %v), want (%d, %v)", c.name, got, ok, c.want, c.ok)
+		}
 	}
 }
 

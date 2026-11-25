@@ -106,7 +106,7 @@ func (f *M4aFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 	// The movie header states an exact presentation duration; converting it to
 	// source samples gives a length that survives even when TotalFrames is -1
 	// because the source does not divide evenly into canonical frames.
-	if samples, ok := durationSamples(md.Duration, md.SampleRate); ok {
+	if samples, ok := sourceDuration(md.Duration, md.SampleRate); ok {
 		info.SourceSamples = samples
 		info.SourceRate = md.SampleRate
 	}
@@ -213,7 +213,7 @@ func newM4aDecoderFrom(file *os.File, rd *m4a.Reader, dec *aacpcm.FrameDecoder, 
 	if d.encoderDelay < 0 {
 		d.encoderDelay = 0
 	}
-	if samples, ok := durationSamples(info.Duration, info.SampleRate); ok {
+	if samples, ok := sourceDuration(info.Duration, info.SampleRate); ok {
 		d.srcSamples = samples
 		d.srcRate = info.SampleRate
 	}
@@ -478,4 +478,25 @@ func durationSamples(d time.Duration, rate int) (int64, bool) {
 	}
 
 	return sec*int64(rate) + remSamples/int64(time.Second), true
+}
+
+// sourceDuration is durationSamples rounded to the nearest sample, for the
+// source-domain length StreamInfo reports. go-m4a derives its duration from the
+// media timescale as whole nanoseconds, so converting back is exact only for a
+// rate that divides one second: 44.1 kHz never is, and an exact rule would
+// report an unknown duration for every such file.
+func sourceDuration(d time.Duration, rate int) (int64, bool) {
+	if d <= 0 || rate <= 0 {
+		return 0, false
+	}
+
+	ns := int64(d)
+	sec := ns / int64(time.Second)
+	rem := ns % int64(time.Second)
+	samples := sec*int64(rate) + (rem*int64(rate)+int64(time.Second)/2)/int64(time.Second)
+	if samples <= 0 {
+		return 0, false
+	}
+
+	return samples, true
 }
