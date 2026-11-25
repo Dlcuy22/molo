@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-11-25
+
+### Fixed
+
+- `decode`: the M4A reader reports the duration of a 44.1 kHz file instead of
+  none. The declared length rarely divides into whole nanoseconds, so the
+  exact-only conversion dropped both the frame count and the source length, and
+  a caller had nothing to show or seek against.
+
 ## [1.3.0] - 2026-11-24
 
 ### Added
