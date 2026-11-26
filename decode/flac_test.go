@@ -412,3 +412,25 @@ func TestFlacOpusUnaffected(t *testing.T) {
 		t.Fatalf("opus probe rate = %d, want 48000", info.Format.Rate)
 	}
 }
+
+// TestFlacOpenReader proves a stream with no path decodes valid frames.
+func TestFlacOpenReader(t *testing.T) {
+	p := fixturePath(t, "sine_stereo_48k.flac")
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	d, err := NewFlacFactory().OpenReader(f)
+	if err != nil {
+		t.Fatalf("OpenReader: %v", err)
+	}
+	defer d.Close()
+
+	buf := make([]float32, 1024)
+	n, err := d.ReadFrames(buf)
+	if n == 0 || err != nil {
+		t.Fatalf("ReadFrames: n=%d err=%v", n, err)
+	}
+}
