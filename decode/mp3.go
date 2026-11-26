@@ -14,6 +14,7 @@ package decode
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/dlcuy22/molo/core"
@@ -80,7 +81,7 @@ func (f *Mp3Factory) Open(path string) (Decoder, error) {
 		return nil, fmt.Errorf("decode: open MP3 %s: %w", path, err)
 	}
 
-	d, err := newMp3Decoder(file, dec)
+	d, err := newMp3Decoder(file, true, dec)
 	if err != nil {
 		file.Close()
 
@@ -88,6 +89,19 @@ func (f *Mp3Factory) Open(path string) (Decoder, error) {
 	}
 
 	return d, nil
+}
+
+// OpenReader decodes from a stream rather than a path. A reader that implements
+// io.Seeker keeps native seek; a forward-only stream plays sequentially and
+// returns ErrNotSeekable on SeekFrame.
+func (f *Mp3Factory) OpenReader(r io.Reader) (Decoder, error) {
+	dec, err := mp3pcm.NewDecoder(r, mp3pcm.WithF32())
+	if err != nil {
+		return nil, fmt.Errorf("decode: open MP3 stream: %w", err)
+	}
+	_, seekable := r.(io.Seeker)
+
+	return newMp3Decoder(nil, seekable, dec)
 }
 
 // Probe reads the first frame and its Xing/Info or VBRI tag without decoding
@@ -128,8 +142,9 @@ func (f *Mp3Factory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error)
 // ReadFrames contract, normalizing rate and channels through the shared
 // pcmConverter.
 type mp3Decoder struct {
-	file *os.File
-	dec  *mp3pcm.Decoder
+	closer   io.Closer
+	seekable bool
+	dec      *mp3pcm.Decoder
 
 	conv *pcmConverter
 
@@ -156,7 +171,7 @@ type mp3Decoder struct {
 	closed bool
 }
 
-func newMp3Decoder(file *os.File, dec *mp3pcm.Decoder) (*mp3Decoder, error) {
+func newMp3Decoder(closer io.Closer, seekable bool, dec *mp3pcm.Decoder) (*mp3Decoder, error) {
 	sm := dec.Info()
 	if sm.Channels < 1 || sm.SampleRate < 1 {
 		return nil, fmt.Errorf("decode: MP3 reports an unusable stream %d Hz %d ch",
@@ -171,7 +186,8 @@ func newMp3Decoder(file *os.File, dec *mp3pcm.Decoder) (*mp3Decoder, error) {
 	}
 
 	d := &mp3Decoder{
-		file:       file,
+		closer:     closer,
+		seekable:   seekable,
 		dec:        dec,
 		conv:       newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
 		total:      total,
@@ -225,6 +241,9 @@ func (d *mp3Decoder) SeekFrame(frame int64) error {
 	if frame < 0 {
 		return fmt.Errorf("decode: negative seek target %d", frame)
 	}
+	if !d.seekable {
+		return ErrNotSeekable
+	}
 
 	// The source position is in source-rate samples; the canonical frame is not.
 	src := canonicalSamples(frame, d.conv.srcRate)
@@ -251,9 +270,9 @@ func (d *mp3Decoder) Close() error {
 	d.pending = nil
 	d.conv.src = nil
 	d.dec = nil
-	if d.file != nil {
-		d.file.Close()
-		d.file = nil
+	if d.closer != nil {
+		d.closer.Close()
+		d.closer = nil
 	}
 
 	return nil

@@ -65,7 +65,7 @@ func (f *FlacFactory) Open(path string) (Decoder, error) {
 		return nil, fmt.Errorf("decode: open FLAC %s: %w", path, err)
 	}
 
-	d, err := newFlacDecoder(file, dec)
+	d, err := newFlacDecoder(file, true, dec)
 	if err != nil {
 		file.Close()
 
@@ -73,6 +73,19 @@ func (f *FlacFactory) Open(path string) (Decoder, error) {
 	}
 
 	return d, nil
+}
+
+// OpenReader decodes from a stream rather than a path. A reader that implements
+// io.Seeker keeps native seek; a forward-only stream plays sequentially and
+// returns ErrNotSeekable on SeekFrame.
+func (f *FlacFactory) OpenReader(r io.Reader) (Decoder, error) {
+	dec, err := pcm.NewDecoder(r)
+	if err != nil {
+		return nil, fmt.Errorf("decode: open FLAC stream: %w", err)
+	}
+	_, seekable := r.(io.Seeker)
+
+	return newFlacDecoder(nil, seekable, dec)
 }
 
 // Probe reads the STREAMINFO and reports the stream shape. It never decodes
@@ -109,8 +122,9 @@ func (f *FlacFactory) Probe(path string, _ ProbeOptions) (core.StreamInfo, error
 // ReadFrames contract, normalizing rate, channels and sample width through the
 // shared pcmConverter.
 type flacDecoder struct {
-	file *os.File
-	dec  *pcm.Decoder
+	closer   io.Closer
+	seekable bool
+	dec      *pcm.Decoder
 
 	conv *pcmConverter
 
@@ -137,7 +151,7 @@ type flacDecoder struct {
 	closed bool
 }
 
-func newFlacDecoder(file *os.File, dec *pcm.Decoder) (*flacDecoder, error) {
+func newFlacDecoder(closer io.Closer, seekable bool, dec *pcm.Decoder) (*flacDecoder, error) {
 	sm := dec.Info()
 	if sm.Channels < 1 || sm.BitDepth < 1 || sm.SampleRate < 1 {
 		return nil, fmt.Errorf("decode: FLAC reports an unusable stream %d Hz %d ch %d-bit",
@@ -158,7 +172,8 @@ func newFlacDecoder(file *os.File, dec *pcm.Decoder) (*flacDecoder, error) {
 	}
 
 	d := &flacDecoder{
-		file:       file,
+		closer:     closer,
+		seekable:   seekable,
 		dec:        dec,
 		conv:       newPCMConverter(sm.SampleRate, sm.Channels, bytesPS),
 		total:      total,
@@ -234,6 +249,9 @@ func (d *flacDecoder) SeekFrame(frame int64) error {
 	if frame < 0 {
 		return fmt.Errorf("decode: negative seek target %d", frame)
 	}
+	if !d.seekable {
+		return ErrNotSeekable
+	}
 
 	// The source position is in source-rate samples; the canonical frame is not.
 	src := canonicalSamples(frame, d.conv.srcRate)
@@ -260,9 +278,9 @@ func (d *flacDecoder) Close() error {
 	d.pending = nil
 	d.conv.src = nil
 	d.dec = nil
-	if d.file != nil {
-		d.file.Close()
-		d.file = nil
+	if d.closer != nil {
+		d.closer.Close()
+		d.closer = nil
 	}
 
 	return nil
