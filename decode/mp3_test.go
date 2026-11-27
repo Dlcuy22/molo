@@ -244,7 +244,11 @@ func TestMp3SeekMatchesStraightDecode(t *testing.T) {
 				t.Fatalf("SeekFrame(%d): %v", at, err)
 			}
 
-			frames := min(int64(500), int64(len(full)/2)-at)
+			rem := int64(len(full)/2) - at
+			if rem <= 0 {
+				return
+			}
+			frames := min(int64(500), rem)
 			got := make([]float32, frames*2)
 			readMp3Frames(t, d, got)
 
@@ -366,5 +370,27 @@ func TestMp3DescriptorNames(t *testing.T) {
 	}
 	if parser != "go-mp3 (mpeg audio)" {
 		t.Fatalf("ParserName = %q, want go-mp3 (mpeg audio)", parser)
+	}
+}
+
+// TestMp3OpenReader proves a stream with no path decodes valid frames.
+func TestMp3OpenReader(t *testing.T) {
+	p := fixturePath(t, "sine_stereo_48k.mp3")
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	d, err := NewMp3Factory().OpenReader(f)
+	if err != nil {
+		t.Fatalf("OpenReader: %v", err)
+	}
+	defer d.Close()
+
+	buf := make([]float32, 1024)
+	n, err := d.ReadFrames(buf)
+	if n == 0 || err != nil {
+		t.Fatalf("ReadFrames: n=%d err=%v", n, err)
 	}
 }
